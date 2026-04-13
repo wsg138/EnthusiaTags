@@ -1,0 +1,759 @@
+placeholders:
+  playtime-active-minutes: "%playtime_active%"
+  playtime-afk-minutes: "%playtime_afk%"
+  playtime-total-minutes: "%playtime_total%"
+  playtime-state: "%playtime_state%"
+categories:
+  playtime:
+    name: "&bPlaytime"
+    icon: "CLOCK"
+  mining:
+    name: "&aMining"
+    icon: "IRON_PICKAXE"
+  combat:
+    name: "&cCombat"
+    icon: "IRON_SWORD"
+  deaths:
+    name: "&7Deaths"
+    icon: "SKELETON_SKULL"
+  economy:
+    name: "&6Economy"
+    icon: "GOLD_INGOT"
+  misc:
+    name: "&dMisc"
+    icon: "NAME_TAG"
+underground-max-y: 56
+rewards:
+  block_game_addict:
+    name: "&bBlock Game Addict"
+    description:
+      - "&7Play 24 hours of active time."
+    icon: "CLOCK"
+    criteria:
+      c1:
+        type: PLAYTIME_ACTIVE_MINUTES
+        amount: 1440
+    rewards:
+      r1:
+        type: TAG
+        id: block_game_addict
+      r2:
+        type: MONEY
+        amount: 250
+  payday:
+    name: "&aPayday"
+    description:
+      - "&7Play 5 hours total."
+    icon: "SUNFLOWER"
+    criteria:
+      c1:
+        type: PLAYTIME_TOTAL_MINUTES
+        amount: 300
+    rewards:
+      r1:
+        type: MONEY
+        amount: 500
+  starter_pack:
+    name: "&dStarter Pack"
+    description:
+      - "&7Mine 250 stone."
+    icon: "CHEST"
+    criteria:
+      c1:
+        type: CUSTOM_COUNTER
+        key: stone_mined
+        amount: 250
+    rewards:
+      r1:
+        type: COMMAND
+        id: "give {player} golden_apple 2"
+        label: "Starter Pack (2 Golden Apples)"
+  trail_starter:
+    name: "&bTrail Starter"
+    description:
+      - "&7Walk 20,000 blocks."
+    icon: "FEATHER"
+    category: "misc"
+    criteria:
+      c1:
+        type: STEPS_WALKED
+        amount: 20000
+    rewards:
+      r1:
+        type: COMMAND
+        id: "lp user %player% permission set enthusia.cosmetics.trail_mist true"
+        label: "Mist Trail Cosmetic"
+  kill_sparks_reward:
+    name: "&cFirst Blood FX"
+    description:
+      - "&7Get 10 player kills."
+    icon: "BLAZE_POWDER"
+    category: "combat"
+    criteria:
+      c1:
+        type: KILLS_TOTAL
+        amount: 10
+    rewards:
+      r1:
+        type: COMMAND
+        id: "lp user %player% permission set enthusia.cosmetics.kill_sparks true"
+        label: "Sparks Kill Effect"
+  proj_spark_reward:
+    name: "&dArrow Flair"
+    description:
+      - "&7Hit 50 projectile shots."
+    icon: "ARROW"
+    category: "combat"
+    criteria:
+      c1:
+        type: CUSTOM_COUNTER
+        key: projectile_hits
+        amount: 50
+    rewards:
+      r1:
+        type: COMMAND
+        id: "lp user %player% permission set enthusia.cosmetics.proj_spark true"
+        label: "Spark Shot Projectiles"
+  km_gg_reward:
+    name: "&aGG Messages"
+    description:
+      - "&7Win 5 fights."
+    icon: "PAPER"
+    category: "combat"
+    criteria:
+      c1:
+        type: KILLS_TOTAL
+        amount: 5
+    rewards:
+      r1:
+        type: COMMAND
+        id: "lp user %player% permission set enthusia.cosmetics.km_gg true"
+        label: "GG Kill Message"
+  high_roller:
+    name: "&6High Roller"
+    description:
+      - "&7Hold 100,000 currency."
+    icon: "GOLD_BLOCK"
+    criteria:
+      c1:
+        type: BALANCE_AT_LEAST
+        amount: 100000
+    rewards:
+      r1:
+        type: TAG
+        id: high_roller
+      r2:
+        type: MONEY
+        amount: 2500
+  market_access:
+    name: "&eMarket Access"
+    description:
+      - "&7Unlock stall access."
+    icon: "LECTERN"
+    criteria:
+      c1:
+        type: PLAYTIME_TOTAL_MINUTES
+        amount: 600
+    rewards:
+      r1:
+        type: COMMAND
+        id: "lp user %player% permission set arm.member.limit.market1 true"
+  rep_unlock:
+    name: "&dReputation Unlocked"
+    description:
+      - "&7Unlock reputation system."
+    icon: "BOOK"
+    criteria:
+      c1:
+        type: PLAYTIME_ACTIVE_MINUTES
+        amount: 300
+    rewards:
+      r1:
+        type: COMMAND
+        id: "lp user %player% permission set reps.add true"
+  no_life:
+    name: "&5No Life"
+    description:
+      - "&7Play 72 hours of active time."
+    icon: "CLOCK"
+    criteria:
+      c1:
+        type: PLAYTIME_ACTIVE_MINUTES
+        amount: 4320
+    rewards:
+      r1:
+        type: TAG
+        id: no_life
+  grass_never:
+    name: "&2Grass? Never Heard of It"
+    description:
+      - "&7Play 120 hours of active time."
+    icon: "CLOCK"
+    criteria:
+      c1:
+        type: PLAYTIME_ACTIVE_MINUTES
+        amount: 7200
+    rewards:
+      r1:
+        type: TAG
+        id: grass_never
+  touch_grass_failed:
+    name: "&aTouch Grass Challenge (Failed)"
+    description:
+      - "&7Play 200 hours of active time."
+    icon: "CLOCK"
+    criteria:
+      c1:
+        type: PLAYTIME_ACTIVE_MINUTES
+        amount: 12000
+    rewards:
+      r1:
+        type: TAG
+        id: touch_grass_failed
+  my_life_now:
+    name: "&dThis Is My Life Now"
+    description:
+      - "&7Play 300 hours of active time."
+    icon: "CLOCK"
+    criteria:
+      c1:
+        type: PLAYTIME_ACTIVE_MINUTES
+        amount: 18000
+    rewards:
+      r1:
+        type: TAG
+        id: my_life_now
+  server_home:
+    name: "&6This Server Is My Home"
+    description:
+      - "&7Play 500 hours of active time."
+    icon: "CLOCK"
+    criteria:
+      c1:
+        type: PLAYTIME_ACTIVE_MINUTES
+        amount: 30000
+    rewards:
+      r1:
+        type: TAG
+        id: server_home
+  sleeps_in_minecraft:
+    name: "&3Sleeps in Minecraft"
+    description:
+      - "&7Reach 12 consecutive hours of active time."
+    icon: "CLOCK"
+    criteria:
+      c1:
+        type: PLAYTIME_CONSECUTIVE_ACTIVE_MINUTES
+        amount: 720
+    rewards:
+      r1:
+        type: TAG
+        id: sleeps_in_minecraft
+  tree_puncher:
+    name: "&aProfessional Tree Puncher"
+    description:
+      - "&7Mine 100 logs."
+    icon: "OAK_LOG"
+    category: "mining"
+    criteria:
+      c1:
+        type: CUSTOM_COUNTER
+        key: logs_mined
+        amount: 100
+    rewards:
+      r1:
+        type: TAG
+        id: tree_puncher
+  industrial_lumberjack:
+    name: "&2Industrial Lumberjack"
+    description:
+      - "&7Mine 5000 logs."
+    icon: "OAK_LOG"
+    category: "mining"
+    criteria:
+      c1:
+        type: CUSTOM_COUNTER
+        key: logs_mined
+        amount: 5000
+    rewards:
+      r1:
+        type: TAG
+        id: industrial_lumberjack
+  dirt_collector:
+    name: "&6Certified Dirt Collector"
+    description:
+      - "&7Mine 1000 dirt."
+    icon: "DIRT"
+    category: "mining"
+    criteria:
+      c1:
+        type: CUSTOM_COUNTER
+        key: dirt_mined
+        amount: 1000
+    rewards:
+      r1:
+        type: TAG
+        id: dirt_collector
+  stone_age:
+    name: "&7Stone Age Never Ended"
+    description:
+      - "&7Mine 10000 stone."
+    icon: "STONE"
+    category: "mining"
+    criteria:
+      c1:
+        type: CUSTOM_COUNTER
+        key: stone_mined
+        amount: 10000
+    rewards:
+      r1:
+        type: TAG
+        id: stone_age
+  iron_deficiency:
+    name: "&fIron Deficiency"
+    description:
+      - "&7Mine 500 iron ore."
+    icon: "IRON_ORE"
+    category: "mining"
+    criteria:
+      c1:
+        type: CUSTOM_COUNTER
+        key: iron_ore_mined
+        amount: 500
+    rewards:
+      r1:
+        type: TAG
+        id: iron_deficiency
+  diamond_hands:
+    name: "&bDiamond Hands"
+    description:
+      - "&7Obtain 64 diamonds."
+    icon: "DIAMOND"
+    category: "mining"
+    criteria:
+      c1:
+        type: CUSTOM_COUNTER
+        key: diamonds_obtained
+        amount: 64
+    rewards:
+      r1:
+        type: TAG
+        id: diamond_hands
+      r2:
+        type: MONEY
+        amount: 500
+  nether_enjoyer:
+    name: "&cNether Enjoyer"
+    description:
+      - "&7Mine 1000 netherrack."
+    icon: "NETHERRACK"
+    category: "mining"
+    criteria:
+      c1:
+        type: CUSTOM_COUNTER
+        key: netherrack_mined
+        amount: 1000
+    rewards:
+      r1:
+        type: TAG
+        id: nether_enjoyer
+  yearn_for_mines:
+    name: "&8I Yearn for the Mines"
+    description:
+      - "&7Spend 10 hours underground."
+    icon: "DEEPSLATE"
+    category: "mining"
+    criteria:
+      c1:
+        type: UNDERGROUND_ACTIVE_MINUTES
+        amount: 600
+    rewards:
+      r1:
+        type: TAG
+        id: yearn_for_mines
+  no_mercy:
+    name: "&cNo Mercy"
+    description:
+      - "&7Get 25 total player kills."
+    icon: "IRON_SWORD"
+    criteria:
+      c1:
+        type: KILLS_TOTAL
+        amount: 25
+    rewards:
+      r1:
+        type: TAG
+        id: no_mercy
+  silent_killer:
+    name: "&4Silent Killer"
+    description:
+      - "&7Reach a 10 kill streak."
+    icon: "IRON_SWORD"
+    criteria:
+      c1:
+        type: KILL_STREAK_CURRENT
+        amount: 10
+    rewards:
+      r1:
+        type: TAG
+        id: silent_killer
+  already_dead:
+    name: "&4Already Dead"
+    description:
+      - "&7Reach a 25 kill streak."
+    icon: "NETHERITE_SWORD"
+    criteria:
+      c1:
+        type: KILL_STREAK_CURRENT
+        amount: 25
+    rewards:
+      r1:
+        type: TAG
+        id: already_dead
+  death_sentence:
+    name: "&6Death Sentence"
+    description:
+      - "&7Kill within 10s of first hit (x10)."
+    icon: "GOLDEN_SWORD"
+    criteria:
+      c1:
+        type: QUICK_KILL_COUNT
+        amount: 10
+    rewards:
+      r1:
+        type: TAG
+        id: death_sentence
+  checkmate:
+    name: "&bCheckmate"
+    description:
+      - "&7Kill a player wearing full armor."
+    icon: "DIAMOND_CHESTPLATE"
+    criteria:
+      c1:
+        type: KILL_FULL_ARMOR_COUNT
+        amount: 1
+    rewards:
+      r1:
+        type: TAG
+        id: checkmate
+  not_even_close:
+    name: "&cNot Even Close"
+    description:
+      - "&7Win a fight under 3 hearts."
+    icon: "RED_DYE"
+    criteria:
+      c1:
+        type: KILL_LOW_HEALTH_COUNT
+        amount: 1
+    rewards:
+      r1:
+        type: TAG
+        id: not_even_close
+  fear_me:
+    name: "&7Fear Me (Please)"
+    description:
+      - "&7Die to a player 10 times."
+    icon: "SKELETON_SKULL"
+    criteria:
+      c1:
+        type: DEATHS_TOTAL
+        amount: 10
+    rewards:
+      r1:
+        type: TAG
+        id: fear_me
+  fallen:
+    name: "&7Fallen"
+    description:
+      - "&7Die 50 times."
+    icon: "SKELETON_SKULL"
+    criteria:
+      c1:
+        type: DEATHS_TOTAL
+        amount: 50
+    rewards:
+      r1:
+        type: TAG
+        id: fallen
+  very_experienced:
+    name: "&7Very Experienced"
+    description:
+      - "&7Die 100 times."
+    icon: "SKELETON_SKULL"
+    criteria:
+      c1:
+        type: DEATHS_TOTAL
+        amount: 100
+    rewards:
+      r1:
+        type: TAG
+        id: very_experienced
+  respawn_enjoyer:
+    name: "&7Respawn Enjoyer"
+    description:
+      - "&7Die 250 times."
+    icon: "SKELETON_SKULL"
+    criteria:
+      c1:
+        type: DEATHS_TOTAL
+        amount: 250
+    rewards:
+      r1:
+        type: TAG
+        id: respawn_enjoyer
+  unkillable_spirit:
+    name: "&7Unkillable Spirit"
+    description:
+      - "&7Die 500 times."
+    icon: "SKELETON_SKULL"
+    criteria:
+      c1:
+        type: DEATHS_TOTAL
+        amount: 500
+    rewards:
+      r1:
+        type: TAG
+        id: unkillable_spirit
+  refuses_to_quit:
+    name: "&7Refuses to Quit"
+    description:
+      - "&7Die 1000 times."
+    icon: "SKELETON_SKULL"
+    criteria:
+      c1:
+        type: DEATHS_TOTAL
+        amount: 1000
+    rewards:
+      r1:
+        type: TAG
+        id: refuses_to_quit
+  target_practice:
+    name: "&eTarget Practice"
+    description:
+      - "&7Die to the same player 5 times in a row."
+    icon: "BOW"
+    criteria:
+      c1:
+        type: DEATH_STREAK_SAME
+        amount: 5
+    rewards:
+      r1:
+        type: TAG
+        id: target_practice
+  personal_problem:
+    name: "&6Personal Problem"
+    description:
+      - "&7Die to the same player 10 times in a row."
+    icon: "BOW"
+    criteria:
+      c1:
+        type: DEATH_STREAK_SAME
+        amount: 10
+    rewards:
+      r1:
+        type: TAG
+        id: personal_problem
+  rent_free:
+    name: "&6Rent Free"
+    description:
+      - "&7Die to the same player 15 times in a row."
+    icon: "BOW"
+    criteria:
+      c1:
+        type: DEATH_STREAK_SAME
+        amount: 15
+    rewards:
+      r1:
+        type: TAG
+        id: rent_free
+  nemesis:
+    name: "&cNemesis"
+    description:
+      - "&7Die to the same player 25 times in a row."
+    icon: "BOW"
+    criteria:
+      c1:
+        type: DEATH_STREAK_SAME
+        amount: 25
+    rewards:
+      r1:
+        type: TAG
+        id: nemesis
+  blooded:
+    name: "&cBlooded"
+    description:
+      - "&7Reach 100 total kills."
+    icon: "IRON_SWORD"
+    criteria:
+      c1:
+        type: KILLS_TOTAL
+        amount: 100
+    rewards:
+      r1:
+        type: TAG
+        id: blooded
+  seasoned:
+    name: "&cSeasoned"
+    description:
+      - "&7Reach 250 total kills."
+    icon: "IRON_SWORD"
+    criteria:
+      c1:
+        type: KILLS_TOTAL
+        amount: 250
+    rewards:
+      r1:
+        type: TAG
+        id: seasoned
+  battle_hardened:
+    name: "&cBattle-Hardened"
+    description:
+      - "&7Reach 500 total kills."
+    icon: "IRON_SWORD"
+    criteria:
+      c1:
+        type: KILLS_TOTAL
+        amount: 500
+    rewards:
+      r1:
+        type: TAG
+        id: battle_hardened
+  warpath:
+    name: "&4Warpath"
+    description:
+      - "&7Reach 1000 total kills."
+    icon: "NETHERITE_SWORD"
+    criteria:
+      c1:
+        type: KILLS_TOTAL
+        amount: 1000
+    rewards:
+      r1:
+        type: TAG
+        id: warpath
+      r2:
+        type: MONEY
+        amount: 1000
+  unstoppable:
+    name: "&4Unstoppable"
+    description:
+      - "&7Reach 2500 total kills."
+    icon: "NETHERITE_SWORD"
+    criteria:
+      c1:
+        type: KILLS_TOTAL
+        amount: 2500
+    rewards:
+      r1:
+        type: TAG
+        id: unstoppable
+  gravity_victim:
+    name: "&7Gravity's Victim"
+    description:
+      - "&7Die to fall damage 10 times."
+    icon: "FEATHER"
+    criteria:
+      c1:
+        type: DEATH_CAUSE_COUNT
+        key: fall
+        amount: 10
+    rewards:
+      r1:
+        type: TAG
+        id: gravity_victim
+  skill_issue:
+    name: "&7Skill Issue"
+    description:
+      - "&7Die to fall damage 30 times."
+    icon: "FEATHER"
+    criteria:
+      c1:
+        type: DEATH_CAUSE_COUNT
+        key: fall
+        amount: 30
+    rewards:
+      r1:
+        type: TAG
+        id: skill_issue
+  physics_hard:
+    name: "&7Physics Is Hard"
+    description:
+      - "&7Die to fall damage 50 times."
+    icon: "FEATHER"
+    criteria:
+      c1:
+        type: DEATH_CAUSE_COUNT
+        key: fall
+        amount: 50
+    rewards:
+      r1:
+        type: TAG
+        id: physics_hard
+  lava_allergy:
+    name: "&6Lava Allergy"
+    description:
+      - "&7Die to lava 25 times."
+    icon: "LAVA_BUCKET"
+    criteria:
+      c1:
+        type: DEATH_CAUSE_COUNT
+        key: lava
+        amount: 25
+    rewards:
+      r1:
+        type: TAG
+        id: lava_allergy
+  i_swear_it_worked:
+    name: "&7I Swear It Worked"
+    description:
+      - "&7Die to your own explosion."
+    icon: "TNT"
+    criteria:
+      c1:
+        type: DEATH_CAUSE_COUNT
+        key: explosion
+        amount: 1
+    rewards:
+      r1:
+        type: TAG
+        id: i_swear_it_worked
+  died_to_chicken:
+    name: "&eDied to a Chicken"
+    description:
+      - "&7Die to a chicken."
+    icon: "CHICKEN"
+    criteria:
+      c1:
+        type: DEATH_CAUSE_COUNT
+        key: chicken
+        amount: 1
+    rewards:
+      r1:
+        type: TAG
+        id: died_to_chicken
+  lag_was_crazy:
+    name: "&7Lag Was Crazy"
+    description:
+      - "&7Reach 150ms ping."
+    icon: "ENDER_PEARL"
+    criteria:
+      c1:
+        type: PING_MS_AT_LEAST
+        amount: 150
+    rewards:
+      r1:
+        type: TAG
+        id: lag_was_crazy
+  baltop_top3:
+    name: "&6Baltop Elite"
+    description:
+      - "&7Reach top 3 on baltop."
+    icon: "GOLD_INGOT"
+    criteria:
+      c1:
+        type: BALTOP_TOP3
+        amount: 1
+    rewards:
+      r1:
+        type: TAG
+        id: baltop_elite

@@ -1,0 +1,92 @@
+name: EnthusiaTags
+main: org.enthusia.tags.EnthusiaTagsPlugin
+version: 1.0.0
+api-version: 1.21
+author: Enthusia
+softdepend:
+  - PlaceholderAPI
+  - Vault
+  - EnthusiaCurrency
+commands:
+  tags:
+    description: Open the tag selection menu.
+    usage: /tags
+    permission: enthusia.tags.use
+  tag:
+    description: Admin tag management.
+    usage: /tag <give|revoke|set|clear|reload>
+    permission: enthusia.tags.admin
+  rewards:
+    description: Open the rewards menu.
+    usage: /rewards
+    permission: enthusia.tags.rewards
+  cosmetics:
+    description: Open the cosmetics menu.
+    usage: /cosmetics
+    permission: enthusia.cosmetics.use
+permissions:
+  enthusia.tags.use:
+    description: Allows opening the tag selection menu.
+    default: true
+  enthusia.tags.rewards:
+    description: Allows opening the rewards menu.
+    default: true
+  enthusia.cosmetics.use:
+    description: Allows opening the cosmetics menu.
+    default: true
+  enthusia.cosmetics.rank.avid:
+    description: Avid rank cosmetics.
+    default: false
+    children:
+      enthusia.cosmetics.kill_sparks: true
+      enthusia.cosmetics.kill_arc: true
+      enthusia.cosmetics.kill_blaze: true
+      enthusia.cosmetics.death_smoke: true
+      enthusia.cosmetics.death_cloud: true
+      enthusia.cosmetics.trail_mist: true
+      enthusia.cosmetics.trail_glow: true
+      enthusia.cosmetics.trail_leaf: true
+      enthusia.cosmetics.proj_spark: true
+      enthusia.cosmetics.proj_flame: true
+      enthusia.cosmetics.trail_spiral_glow: true
+      enthusia.cosmetics.join_clean: true
+      enthusia.cosmetics.quit_clean: true
+      enthusia.cosmetics.km_gg: true
+  enthusia.cosmetics.rank.devotee:
+    description: Devotee rank cosmetics.
+    default: false
+    children:
+      enthusia.cosmetics.kill_soul: true
+      enthusia.cosmetics.kill_dragon: true
+      enthusia.cosmetics.kill_portal: true
+      enthusia.cosmetics.kill_totem: true
+      enthusia.cosmetics.kill_starfall: true
+      enthusia.cosmetics.death_frost: true
+      enthusia.cosmetics.death_soulfire: true
+      enthusia.cosmetics.death_tnt: true
+      enthusia.cosmetics.trail_dragon: true
+      enthusia.cosmetics.trail_portal: true
+      enthusia.cosmetics.trail_totem: true
+      enthusia.cosmetics.proj_dragon: true
+      enthusia.cosmetics.proj_portal: true
+      enthusia.cosmetics.trail_spiral_portal: true
+      enthusia.cosmetics.join_flashy: true
+      enthusia.cosmetics.quit_smoke: true
+      enthusia.cosmetics.km_obliterated: true
+      enthusia.cosmetics.km_cancelled: true
+  enthusia.cosmetics.default:
+    description: Grants all basic cosmetics.
+    default: false
+    children:
+      enthusia.cosmetics.kill_sparks: true
+      enthusia.cosmetics.kill_arc: true
+      enthusia.cosmetics.death_smoke: true
+      enthusia.cosmetics.trail_mist: true
+      enthusia.cosmetics.trail_leaf: true
+      enthusia.cosmetics.proj_spark: true
+      enthusia.cosmetics.join_clean: true
+      enthusia.cosmetics.quit_clean: true
+      enthusia.cosmetics.km_gg: true
+  enthusia.tags.admin:
+    description: Allows managing player tags.
+    default: op

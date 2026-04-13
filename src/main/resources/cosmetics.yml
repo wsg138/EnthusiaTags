@@ -1,0 +1,702 @@
+categories:
+  kill:
+    name: "&cKill Effects"
+    icon: "IRON_SWORD"
+  death:
+    name: "&7Death Effects"
+    icon: "SKELETON_SKULL"
+  trail:
+    name: "&bTrails"
+    icon: "FEATHER"
+  projectile:
+    name: "&dProjectiles"
+    icon: "BOW"
+  kill_message:
+    name: "&6Kill Messages"
+    icon: "PAPER"
+  join:
+    name: "&aJoin Messages"
+    icon: "OAK_SIGN"
+  quit:
+    name: "&cQuit Messages"
+    icon: "OAK_SIGN"
+
+cosmetics:
+  kill_sparks:
+    name: "&#ffb347&lSparks"
+    category: "kill"
+    type: KILL_PARTICLE
+    particle: "CRIT"
+    icon: "BLAZE_POWDER"
+    permission: "enthusia.cosmetics.kill_sparks"
+  kill_arc:
+    name: "&#7dd3fc&lArc Burst"
+    category: "kill"
+    type: KILL_PARTICLE
+    particle: "ELECTRIC_SPARK"
+    icon: "LIGHTNING_ROD"
+    permission: "enthusia.cosmetics.kill_arc"
+  kill_blaze:
+    name: "&#ff6b6b&lBlaze Pop"
+    category: "kill"
+    type: KILL_PARTICLE
+    particle: "FLAME"
+    icon: "BLAZE_ROD"
+    permission: "enthusia.cosmetics.kill_blaze"
+  kill_soul:
+    name: "&#6ee7ff&lSoul Burst"
+    category: "kill"
+    type: KILL_PARTICLE
+    particle: "SOUL"
+    icon: "SOUL_SAND"
+    permission: "enthusia.cosmetics.kill_soul"
+  kill_soulfire:
+    name: "&#5bc0ff&lSoulfire"
+    category: "kill"
+    type: KILL_PARTICLE
+    particle: "SOUL_FIRE_FLAME"
+    icon: "SOUL_TORCH"
+    permission: "enthusia.cosmetics.kill_soulfire"
+  kill_lava:
+    name: "&#ff8c00&lLava Snap"
+    category: "kill"
+    type: KILL_PARTICLE
+    particle: "LAVA"
+    icon: "LAVA_BUCKET"
+    permission: "enthusia.cosmetics.kill_lava"
+  kill_ash:
+    name: "&#9e9e9e&lAsh Drift"
+    category: "kill"
+    type: KILL_PARTICLE
+    particle: "ASH"
+    icon: "COAL"
+    permission: "enthusia.cosmetics.kill_ash"
+  kill_smoke:
+    name: "&#b0b0b0&lSmoke Puff"
+    category: "kill"
+    type: KILL_PARTICLE
+    particle: "SMOKE"
+    icon: "CAMPFIRE"
+    permission: "enthusia.cosmetics.kill_smoke"
+  kill_witch:
+    name: "&#a78bfa&lHex"
+    category: "kill"
+    type: KILL_PARTICLE
+    particle: "WITCH"
+    icon: "POTION"
+    permission: "enthusia.cosmetics.kill_witch"
+  kill_dragon:
+    name: "&#a855f7&lDragon Mist"
+    category: "kill"
+    type: KILL_PARTICLE
+    particle: "DRAGON_BREATH"
+    icon: "DRAGON_BREATH"
+    permission: "enthusia.cosmetics.kill_dragon"
+  kill_endrod:
+    name: "&#f5f5f5&lEnd Rod"
+    category: "kill"
+    type: KILL_PARTICLE
+    particle: "END_ROD"
+    icon: "END_ROD"
+    permission: "enthusia.cosmetics.kill_endrod"
+  kill_portal:
+    name: "&#8b5cf6&lPortal Snap"
+    category: "kill"
+    type: KILL_PARTICLE
+    particle: "PORTAL"
+    icon: "OBSIDIAN"
+    permission: "enthusia.cosmetics.kill_portal"
+  kill_totem:
+    name: "&#ffd166&lTotem Flash"
+    category: "kill"
+    type: KILL_PARTICLE
+    particle: "TOTEM"
+    icon: "TOTEM_OF_UNDYING"
+    permission: "enthusia.cosmetics.kill_totem"
+  kill_glow:
+    name: "&#ffe066&lGlow Burst"
+    category: "kill"
+    type: KILL_PARTICLE
+    particle: "GLOW"
+    icon: "GLOWSTONE_DUST"
+    permission: "enthusia.cosmetics.kill_glow"
+  kill_happy:
+    name: "&#7bdc5f&lGood Vibes"
+    category: "kill"
+    type: KILL_PARTICLE
+    particle: "HAPPY_VILLAGER"
+    icon: "EMERALD"
+    permission: "enthusia.cosmetics.kill_happy"
+  kill_note:
+    name: "&#ffd166&lJam"
+    category: "kill"
+    type: KILL_PARTICLE
+    particle: "NOTE"
+    icon: "NOTE_BLOCK"
+    permission: "enthusia.cosmetics.kill_note"
+  kill_ember_rain:
+    name: "&#ff6b6b&lEmber Rain"
+    category: "kill"
+    type: KILL_ITEM_RAIN
+    item: "BLAZE_POWDER"
+    icon: "BLAZE_POWDER"
+    count: 40
+    spread: 0.5
+    permission: "enthusia.cosmetics.kill_ember_rain"
+  kill_starfall:
+    name: "&#a78bfa&lStarfall"
+    category: "kill"
+    type: KILL_ITEM_RAIN
+    item: "AMETHYST_SHARD"
+    icon: "AMETHYST_SHARD"
+    count: 40
+    spread: 0.5
+    permission: "enthusia.cosmetics.kill_starfall"
+  kill_coin_rain:
+    name: "&#ffd700&lCoin Rain"
+    category: "kill"
+    type: KILL_ITEM_RAIN
+    item: "GOLD_NUGGET"
+    icon: "GOLD_NUGGET"
+    permission: "enthusia.cosmetics.kill_coin_rain"
+  kill_leaf_rain:
+    name: "&#7bdc5f&lLeaf Rain"
+    category: "kill"
+    type: KILL_ITEM_RAIN
+    item: "OAK_LEAVES"
+    icon: "OAK_LEAVES"
+    permission: "enthusia.cosmetics.kill_leaf_rain"
+
+  death_smoke:
+    name: "&#9e9e9e&lSmoke Fade"
+    category: "death"
+    type: DEATH_PARTICLE
+    particle: "SMOKE"
+    icon: "COAL"
+    permission: "enthusia.cosmetics.death_smoke"
+  death_frost:
+    name: "&#b3e5fc&lFrost Pop"
+    category: "death"
+    type: DEATH_PARTICLE
+    particle: "SNOWFLAKE"
+    icon: "SNOWBALL"
+    permission: "enthusia.cosmetics.death_frost"
+  death_ash:
+    name: "&#9e9e9e&lAsh Rise"
+    category: "death"
+    type: DEATH_PARTICLE
+    particle: "ASH"
+    icon: "BLACK_DYE"
+    permission: "enthusia.cosmetics.death_ash"
+  death_soul:
+    name: "&#6ee7ff&lSoul Drift"
+    category: "death"
+    type: DEATH_PARTICLE
+    particle: "SOUL"
+    icon: "SOUL_SAND"
+    permission: "enthusia.cosmetics.death_soul"
+  death_soulfire:
+    name: "&#5bc0ff&lSoulfire Burst"
+    category: "death"
+    type: DEATH_PARTICLE
+    particle: "SOUL_FIRE_FLAME"
+    icon: "SOUL_TORCH"
+    permission: "enthusia.cosmetics.death_soulfire"
+  death_flame:
+    name: "&#ff6b6b&lFlame Up"
+    category: "death"
+    type: DEATH_PARTICLE
+    particle: "FLAME"
+    icon: "FIRE_CHARGE"
+    permission: "enthusia.cosmetics.death_flame"
+  death_lava:
+    name: "&#ff8c00&lLava Burst"
+    category: "death"
+    type: DEATH_PARTICLE
+    particle: "LAVA"
+    icon: "LAVA_BUCKET"
+    permission: "enthusia.cosmetics.death_lava"
+  death_dragon:
+    name: "&#a855f7&lDragon Breath"
+    category: "death"
+    type: DEATH_PARTICLE
+    particle: "DRAGON_BREATH"
+    icon: "DRAGON_BREATH"
+    permission: "enthusia.cosmetics.death_dragon"
+  death_endrod:
+    name: "&#f5f5f5&lEnd Rod"
+    category: "death"
+    type: DEATH_PARTICLE
+    particle: "END_ROD"
+    icon: "END_ROD"
+    permission: "enthusia.cosmetics.death_endrod"
+  death_portal:
+    name: "&#8b5cf6&lPortal Snap"
+    category: "death"
+    type: DEATH_PARTICLE
+    particle: "PORTAL"
+    icon: "OBSIDIAN"
+    permission: "enthusia.cosmetics.death_portal"
+  death_witch:
+    name: "&#a78bfa&lHex Fade"
+    category: "death"
+    type: DEATH_PARTICLE
+    particle: "WITCH"
+    icon: "POTION"
+    permission: "enthusia.cosmetics.death_witch"
+  death_glow:
+    name: "&#ffe066&lGlow Pop"
+    category: "death"
+    type: DEATH_PARTICLE
+    particle: "GLOW"
+    icon: "GLOWSTONE_DUST"
+    permission: "enthusia.cosmetics.death_glow"
+  death_totem:
+    name: "&#ffd166&lTotem Fade"
+    category: "death"
+    type: DEATH_PARTICLE
+    particle: "TOTEM"
+    icon: "TOTEM_OF_UNDYING"
+    permission: "enthusia.cosmetics.death_totem"
+  death_cloud:
+    name: "&#b0b0b0&lCloud Puff"
+    category: "death"
+    type: DEATH_PARTICLE
+    particle: "CLOUD"
+    icon: "WHITE_DYE"
+    permission: "enthusia.cosmetics.death_cloud"
+  death_tnt:
+    name: "&#ff5252&lFake TNT"
+    category: "death"
+    type: DEATH_TNT
+    icon: "TNT"
+    permission: "enthusia.cosmetics.death_tnt"
+
+  trail_mist:
+    name: "&#6ee7ff&lMist Trail"
+    category: "trail"
+    type: TRAIL_PARTICLE
+    particle: "CLOUD"
+    icon: "WHITE_DYE"
+    permission: "enthusia.cosmetics.trail_mist"
+  trail_glow:
+    name: "&#ffe066&lGlow Trail"
+    category: "trail"
+    type: TRAIL_PARTICLE
+    particle: "GLOW"
+    icon: "GLOWSTONE_DUST"
+    permission: "enthusia.cosmetics.trail_glow"
+  trail_leaf:
+    name: "&#7bdc5f&lLeaf Trail"
+    category: "trail"
+    type: TRAIL_PARTICLE
+    particle: "HAPPY_VILLAGER"
+    icon: "OAK_LEAVES"
+    permission: "enthusia.cosmetics.trail_leaf"
+  trail_soul:
+    name: "&#6ee7ff&lSoul Trail"
+    category: "trail"
+    type: TRAIL_PARTICLE
+    particle: "SOUL"
+    icon: "SOUL_SAND"
+    permission: "enthusia.cosmetics.trail_soul"
+  trail_soulfire:
+    name: "&#5bc0ff&lSoulfire Trail"
+    category: "trail"
+    type: TRAIL_PARTICLE
+    particle: "SOUL_FIRE_FLAME"
+    icon: "SOUL_TORCH"
+    permission: "enthusia.cosmetics.trail_soulfire"
+  trail_spark:
+    name: "&#7dd3fc&lSpark Trail"
+    category: "trail"
+    type: TRAIL_PARTICLE
+    particle: "ELECTRIC_SPARK"
+    icon: "LIGHTNING_ROD"
+    permission: "enthusia.cosmetics.trail_spark"
+  trail_ember:
+    name: "&#ff6b6b&lEmber Trail"
+    category: "trail"
+    type: TRAIL_PARTICLE
+    particle: "FLAME"
+    icon: "BLAZE_POWDER"
+    permission: "enthusia.cosmetics.trail_ember"
+  trail_ash:
+    name: "&#9e9e9e&lAsh Trail"
+    category: "trail"
+    type: TRAIL_PARTICLE
+    particle: "ASH"
+    icon: "BLACK_DYE"
+    permission: "enthusia.cosmetics.trail_ash"
+  trail_smoke:
+    name: "&#b0b0b0&lSmoke Trail"
+    category: "trail"
+    type: TRAIL_PARTICLE
+    particle: "SMOKE"
+    icon: "CAMPFIRE"
+    permission: "enthusia.cosmetics.trail_smoke"
+  trail_portal:
+    name: "&#8b5cf6&lPortal Trail"
+    category: "trail"
+    type: TRAIL_PARTICLE
+    particle: "PORTAL"
+    icon: "OBSIDIAN"
+    permission: "enthusia.cosmetics.trail_portal"
+  trail_endrod:
+    name: "&#f5f5f5&lEnd Rod Trail"
+    category: "trail"
+    type: TRAIL_PARTICLE
+    particle: "END_ROD"
+    icon: "END_ROD"
+    permission: "enthusia.cosmetics.trail_endrod"
+  trail_dragon:
+    name: "&#a855f7&lDragon Trail"
+    category: "trail"
+    type: TRAIL_PARTICLE
+    particle: "DRAGON_BREATH"
+    icon: "DRAGON_BREATH"
+    permission: "enthusia.cosmetics.trail_dragon"
+  trail_note:
+    name: "&#ffd166&lNote Trail"
+    category: "trail"
+    type: TRAIL_PARTICLE
+    particle: "NOTE"
+    icon: "NOTE_BLOCK"
+    permission: "enthusia.cosmetics.trail_note"
+  trail_totem:
+    name: "&#ffd166&lTotem Trail"
+    category: "trail"
+    type: TRAIL_PARTICLE
+    particle: "TOTEM"
+    icon: "TOTEM_OF_UNDYING"
+    permission: "enthusia.cosmetics.trail_totem"
+  trail_heart:
+    name: "&#ff6b6b&lHeart Trail"
+    category: "trail"
+    type: TRAIL_PARTICLE
+    particle: "HEART"
+    icon: "ROSE_BUSH"
+    permission: "enthusia.cosmetics.trail_heart"
+  trail_snow:
+    name: "&#b3e5fc&lSnow Trail"
+    category: "trail"
+    type: TRAIL_PARTICLE
+    particle: "SNOWFLAKE"
+    icon: "SNOWBALL"
+    permission: "enthusia.cosmetics.trail_snow"
+  trail_spiral_glow:
+    name: "&#ffe066&lGlow Spiral"
+    category: "trail"
+    type: TRAIL_SPIRAL
+    particle: "GLOW"
+    icon: "GLOWSTONE_DUST"
+    radius: 0.7
+    permission: "enthusia.cosmetics.trail_spiral_glow"
+  trail_spiral_portal:
+    name: "&#8b5cf6&lPortal Spiral"
+    category: "trail"
+    type: TRAIL_SPIRAL
+    particle: "PORTAL"
+    icon: "OBSIDIAN"
+    radius: 0.8
+    permission: "enthusia.cosmetics.trail_spiral_portal"
+
+  proj_spark:
+    name: "&#7dd3fc&lSpark Shot"
+    category: "projectile"
+    type: PROJECTILE_TRAIL
+    particle: "ELECTRIC_SPARK"
+    icon: "ARROW"
+    permission: "enthusia.cosmetics.proj_spark"
+  proj_flame:
+    name: "&#ff6b6b&lFlame Shot"
+    category: "projectile"
+    type: PROJECTILE_TRAIL
+    particle: "FLAME"
+    icon: "ARROW"
+    permission: "enthusia.cosmetics.proj_flame"
+  proj_soul:
+    name: "&#6ee7ff&lSoul Shot"
+    category: "projectile"
+    type: PROJECTILE_TRAIL
+    particle: "SOUL"
+    icon: "ARROW"
+    permission: "enthusia.cosmetics.proj_soul"
+  proj_soulfire:
+    name: "&#5bc0ff&lSoulfire Shot"
+    category: "projectile"
+    type: PROJECTILE_TRAIL
+    particle: "SOUL_FIRE_FLAME"
+    icon: "ARROW"
+    permission: "enthusia.cosmetics.proj_soulfire"
+  proj_smoke:
+    name: "&#b0b0b0&lSmoke Shot"
+    category: "projectile"
+    type: PROJECTILE_TRAIL
+    particle: "SMOKE"
+    icon: "ARROW"
+    permission: "enthusia.cosmetics.proj_smoke"
+  proj_ash:
+    name: "&#9e9e9e&lAsh Shot"
+    category: "projectile"
+    type: PROJECTILE_TRAIL
+    particle: "ASH"
+    icon: "ARROW"
+    permission: "enthusia.cosmetics.proj_ash"
+  proj_dragon:
+    name: "&#a855f7&lDragon Shot"
+    category: "projectile"
+    type: PROJECTILE_TRAIL
+    particle: "DRAGON_BREATH"
+    icon: "ARROW"
+    permission: "enthusia.cosmetics.proj_dragon"
+  proj_endrod:
+    name: "&#f5f5f5&lEnd Rod Shot"
+    category: "projectile"
+    type: PROJECTILE_TRAIL
+    particle: "END_ROD"
+    icon: "ARROW"
+    permission: "enthusia.cosmetics.proj_endrod"
+  proj_portal:
+    name: "&#8b5cf6&lPortal Shot"
+    category: "projectile"
+    type: PROJECTILE_TRAIL
+    particle: "PORTAL"
+    icon: "ARROW"
+    permission: "enthusia.cosmetics.proj_portal"
+  proj_glow:
+    name: "&#ffe066&lGlow Shot"
+    category: "projectile"
+    type: PROJECTILE_TRAIL
+    particle: "GLOW"
+    icon: "ARROW"
+    permission: "enthusia.cosmetics.proj_glow"
+  proj_note:
+    name: "&#ffd166&lNote Shot"
+    category: "projectile"
+    type: PROJECTILE_TRAIL
+    particle: "NOTE"
+    icon: "ARROW"
+    permission: "enthusia.cosmetics.proj_note"
+  proj_happy:
+    name: "&#7bdc5f&lVibe Shot"
+    category: "projectile"
+    type: PROJECTILE_TRAIL
+    particle: "HAPPY_VILLAGER"
+    icon: "ARROW"
+    permission: "enthusia.cosmetics.proj_happy"
+  proj_totem:
+    name: "&#ffd166&lTotem Shot"
+    category: "projectile"
+    type: PROJECTILE_TRAIL
+    particle: "TOTEM"
+    icon: "ARROW"
+    permission: "enthusia.cosmetics.proj_totem"
+  proj_snow:
+    name: "&#b3e5fc&lSnow Shot"
+    category: "projectile"
+    type: PROJECTILE_TRAIL
+    particle: "SNOWFLAKE"
+    icon: "ARROW"
+    permission: "enthusia.cosmetics.proj_snow"
+  proj_cloud:
+    name: "&#6ee7ff&lCloud Shot"
+    category: "projectile"
+    type: PROJECTILE_TRAIL
+    particle: "CLOUD"
+    icon: "ARROW"
+    permission: "enthusia.cosmetics.proj_cloud"
+  proj_impact:
+    name: "&#ff6b6b&lImpact Shot"
+    category: "projectile"
+    type: PROJECTILE_TRAIL
+    particle: "CRIT"
+    icon: "ARROW"
+    count: 10
+    spread: 0.25
+    permission: "enthusia.cosmetics.proj_impact"
+
+  km_crushed:
+    name: "&6Crushed"
+    category: "kill_message"
+    type: KILL_MESSAGE
+    message: "&#ffb347{victim} &7was crushed by &#ffb347{killer}"
+    icon: "PAPER"
+    permission: "enthusia.cosmetics.km_crushed"
+  km_ko:
+    name: "&6KO"
+    category: "kill_message"
+    type: KILL_MESSAGE
+    message: "&#ffd166{killer} &7KO'd &#ffd166{victim}"
+    icon: "PAPER"
+    permission: "enthusia.cosmetics.km_ko"
+  km_obliterated:
+    name: "&6Obliterated"
+    category: "kill_message"
+    type: KILL_MESSAGE
+    message: "&#ff6b6b{victim} &7was obliterated by &#ff6b6b{killer}"
+    icon: "PAPER"
+    permission: "enthusia.cosmetics.km_obliterated"
+  km_took_l:
+    name: "&6Took the L"
+    category: "kill_message"
+    type: KILL_MESSAGE
+    message: "&#9e9e9e{victim} &7took the L to &#9e9e9e{killer}"
+    icon: "PAPER"
+    permission: "enthusia.cosmetics.km_took_l"
+  km_skill_issue:
+    name: "&6Skill Issue"
+    category: "kill_message"
+    type: KILL_MESSAGE
+    message: "&#ff5252{victim} &7had a skill issue vs &#ff5252{killer}"
+    icon: "PAPER"
+    permission: "enthusia.cosmetics.km_skill_issue"
+  km_shadowed:
+    name: "&6Shadowed"
+    category: "kill_message"
+    type: KILL_MESSAGE
+    message: "&#8b5cf6{killer} &7shadowed &#8b5cf6{victim}"
+    icon: "PAPER"
+    permission: "enthusia.cosmetics.km_shadowed"
+  km_1tapped:
+    name: "&61-Tapped"
+    category: "kill_message"
+    type: KILL_MESSAGE
+    message: "&#ffd166{victim} &7got 1-tapped by &#ffd166{killer}"
+    icon: "PAPER"
+    permission: "enthusia.cosmetics.km_1tapped"
+  km_outplayed:
+    name: "&6Outplayed"
+    category: "kill_message"
+    type: KILL_MESSAGE
+    message: "&#7dd3fc{killer} &7outplayed &#7dd3fc{victim}"
+    icon: "PAPER"
+    permission: "enthusia.cosmetics.km_outplayed"
+  km_delete:
+    name: "&6Delete Key"
+    category: "kill_message"
+    type: KILL_MESSAGE
+    message: "&#9e9e9e{killer} &7pressed delete on &#9e9e9e{victim}"
+    icon: "PAPER"
+    permission: "enthusia.cosmetics.km_delete"
+  km_sent:
+    name: "&6Sent"
+    category: "kill_message"
+    type: KILL_MESSAGE
+    message: "&#ffb347{victim} &7was sent by &#ffb347{killer}"
+    icon: "PAPER"
+    permission: "enthusia.cosmetics.km_sent"
+  km_ratio:
+    name: "&6Ratio"
+    category: "kill_message"
+    type: KILL_MESSAGE
+    message: "&#ffd166{killer} &7ratio'd &#ffd166{victim}"
+    icon: "PAPER"
+    permission: "enthusia.cosmetics.km_ratio"
+  km_boink:
+    name: "&6Boink"
+    category: "kill_message"
+    type: KILL_MESSAGE
+    message: "&#ff6b6b{killer} &7bonked &#ff6b6b{victim}"
+    icon: "PAPER"
+    permission: "enthusia.cosmetics.km_boink"
+  km_gg:
+    name: "&6GG"
+    category: "kill_message"
+    type: KILL_MESSAGE
+    message: "&#7bdc5fGG! &7{killer} > {victim}"
+    icon: "PAPER"
+    permission: "enthusia.cosmetics.km_gg"
+  km_folded:
+    name: "&6Folded"
+    category: "kill_message"
+    type: KILL_MESSAGE
+    message: "&#9e9e9e{victim} &7got folded by &#9e9e9e{killer}"
+    icon: "PAPER"
+    permission: "enthusia.cosmetics.km_folded"
+  km_batteries:
+    name: "&6Low Battery"
+    category: "kill_message"
+    type: KILL_MESSAGE
+    message: "&#9e9e9e{victim} &7ran out of batteries vs &#9e9e9e{killer}"
+    icon: "PAPER"
+    permission: "enthusia.cosmetics.km_batteries"
+  km_nope:
+    name: "&6Nope"
+    category: "kill_message"
+    type: KILL_MESSAGE
+    message: "&#ff5252Nope. &7{killer} > {victim}"
+    icon: "PAPER"
+    permission: "enthusia.cosmetics.km_nope"
+  km_toast:
+    name: "&6Toast"
+    category: "kill_message"
+    type: KILL_MESSAGE
+    message: "&#ffb347{victim} &7got toasted by &#ffb347{killer}"
+    icon: "PAPER"
+    permission: "enthusia.cosmetics.km_toast"
+  km_cancelled:
+    name: "&6Cancelled"
+    category: "kill_message"
+    type: KILL_MESSAGE
+    message: "&#a78bfa{victim} &7was cancelled by &#a78bfa{killer}"
+    icon: "PAPER"
+    permission: "enthusia.cosmetics.km_cancelled"
+  km_budget:
+    name: "&6Budget Cut"
+    category: "kill_message"
+    type: KILL_MESSAGE
+    message: "&#9e9e9e{victim} &7was cut from the budget by &#9e9e9e{killer}"
+    icon: "PAPER"
+    permission: "enthusia.cosmetics.km_budget"
+  km_invoice:
+    name: "&6Invoice"
+    category: "kill_message"
+    type: KILL_MESSAGE
+    message: "&#ffd166{victim} &7received an invoice from &#ffd166{killer}"
+    icon: "PAPER"
+    permission: "enthusia.cosmetics.km_invoice"
+
+  join_clean:
+    name: "&aClean Entrance"
+    category: "join"
+    type: JOIN_MESSAGE
+    message: "&a+ {player}"
+    icon: "LIME_DYE"
+    permission: "enthusia.cosmetics.join_clean"
+  join_flashy:
+    name: "&#39c5ff&lFlashy Entrance"
+    category: "join"
+    type: JOIN_MESSAGE
+    message: "&#39c5ff>> &f{player} &#39c5ffjoined!"
+    icon: "DIAMOND"
+    permission: "enthusia.cosmetics.join_flashy"
+  join_bold:
+    name: "&#ffd166&lArrival"
+    category: "join"
+    type: JOIN_MESSAGE
+    message: "&#ffd166{player} &7has arrived."
+    icon: "SUNFLOWER"
+    permission: "enthusia.cosmetics.join_bold"
+
+  quit_clean:
+    name: "&cClean Exit"
+    category: "quit"
+    type: QUIT_MESSAGE
+    message: "&c- {player}"
+    icon: "RED_DYE"
+    permission: "enthusia.cosmetics.quit_clean"
+  quit_smoke:
+    name: "&#9e9e9e&lSmoke Exit"
+    category: "quit"
+    type: QUIT_MESSAGE
+    message: "&#9e9e9e{player} vanished."
+    icon: "GRAY_DYE"
+    permission: "enthusia.cosmetics.quit_smoke"
+  quit_peace:
+    name: "&#7bdc5f&lPeace Out"
+    category: "quit"
+    type: QUIT_MESSAGE
+    message: "&#7bdc5f{player} &7peace out."
+    icon: "LIME_DYE"
+    permission: "enthusia.cosmetics.quit_peace"
