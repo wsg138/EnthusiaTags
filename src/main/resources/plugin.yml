@@ -7,6 +7,7 @@ softdepend:
   - PlaceholderAPI
   - Vault
   - EnthusiaCurrency
+  - EnthusiaPlaytime
 commands:
   tags:
     description: Open the tag selection menu.
@@ -24,6 +25,11 @@ commands:
     description: Open the cosmetics menu.
     usage: /cosmetics
     permission: enthusia.cosmetics.use
+  enthusiatags:
+    description: Main EnthusiaTags admin command.
+    usage: /enthusiatags reload
+    aliases: [etags]
+    permission: enthusia.tags.admin
 permissions:
   enthusia.tags.use:
     description: Allows opening the tag selection menu.

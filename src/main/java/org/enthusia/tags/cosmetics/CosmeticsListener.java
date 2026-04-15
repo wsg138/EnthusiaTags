@@ -4,11 +4,13 @@ import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import org.bukkit.entity.Player;
 import org.bukkit.entity.Projectile;
 import org.bukkit.event.EventHandler;
+import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.event.entity.ProjectileHitEvent;
 import org.bukkit.event.entity.ProjectileLaunchEvent;
 import org.bukkit.event.inventory.InventoryClickEvent;
+import org.bukkit.event.player.AsyncPlayerPreLoginEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.inventory.InventoryHolder;
@@ -18,19 +20,30 @@ import org.bukkit.persistence.PersistentDataContainer;
 import org.bukkit.persistence.PersistentDataType;
 import org.enthusia.tags.TagMenu;
 import org.enthusia.tags.TagService;
+import org.enthusia.tags.rewards.RewardService;
 
 public final class CosmeticsListener implements Listener {
     private final CosmeticsService cosmeticsService;
     private final CosmeticsMenu cosmeticsMenu;
     private final TagMenu tagMenu;
+    private final RewardService rewardService;
 
-    public CosmeticsListener(CosmeticsService cosmeticsService, TagService tagService, org.enthusia.tags.Messages messages) {
+    public CosmeticsListener(CosmeticsService cosmeticsService,
+                             TagService tagService,
+                             org.enthusia.tags.Messages messages,
+                             RewardService rewardService) {
         this.cosmeticsService = cosmeticsService;
         this.cosmeticsMenu = new CosmeticsMenu(cosmeticsService, tagService, messages);
         this.tagMenu = new TagMenu(tagService);
+        this.rewardService = rewardService;
     }
 
     @EventHandler
+    public void onAsyncPreLogin(AsyncPlayerPreLoginEvent event) {
+        cosmeticsService.preloadPlayerBlocking(event.getUniqueId());
+    }
+
+    @EventHandler(priority = EventPriority.HIGH)
     public void onJoin(PlayerJoinEvent event) {
         cosmeticsService.loadPlayer(event.getPlayer());
         String message = cosmeticsService.getJoinMessage(event.getPlayer());
@@ -39,7 +52,7 @@ public final class CosmeticsListener implements Listener {
         }
     }
 
-    @EventHandler
+    @EventHandler(priority = EventPriority.HIGH)
     public void onQuit(PlayerQuitEvent event) {
         String message = cosmeticsService.getQuitMessage(event.getPlayer());
         if (message != null && !message.isBlank()) {
@@ -48,7 +61,7 @@ public final class CosmeticsListener implements Listener {
         cosmeticsService.unloadPlayer(event.getPlayer());
     }
 
-    @EventHandler
+    @EventHandler(priority = EventPriority.MONITOR)
     public void onDeath(PlayerDeathEvent event) {
         Player victim = event.getEntity();
         cosmeticsService.applyDeathEffect(victim);
@@ -62,7 +75,7 @@ public final class CosmeticsListener implements Listener {
         }
     }
 
-    @EventHandler
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onProjectileLaunch(ProjectileLaunchEvent event) {
         Projectile projectile = event.getEntity();
         if (!(projectile.getShooter() instanceof Player player)) {
@@ -71,7 +84,7 @@ public final class CosmeticsListener implements Listener {
         if (projectile.getType() == org.bukkit.entity.EntityType.WIND_CHARGE) {
             return;
         }
-        String selected = cosmeticsService.getSelection(player.getUniqueId(), "projectile");
+        String selected = cosmeticsService.getActiveSelection(player.getUniqueId(), "projectile", player);
         if (selected == null) {
             return;
         }
@@ -79,31 +92,20 @@ public final class CosmeticsListener implements Listener {
         if (cosmetic == null || cosmetic.getType() != CosmeticType.PROJECTILE_TRAIL) {
             return;
         }
-        if (!player.hasPermission(cosmetic.getPermission())) {
-            return;
-        }
         cosmeticsService.registerProjectile(projectile, cosmetic);
     }
 
-    @EventHandler
+    @EventHandler(priority = EventPriority.MONITOR)
     public void onProjectileHit(ProjectileHitEvent event) {
         cosmeticsService.unregisterProjectile(event.getEntity());
         if (event.getHitEntity() instanceof Player && event.getEntity().getShooter() instanceof Player shooter) {
-            org.enthusia.tags.rewards.RewardService rewardService =
-                ((org.enthusia.tags.EnthusiaTagsPlugin) org.bukkit.Bukkit.getPluginManager()
-                    .getPlugin("EnthusiaTags")).getRewardService();
-            if (rewardService != null) {
-                try {
-                    rewardService.getStorage().incrementCounter(shooter.getUniqueId(), "projectile_hits", 1);
-                } catch (Exception ignored) {
-                }
-            }
+            rewardService.incrementCounter(shooter.getUniqueId(), "projectile_hits", 1);
         }
     }
 
     @EventHandler
     public void onInventoryClick(InventoryClickEvent event) {
-        InventoryHolder holder = event.getInventory().getHolder();
+        InventoryHolder holder = event.getView().getTopInventory().getHolder();
         if (!(holder instanceof CosmeticsMenuHolder)) {
             return;
         }

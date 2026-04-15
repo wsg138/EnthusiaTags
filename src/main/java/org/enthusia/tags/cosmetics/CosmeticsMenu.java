@@ -112,7 +112,7 @@ public final class CosmeticsMenu {
         List<Component> lore = new ArrayList<>();
         boolean has = player.hasPermission(cosmetic.getPermission());
         String selected = cosmeticsService.getSelection(player.getUniqueId(), cosmetic.getCategory());
-        boolean active = selected != null && selected.equalsIgnoreCase(cosmetic.getId());
+        boolean active = has && selected != null && selected.equalsIgnoreCase(cosmetic.getId());
 
         if (!has) {
             lore.add(LegacyComponentSerializer.legacyAmpersand().deserialize(messages.get("cosmetics-locked")));

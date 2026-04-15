@@ -8,6 +8,7 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.inventory.InventoryClickEvent;
+import org.bukkit.event.player.AsyncPlayerPreLoginEvent;
 import org.bukkit.event.player.PlayerChangedWorldEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
@@ -18,18 +19,23 @@ import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.persistence.PersistentDataContainer;
 import org.bukkit.persistence.PersistentDataType;
+import org.enthusia.tags.rewards.RewardMenu;
+import org.enthusia.tags.rewards.RewardService;
 
 public final class TagListener implements Listener {
     private final TagService tagService;
-    private final org.enthusia.tags.rewards.RewardService rewardService;
     private final TagMenu tagMenu;
-    private final org.enthusia.tags.rewards.RewardMenu rewardMenu;
+    private final RewardMenu rewardMenu;
 
-    public TagListener(TagService tagService, org.enthusia.tags.rewards.RewardService rewardService) {
+    public TagListener(TagService tagService, RewardService rewardService) {
         this.tagService = tagService;
-        this.rewardService = rewardService;
         this.tagMenu = new TagMenu(tagService);
-        this.rewardMenu = new org.enthusia.tags.rewards.RewardMenu(rewardService, tagService);
+        this.rewardMenu = new RewardMenu(rewardService, tagService);
+    }
+
+    @EventHandler
+    public void onAsyncPreLogin(AsyncPlayerPreLoginEvent event) {
+        tagService.preloadPlayerBlocking(event.getUniqueId());
     }
 
     @EventHandler
@@ -44,43 +50,31 @@ public final class TagListener implements Listener {
 
     @EventHandler
     public void onRespawn(PlayerRespawnEvent event) {
-        Player player = event.getPlayer();
-        Bukkit.getScheduler().runTask(tagService.getPlugin(), () -> tagService.updateDisplay(player));
+        Bukkit.getScheduler().runTask(tagService.getPlugin(), () -> tagService.updateDisplay(event.getPlayer()));
     }
 
     @EventHandler
     public void onWorldChange(PlayerChangedWorldEvent event) {
-        Player player = event.getPlayer();
-        Bukkit.getScheduler().runTask(tagService.getPlugin(), () -> tagService.updateDisplay(player));
+        Bukkit.getScheduler().runTask(tagService.getPlugin(), () -> tagService.updateDisplay(event.getPlayer()));
     }
 
-    @EventHandler(priority = EventPriority.LOWEST)
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
     public void onTeleportStart(PlayerTeleportEvent event) {
-        if (event.isCancelled()) {
-            return;
-        }
         tagService.removeDisplay(event.getPlayer());
     }
 
     @EventHandler(priority = EventPriority.MONITOR)
     public void onTeleportEnd(PlayerTeleportEvent event) {
-        if (event.isCancelled()) {
-            Bukkit.getScheduler().runTask(tagService.getPlugin(),
-                () -> tagService.updateDisplay(event.getPlayer()));
-            return;
-        }
-        Bukkit.getScheduler().runTask(tagService.getPlugin(),
-            () -> tagService.updateDisplay(event.getPlayer()));
+        Bukkit.getScheduler().runTask(tagService.getPlugin(), () -> tagService.updateDisplay(event.getPlayer()));
     }
 
     @EventHandler
     public void onInventoryClick(InventoryClickEvent event) {
-        InventoryHolder holder = event.getInventory().getHolder();
+        InventoryHolder holder = event.getView().getTopInventory().getHolder();
         if (!(holder instanceof TagMenuHolder)) {
             return;
         }
         event.setCancelled(true);
-
         if (!(event.getWhoClicked() instanceof Player player)) {
             return;
         }
@@ -96,7 +90,6 @@ public final class TagListener implements Listener {
             player.openInventory(rewardMenu.create(player));
             return;
         }
-
         if (data.has(tagMenu.getClearKey(), PersistentDataType.BYTE)) {
             tagService.setSelectedTag(player, null);
             player.closeInventory();
@@ -109,16 +102,11 @@ public final class TagListener implements Listener {
             return;
         }
         boolean updated = tagService.setSelectedTag(player, tagId);
-        if (!updated) {
-            player.sendMessage(message("tag-not-owned-self"));
-        } else {
-            player.sendMessage(message("tag-selected-self"));
-        }
         player.closeInventory();
+        player.sendMessage(updated ? message("tag-selected-self") : message("tag-not-owned-self"));
     }
 
     private Component message(String key) {
-        String raw = tagService.getMessages().get(key);
-        return LegacyComponentSerializer.legacyAmpersand().deserialize(raw);
+        return LegacyComponentSerializer.legacyAmpersand().deserialize(tagService.getMessages().get(key));
     }
 }

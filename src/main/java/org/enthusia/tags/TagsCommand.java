@@ -7,14 +7,14 @@ import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
 import org.bukkit.command.TabCompleter;
 import org.bukkit.entity.Player;
-import org.enthusia.tags.EnthusiaTagsPlugin;
+import org.enthusia.tags.cosmetics.CosmeticsMenu;
 
 import java.util.Collections;
 import java.util.List;
 
 public final class TagsCommand implements CommandExecutor, TabCompleter {
-    private final TagService tagService;
     private final TagMenu tagMenu;
+    private final TagService tagService;
     private final EnthusiaTagsPlugin plugin;
 
     public TagsCommand(TagService tagService, EnthusiaTagsPlugin plugin) {
@@ -43,11 +43,7 @@ public final class TagsCommand implements CommandExecutor, TabCompleter {
                 sender.sendMessage(message("players-only"));
                 return true;
             }
-            org.enthusia.tags.cosmetics.CosmeticsMenu menu =
-                new org.enthusia.tags.cosmetics.CosmeticsMenu(
-                    plugin.getCosmeticsService(),
-                    tagService,
-                    plugin.getMessages());
+            CosmeticsMenu menu = new CosmeticsMenu(plugin.getCosmeticsService(), tagService, plugin.getMessages());
             player.openInventory(menu.createMain(player));
             return true;
         }
@@ -75,7 +71,6 @@ public final class TagsCommand implements CommandExecutor, TabCompleter {
     }
 
     private Component message(String key) {
-        String raw = tagService.getMessages().get(key);
-        return LegacyComponentSerializer.legacyAmpersand().deserialize(raw);
+        return LegacyComponentSerializer.legacyAmpersand().deserialize(tagService.getMessages().get(key));
     }
 }

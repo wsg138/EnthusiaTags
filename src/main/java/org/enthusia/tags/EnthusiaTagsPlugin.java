@@ -1,58 +1,47 @@
 package org.enthusia.tags;
 
 import org.bukkit.Bukkit;
+import org.bukkit.command.PluginCommand;
 import org.bukkit.plugin.ServicePriority;
 import org.bukkit.plugin.java.JavaPlugin;
+import org.enthusia.tags.cosmetics.CosmeticsCommand;
+import org.enthusia.tags.cosmetics.CosmeticsListener;
+import org.enthusia.tags.cosmetics.CosmeticsService;
+import org.enthusia.tags.rewards.RewardListener;
+import org.enthusia.tags.rewards.RewardService;
+import org.enthusia.tags.rewards.RewardTracker;
+import org.enthusia.tags.rewards.RewardsCommand;
 
-public class EnthusiaTagsPlugin extends JavaPlugin {
+public final class EnthusiaTagsPlugin extends JavaPlugin {
     private TagService tagService;
     private Messages messages;
-    private org.enthusia.tags.rewards.RewardService rewardService;
-    private org.enthusia.tags.rewards.RewardTracker rewardTracker;
-    private org.enthusia.tags.cosmetics.CosmeticsService cosmeticsService;
+    private RewardService rewardService;
+    private RewardTracker rewardTracker;
+    private CosmeticsService cosmeticsService;
 
     @Override
     public void onEnable() {
         messages = new Messages(this);
         messages.reload();
+
         tagService = new TagService(this, messages);
+        cosmeticsService = new CosmeticsService(this, messages);
+        rewardService = new RewardService(this, tagService, messages);
+        rewardTracker = new RewardTracker(rewardService);
+
         tagService.enable();
-        cosmeticsService = new org.enthusia.tags.cosmetics.CosmeticsService(this, messages);
         cosmeticsService.enable();
-        rewardService = new org.enthusia.tags.rewards.RewardService(this, tagService, messages);
         rewardService.enable();
-        rewardTracker = new org.enthusia.tags.rewards.RewardTracker(rewardService, tagService);
         rewardTracker.start(this);
+
         Bukkit.getServicesManager().register(TagService.class, tagService, this, ServicePriority.Normal);
-        Bukkit.getPluginManager().registerEvents(new TagListener(tagService, rewardService), this);
-        Bukkit.getPluginManager().registerEvents(
-            new org.enthusia.tags.cosmetics.CosmeticsListener(cosmeticsService, tagService, messages), this);
-        TagsCommand tagsCommand = new TagsCommand(tagService, this);
-        getCommand("tags").setExecutor(tagsCommand);
-        getCommand("tags").setTabCompleter(tagsCommand);
-        TagAdminCommand adminCommand = new TagAdminCommand(tagService, this);
-        getCommand("tag").setExecutor(adminCommand);
-        getCommand("tag").setTabCompleter(adminCommand);
-        org.enthusia.tags.cosmetics.CosmeticsCommand cosmeticsCommand =
-            new org.enthusia.tags.cosmetics.CosmeticsCommand(cosmeticsService, tagService, messages);
-        getCommand("cosmetics").setExecutor(cosmeticsCommand);
-        getCommand("cosmetics").setTabCompleter(cosmeticsCommand);
-        org.enthusia.tags.rewards.RewardsCommand rewardsCommand =
-            new org.enthusia.tags.rewards.RewardsCommand(rewardService, tagService, messages);
-        getCommand("rewards").setExecutor(rewardsCommand);
-        getCommand("rewards").setTabCompleter(rewardsCommand);
-        Bukkit.getPluginManager().registerEvents(
-            new org.enthusia.tags.rewards.RewardListener(rewardService, rewardsCommand.getRewardMenu()),
-            this);
-        Bukkit.getPluginManager().registerEvents(rewardTracker, this);
+        registerListeners();
+        registerCommands();
     }
 
     @Override
     public void onDisable() {
-        if (tagService != null) {
-            Bukkit.getServicesManager().unregister(tagService);
-            tagService.disable();
-        }
+        Bukkit.getServicesManager().unregister(tagService);
         if (rewardTracker != null) {
             rewardTracker.stop();
         }
@@ -61,6 +50,9 @@ public class EnthusiaTagsPlugin extends JavaPlugin {
         }
         if (cosmeticsService != null) {
             cosmeticsService.disable();
+        }
+        if (tagService != null) {
+            tagService.disable();
         }
     }
 
@@ -72,24 +64,78 @@ public class EnthusiaTagsPlugin extends JavaPlugin {
         return messages;
     }
 
-    public org.enthusia.tags.rewards.RewardService getRewardService() {
+    public RewardService getRewardService() {
         return rewardService;
     }
 
-    public org.enthusia.tags.cosmetics.CosmeticsService getCosmeticsService() {
+    public CosmeticsService getCosmeticsService() {
         return cosmeticsService;
     }
 
     public void reloadAllFiles() {
+        reloadConfig();
         messages.reload();
-        if (tagService != null) {
-            tagService.reloadAll();
+        tagService.reloadAll();
+        rewardService.reload();
+        cosmeticsService.reload();
+    }
+
+    private void registerListeners() {
+        Bukkit.getPluginManager().registerEvents(new TagListener(tagService, rewardService), this);
+        Bukkit.getPluginManager().registerEvents(new CosmeticsListener(cosmeticsService, tagService, messages, rewardService), this);
+        RewardsCommand rewardsCommand = new RewardsCommand(rewardService, tagService, messages, this);
+        Bukkit.getPluginManager().registerEvents(new RewardListener(rewardService, rewardsCommand.getRewardMenu()), this);
+        Bukkit.getPluginManager().registerEvents(rewardTracker, this);
+
+        PluginCommand rewards = getCommand("rewards");
+        if (rewards != null) {
+            rewards.setExecutor(rewardsCommand);
+            rewards.setTabCompleter(rewardsCommand);
         }
-        if (rewardService != null) {
-            rewardService.reload();
+    }
+
+    private void registerCommands() {
+        TagsCommand tagsCommand = new TagsCommand(tagService, this);
+        PluginCommand tags = getCommand("tags");
+        if (tags != null) {
+            tags.setExecutor(tagsCommand);
+            tags.setTabCompleter(tagsCommand);
         }
-        if (cosmeticsService != null) {
-            cosmeticsService.reload();
+
+        TagAdminCommand tagAdminCommand = new TagAdminCommand(tagService, this);
+        PluginCommand tag = getCommand("tag");
+        if (tag != null) {
+            tag.setExecutor(tagAdminCommand);
+            tag.setTabCompleter(tagAdminCommand);
+        }
+
+        CosmeticsCommand cosmeticsCommand = new CosmeticsCommand(cosmeticsService, tagService, messages, this);
+        PluginCommand cosmetics = getCommand("cosmetics");
+        if (cosmetics != null) {
+            cosmetics.setExecutor(cosmeticsCommand);
+            cosmetics.setTabCompleter(cosmeticsCommand);
+        }
+
+        PluginCommand root = getCommand("enthusiatags");
+        if (root != null) {
+            root.setExecutor((sender, command, label, args) -> {
+                if (!sender.hasPermission("enthusia.tags.admin")) {
+                    sender.sendMessage(net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer.legacyAmpersand()
+                        .deserialize(messages.get("no-permission")));
+                    return true;
+                }
+                if (args.length == 1 && args[0].equalsIgnoreCase("reload")) {
+                    reloadAllFiles();
+                    sender.sendMessage(net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer.legacyAmpersand()
+                        .deserialize(messages.get("config-reloaded")));
+                    return true;
+                }
+                sender.sendMessage(net.kyori.adventure.text.Component.text("Usage: /enthusiatags reload"));
+                return true;
+            });
+            root.setTabCompleter((sender, command, alias, args) -> args.length == 1 && sender.hasPermission("enthusia.tags.admin")
+                ? java.util.List.of("reload")
+                : java.util.List.of());
         }
     }
 }

@@ -4,9 +4,11 @@ import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
+import org.bukkit.OfflinePlayer;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.java.JavaPlugin;
+import org.bukkit.scheduler.BukkitTask;
 
 import java.io.File;
 import java.sql.SQLException;
@@ -14,6 +16,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 
 public final class TagService {
@@ -25,13 +28,15 @@ public final class TagService {
     private final TagDisplayManager displayManager = new TagDisplayManager();
     private final VanishHook vanishHook = new VanishHook();
     private final Map<UUID, PlayerTagData> cache = new ConcurrentHashMap<>();
+    private final Map<UUID, CompletableFuture<Void>> pendingLoads = new ConcurrentHashMap<>();
+
     private TagStorage storage;
     private String lineFormat;
     private String guiTitle;
     private String clearItemName;
     private String noTagsItemName;
     private double displayOffset;
-    private org.bukkit.scheduler.BukkitTask vanishTask;
+    private BukkitTask vanishTask;
 
     public TagService(JavaPlugin plugin, Messages messages) {
         this.plugin = plugin;
@@ -43,20 +48,81 @@ public final class TagService {
         reloadConfigValues();
         placeholderRegistry.register("player", Player::getName);
         initStorage();
+        loadConfigTags();
         displayManager.start(plugin);
         startVanishWatcher();
-        loadConfigTags();
         for (Player player : Bukkit.getOnlinePlayers()) {
+            preloadPlayer(player.getUniqueId());
             loadPlayer(player);
         }
     }
 
     public void disable() {
-        displayManager.stop();
         stopVanishWatcher();
+        displayManager.stop();
+        pendingLoads.clear();
         cache.clear();
         if (storage != null) {
             storage.close();
+        }
+    }
+
+    public void preloadPlayer(UUID playerId) {
+        if (cache.containsKey(playerId)) {
+            return;
+        }
+        pendingLoads.computeIfAbsent(playerId, ignored ->
+            storage.loadAsync(playerId).handle((data, throwable) -> {
+                if (throwable != null) {
+                    plugin.getLogger().warning("Failed to load tags for " + playerId + ": " + throwable.getMessage());
+                } else {
+                    PlayerTagData state = toPlayerTagData(data);
+                    cache.put(playerId, state);
+                }
+                return (Void) null;
+            }).whenComplete((ignoredResult, ignoredThrowable) -> pendingLoads.remove(playerId)));
+    }
+
+    public void preloadPlayerBlocking(UUID playerId) {
+        if (cache.containsKey(playerId)) {
+            return;
+        }
+        try {
+            cache.put(playerId, toPlayerTagData(storage.loadNow(playerId)));
+        } catch (SQLException ex) {
+            plugin.getLogger().warning("Failed to preload tags for " + playerId + ": " + ex.getMessage());
+        }
+    }
+
+    public void loadPlayer(Player player) {
+        UUID playerId = player.getUniqueId();
+        preloadPlayer(playerId);
+        CompletableFuture<Void> pending = pendingLoads.get(playerId);
+        if (pending == null) {
+            updateDisplay(player);
+            return;
+        }
+        pending.thenRun(() -> Bukkit.getScheduler().runTask(plugin, () -> {
+            if (player.isOnline()) {
+                updateDisplay(player);
+            }
+        }));
+    }
+
+    public void unloadPlayer(Player player) {
+        cache.remove(player.getUniqueId());
+        pendingLoads.remove(player.getUniqueId());
+        displayManager.remove(player);
+    }
+
+    public void reloadAll() {
+        ensureConfigDefaults();
+        reloadConfigValues();
+        registry.clear();
+        loadConfigTags();
+        startVanishWatcher();
+        for (Player player : Bukkit.getOnlinePlayers()) {
+            updateDisplay(player);
         }
     }
 
@@ -66,27 +132,13 @@ public final class TagService {
         guiTitle = plugin.getConfig().getString("gui-title", "Your Tags");
         clearItemName = plugin.getConfig().getString("clear-item-name", "&cClear Tag");
         noTagsItemName = plugin.getConfig().getString("no-tags-item-name", "&7No tags yet");
-        displayOffset = plugin.getConfig().getDouble("display-offset", 2.1);
-    }
-
-    public void reloadAll() {
-        ensureConfigDefaults();
-        messages.reload();
-        reloadConfigValues();
-        registry.clear();
-        loadConfigTags();
-        reopenStorage();
-        displayManager.clearAll();
-        for (Player player : Bukkit.getOnlinePlayers()) {
-            updateDisplay(player);
-        }
+        displayOffset = plugin.getConfig().getDouble("display-offset", 0.06D);
     }
 
     public void setDisplayOffset(double offset) {
         displayOffset = offset;
         plugin.getConfig().set("display-offset", offset);
         plugin.saveConfig();
-        displayManager.clearAll();
         for (Player player : Bukkit.getOnlinePlayers()) {
             updateDisplay(player);
         }
@@ -139,7 +191,7 @@ public final class TagService {
         plugin.getConfig().set("tags." + key + ".tag-text", tagText);
         plugin.getConfig().set("tags." + key + ".icon", "NAME_TAG");
         plugin.saveConfig();
-        registerTag(new TagDefinition(key, displayName, tagText, org.bukkit.Material.NAME_TAG, java.util.List.of()));
+        registerTag(new TagDefinition(key, displayName, tagText, Material.NAME_TAG, List.of()));
         return true;
     }
 
@@ -156,88 +208,139 @@ public final class TagService {
     }
 
     public void grantTag(UUID playerId, String tagId) {
+        String lowered = tagId.toLowerCase();
         PlayerTagData data = cache.computeIfAbsent(playerId, ignored -> new PlayerTagData());
-        data.getOwnedTags().add(tagId.toLowerCase());
-        runAsync(() -> {
-            try {
-                storage.grantTag(playerId, tagId.toLowerCase());
-            } catch (SQLException ex) {
-                plugin.getLogger().warning("Failed to grant tag " + tagId + " to " + playerId + ": " + ex.getMessage());
-                handleMovedDb(ex);
+        data.getOwnedTags().add(lowered);
+        storage.grantTagAsync(playerId, lowered).exceptionally(throwable -> {
+            plugin.getLogger().warning("Failed to grant tag " + lowered + " to " + playerId + ": " + throwable.getMessage());
+            return null;
+        });
+    }
+
+    public CompletableFuture<TagAdminResult> grantTagAsync(OfflinePlayer player, String tagId) {
+        if (player == null) {
+            return CompletableFuture.completedFuture(TagAdminResult.PLAYER_NOT_FOUND);
+        }
+        if (registry.get(tagId) == null) {
+            return CompletableFuture.completedFuture(TagAdminResult.UNKNOWN_TAG);
+        }
+        String lowered = tagId.toLowerCase();
+        return loadDataAsync(player.getUniqueId()).thenCompose(data -> {
+            data.getOwnedTags().add(lowered);
+            cache.put(player.getUniqueId(), data);
+            Player online = player.getPlayer();
+            if (online != null) {
+                Bukkit.getScheduler().runTask(plugin, () -> updateDisplay(online));
             }
+            return storage.grantTagAsync(player.getUniqueId(), lowered).handle((ignored, throwable) -> {
+                if (throwable != null) {
+                    plugin.getLogger().warning("Failed to grant tag " + lowered + " to " + player.getUniqueId() + ": "
+                        + throwable.getMessage());
+                }
+                return TagAdminResult.SUCCESS;
+            });
         });
     }
 
     public void revokeTag(UUID playerId, String tagId) {
+        String lowered = tagId.toLowerCase();
         PlayerTagData data = cache.computeIfAbsent(playerId, ignored -> new PlayerTagData());
-        data.getOwnedTags().remove(tagId.toLowerCase());
-        if (tagId.equalsIgnoreCase(data.getSelectedTag())) {
+        data.getOwnedTags().remove(lowered);
+        if (lowered.equalsIgnoreCase(data.getSelectedTag())) {
             data.setSelectedTag(null);
             Player player = Bukkit.getPlayer(playerId);
             if (player != null) {
                 updateDisplay(player);
             }
         }
-        runAsync(() -> {
-            try {
-                storage.revokeTag(playerId, tagId.toLowerCase());
-            } catch (SQLException ex) {
-                plugin.getLogger().warning("Failed to revoke tag " + tagId + " from " + playerId + ": " + ex.getMessage());
-                handleMovedDb(ex);
+        storage.revokeTagAsync(playerId, lowered).exceptionally(throwable -> {
+            plugin.getLogger().warning("Failed to revoke tag " + lowered + " from " + playerId + ": " + throwable.getMessage());
+            return null;
+        });
+        storage.setSelectedTagAsync(playerId, data.getSelectedTag()).exceptionally(throwable -> null);
+    }
+
+    public CompletableFuture<TagAdminResult> revokeTagAsync(OfflinePlayer player, String tagId) {
+        if (player == null) {
+            return CompletableFuture.completedFuture(TagAdminResult.PLAYER_NOT_FOUND);
+        }
+        String lowered = tagId.toLowerCase();
+        if (registry.get(lowered) == null) {
+            return CompletableFuture.completedFuture(TagAdminResult.UNKNOWN_TAG);
+        }
+        return loadDataAsync(player.getUniqueId()).thenApply(data -> {
+            data.getOwnedTags().remove(lowered);
+            if (lowered.equalsIgnoreCase(data.getSelectedTag())) {
+                data.setSelectedTag(null);
             }
+            cache.put(player.getUniqueId(), data);
+            revokeTag(player.getUniqueId(), lowered);
+            return TagAdminResult.SUCCESS;
         });
     }
 
     public boolean setSelectedTag(Player player, String tagId) {
+        String normalized = tagId == null ? null : tagId.toLowerCase();
         PlayerTagData data = cache.computeIfAbsent(player.getUniqueId(), ignored -> new PlayerTagData());
-        if (tagId != null && !data.getOwnedTags().contains(tagId.toLowerCase())) {
+        if (normalized != null && !data.getOwnedTags().contains(normalized)) {
             return false;
         }
-        data.setSelectedTag(tagId == null ? null : tagId.toLowerCase());
+        data.setSelectedTag(normalized);
         updateDisplay(player);
-        runAsync(() -> {
-            try {
-                storage.setSelectedTag(player.getUniqueId(), data.getSelectedTag());
-            } catch (SQLException ex) {
-                plugin.getLogger().warning("Failed to set selected tag for " + player.getUniqueId() + ": " + ex.getMessage());
-                handleMovedDb(ex);
-            }
+        storage.setSelectedTagAsync(player.getUniqueId(), normalized).exceptionally(throwable -> {
+            plugin.getLogger().warning("Failed to set selected tag for " + player.getUniqueId() + ": " + throwable.getMessage());
+            return null;
         });
         return true;
+    }
+
+    public CompletableFuture<TagAdminResult> setSelectedTagAsync(OfflinePlayer player, String tagId) {
+        if (player == null) {
+            return CompletableFuture.completedFuture(TagAdminResult.PLAYER_NOT_FOUND);
+        }
+        String normalized = tagId == null ? null : tagId.toLowerCase();
+        if (normalized != null && registry.get(normalized) == null) {
+            return CompletableFuture.completedFuture(TagAdminResult.UNKNOWN_TAG);
+        }
+        return loadDataAsync(player.getUniqueId()).thenCompose(data -> {
+            if (normalized != null && !data.getOwnedTags().contains(normalized)) {
+                return CompletableFuture.completedFuture(TagAdminResult.TAG_NOT_OWNED);
+            }
+            data.setSelectedTag(normalized);
+            cache.put(player.getUniqueId(), data);
+            Player online = player.getPlayer();
+            if (online != null) {
+                Bukkit.getScheduler().runTask(plugin, () -> updateDisplay(online));
+            }
+            return storage.setSelectedTagAsync(player.getUniqueId(), normalized).handle((ignored, throwable) -> {
+                if (throwable != null) {
+                    plugin.getLogger().warning("Failed to set selected tag for " + player.getUniqueId() + ": "
+                        + throwable.getMessage());
+                }
+                return TagAdminResult.SUCCESS;
+            });
+        });
+    }
+
+    public CompletableFuture<PlayerTagData> getPlayerDataAsync(UUID playerId) {
+        return loadDataAsync(playerId);
     }
 
     public PlayerTagData getPlayerData(UUID playerId) {
         return cache.computeIfAbsent(playerId, ignored -> new PlayerTagData());
     }
 
-    public void loadPlayer(Player player) {
-        runAsync(() -> {
-            try {
-                Set<String> owned = storage.loadOwnedTags(player.getUniqueId());
-                String selected = storage.loadSelectedTag(player.getUniqueId());
-                PlayerTagData data = new PlayerTagData();
-                data.getOwnedTags().addAll(owned);
-                data.setSelectedTag(selected == null ? null : selected.toLowerCase());
-                cache.put(player.getUniqueId(), data);
-                runSync(() -> updateDisplay(player));
-            } catch (SQLException ex) {
-                plugin.getLogger().warning("Failed to load tags for " + player.getUniqueId() + ": " + ex.getMessage());
-            }
-        });
-    }
-
-    public void unloadPlayer(Player player) {
-        cache.remove(player.getUniqueId());
-        displayManager.remove(player);
-    }
-
     public void updateDisplay(Player player) {
+        if (!player.isOnline()) {
+            displayManager.remove(player);
+            return;
+        }
         PlayerTagData data = cache.get(player.getUniqueId());
         if (data == null) {
             displayManager.update(player, null, displayOffset);
             return;
         }
-        boolean vanished = isVanished(player);
+        boolean vanished = vanishHook.isVanished(player);
         data.setVanished(vanished);
         if (vanished || data.getSelectedTag() == null) {
             displayManager.update(player, null, displayOffset);
@@ -259,8 +362,19 @@ public final class TagService {
         displayManager.remove(player);
     }
 
-    private boolean isVanished(Player player) {
-        return vanishHook.isVanished(player);
+    private CompletableFuture<PlayerTagData> loadDataAsync(UUID playerId) {
+        PlayerTagData cachedData = cache.get(playerId);
+        if (cachedData != null) {
+            return CompletableFuture.completedFuture(cachedData);
+        }
+        return storage.loadAsync(playerId).thenApply(this::toPlayerTagData);
+    }
+
+    private PlayerTagData toPlayerTagData(TagStorage.StoredTagData data) {
+        PlayerTagData state = new PlayerTagData();
+        state.getOwnedTags().addAll(data.ownedTags());
+        state.setSelectedTag(data.selectedTag() == null ? null : data.selectedTag().toLowerCase());
+        return state;
     }
 
     private void initStorage() {
@@ -272,15 +386,8 @@ public final class TagService {
         try {
             storage.init();
         } catch (SQLException ex) {
-            plugin.getLogger().severe("Failed to initialize database: " + ex.getMessage());
+            plugin.getLogger().severe("Failed to initialize tag database: " + ex.getMessage());
         }
-    }
-
-    private void reopenStorage() {
-        if (storage != null) {
-            storage.close();
-        }
-        initStorage();
     }
 
     private void loadConfigTags() {
@@ -310,27 +417,17 @@ public final class TagService {
         }
     }
 
-    private void runAsync(Runnable task) {
-        Bukkit.getScheduler().runTaskAsynchronously(plugin, task);
-    }
-
-    private void runSync(Runnable task) {
-        Bukkit.getScheduler().runTask(plugin, task);
-    }
-
     private void startVanishWatcher() {
-        if (vanishTask != null) {
-            return;
-        }
-        vanishTask = Bukkit.getScheduler().runTaskTimer(plugin, this::refreshVanishStates, 20L, 20L);
+        stopVanishWatcher();
+        long interval = Math.max(20L, plugin.getConfig().getLong("performance.tag-visibility-refresh-ticks", 20L));
+        vanishTask = Bukkit.getScheduler().runTaskTimer(plugin, this::refreshVanishStates, interval, interval);
     }
 
     private void stopVanishWatcher() {
-        if (vanishTask == null) {
-            return;
+        if (vanishTask != null) {
+            vanishTask.cancel();
+            vanishTask = null;
         }
-        vanishTask.cancel();
-        vanishTask = null;
     }
 
     private void refreshVanishStates() {
@@ -339,17 +436,11 @@ public final class TagService {
             if (data == null) {
                 continue;
             }
-            boolean vanished = isVanished(player);
+            boolean vanished = vanishHook.isVanished(player);
             if (data.isVanished() != vanished) {
                 data.setVanished(vanished);
                 updateDisplay(player);
             }
-        }
-    }
-
-    private void handleMovedDb(SQLException ex) {
-        if (ex.getMessage() != null && ex.getMessage().contains("SQLITE_READONLY_DBMOVED")) {
-            Bukkit.getScheduler().runTask(plugin, this::reopenStorage);
         }
     }
 

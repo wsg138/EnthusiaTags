@@ -1,8 +1,19 @@
 placeholders:
+  # Placeholder fallback values. These are only used if
+  # `integrations.playtime.allow-placeholder-fallback` is enabled.
   playtime-active-minutes: "%playtime_active%"
   playtime-afk-minutes: "%playtime_afk%"
   playtime-total-minutes: "%playtime_total%"
   playtime-state: "%playtime_state%"
+
+integrations:
+  playtime:
+    # Default false: use the EnthusiaPlaytime API directly and block playtime rewards if it is unavailable.
+    allow-placeholder-fallback: false
+  baltop:
+    # Plugin that exposes `isInBaltopTop(UUID, int)`.
+    plugin-name: "EnthusiaCurrency"
+
 categories:
   playtime:
     name: "&bPlaytime"

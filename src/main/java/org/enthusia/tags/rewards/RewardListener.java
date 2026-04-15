@@ -22,7 +22,7 @@ public final class RewardListener implements Listener {
 
     @EventHandler
     public void onInventoryClick(InventoryClickEvent event) {
-        InventoryHolder holder = event.getInventory().getHolder();
+        InventoryHolder holder = event.getView().getTopInventory().getHolder();
         if (!(holder instanceof RewardMenuHolder rewardHolder)) {
             return;
         }

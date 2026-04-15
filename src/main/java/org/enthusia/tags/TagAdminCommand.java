@@ -3,26 +3,26 @@ package org.enthusia.tags;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import org.bukkit.Bukkit;
+import org.bukkit.OfflinePlayer;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
 import org.bukkit.command.TabCompleter;
-import org.bukkit.entity.Player;
-import org.enthusia.tags.EnthusiaTagsPlugin;
 
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Set;
-import java.util.UUID;
 
 public final class TagAdminCommand implements CommandExecutor, TabCompleter {
     private final TagService tagService;
     private final EnthusiaTagsPlugin plugin;
+    private final PlayerLookup playerLookup;
 
     public TagAdminCommand(TagService tagService, EnthusiaTagsPlugin plugin) {
         this.tagService = tagService;
         this.plugin = plugin;
+        this.playerLookup = new PlayerLookup(plugin);
     }
 
     @Override
@@ -42,18 +42,18 @@ public final class TagAdminCommand implements CommandExecutor, TabCompleter {
                     sendUsage(sender);
                     return true;
                 }
-                Player target = Bukkit.getPlayerExact(args[1]);
+                OfflinePlayer target = playerLookup.findPlayer(args[1]);
                 if (target == null) {
                     sender.sendMessage(message("player-not-found"));
                     return true;
                 }
                 String tagId = args[2].toLowerCase();
-                if (tagService.getRegistry().get(tagId) == null) {
-                    sender.sendMessage(formatMessage("unknown-tag", "", tagId));
-                    return true;
-                }
-                tagService.grantTag(target.getUniqueId(), tagId);
-                sender.sendMessage(formatMessage("tag-granted", target.getName(), tagId));
+                tagService.grantTagAsync(target, tagId).thenAccept(result ->
+                    Bukkit.getScheduler().runTask(plugin, () -> sender.sendMessage(switch (result) {
+                        case PLAYER_NOT_FOUND -> message("player-not-found");
+                        case UNKNOWN_TAG -> formatMessage("unknown-tag", "", tagId);
+                        default -> formatMessage("tag-granted", target.getName(), tagId);
+                    })));
                 return true;
             }
             case "revoke" -> {
@@ -61,14 +61,18 @@ public final class TagAdminCommand implements CommandExecutor, TabCompleter {
                     sendUsage(sender);
                     return true;
                 }
-                Player target = Bukkit.getPlayerExact(args[1]);
+                OfflinePlayer target = playerLookup.findPlayer(args[1]);
                 if (target == null) {
                     sender.sendMessage(message("player-not-found"));
                     return true;
                 }
                 String tagId = args[2].toLowerCase();
-                tagService.revokeTag(target.getUniqueId(), tagId);
-                sender.sendMessage(formatMessage("tag-revoked", target.getName(), tagId));
+                tagService.revokeTagAsync(target, tagId).thenAccept(result ->
+                    Bukkit.getScheduler().runTask(plugin, () -> sender.sendMessage(switch (result) {
+                        case PLAYER_NOT_FOUND -> message("player-not-found");
+                        case UNKNOWN_TAG -> formatMessage("unknown-tag", "", tagId);
+                        default -> formatMessage("tag-revoked", target.getName(), tagId);
+                    })));
                 return true;
             }
             case "clear" -> {
@@ -76,13 +80,15 @@ public final class TagAdminCommand implements CommandExecutor, TabCompleter {
                     sendUsage(sender);
                     return true;
                 }
-                Player target = Bukkit.getPlayerExact(args[1]);
+                OfflinePlayer target = playerLookup.findPlayer(args[1]);
                 if (target == null) {
                     sender.sendMessage(message("player-not-found"));
                     return true;
                 }
-                tagService.setSelectedTag(target, null);
-                sender.sendMessage(formatMessage("tag-cleared", target.getName(), ""));
+                tagService.setSelectedTagAsync(target, null).thenAccept(result ->
+                    Bukkit.getScheduler().runTask(plugin, () -> sender.sendMessage(
+                        result == TagAdminResult.PLAYER_NOT_FOUND ? message("player-not-found")
+                            : formatMessage("tag-cleared", target.getName(), ""))));
                 return true;
             }
             case "reload" -> {
@@ -95,22 +101,19 @@ public final class TagAdminCommand implements CommandExecutor, TabCompleter {
                     sendUsage(sender);
                     return true;
                 }
-                Player target = Bukkit.getPlayerExact(args[1]);
+                OfflinePlayer target = playerLookup.findPlayer(args[1]);
                 if (target == null) {
                     sender.sendMessage(message("player-not-found"));
                     return true;
                 }
                 String tagId = args[2].toLowerCase();
-                if (tagService.getRegistry().get(tagId) == null) {
-                    sender.sendMessage(formatMessage("unknown-tag", "", tagId));
-                    return true;
-                }
-                boolean ok = tagService.setSelectedTag(target, tagId);
-                if (!ok) {
-                    sender.sendMessage(formatMessage("tag-not-owned", target.getName(), tagId));
-                } else {
-                sender.sendMessage(formatMessage("tag-selected", target.getName(), tagId));
-                }
+                tagService.setSelectedTagAsync(target, tagId).thenAccept(result ->
+                    Bukkit.getScheduler().runTask(plugin, () -> sender.sendMessage(switch (result) {
+                        case PLAYER_NOT_FOUND -> message("player-not-found");
+                        case UNKNOWN_TAG -> formatMessage("unknown-tag", "", tagId);
+                        case TAG_NOT_OWNED -> formatMessage("tag-not-owned", target.getName(), tagId);
+                        default -> formatMessage("tag-selected", target.getName(), tagId);
+                    })));
                 return true;
             }
             case "list" -> {
@@ -118,21 +121,21 @@ public final class TagAdminCommand implements CommandExecutor, TabCompleter {
                     sendUsage(sender);
                     return true;
                 }
-                Player target = Bukkit.getPlayerExact(args[1]);
+                OfflinePlayer target = playerLookup.findPlayer(args[1]);
                 if (target == null) {
                     sender.sendMessage(message("player-not-found"));
                     return true;
                 }
-                PlayerTagData data = tagService.getPlayerData(target.getUniqueId());
-                String selected = data.getSelectedTag();
-                sender.sendMessage(formatMessage("tag-list-header", target.getName(), selected == null ? "none" : selected));
-                if (data.getOwnedTags().isEmpty()) {
-                    sender.sendMessage(message("tag-list-empty"));
-                    return true;
-                }
-                sender.sendMessage(formatMessage("tag-list-items",
-                    "",
-                    String.join(", ", data.getOwnedTags())));
+                tagService.getPlayerDataAsync(target.getUniqueId()).thenAccept(data ->
+                    Bukkit.getScheduler().runTask(plugin, () -> {
+                        String selected = data.getSelectedTag();
+                        sender.sendMessage(formatMessage("tag-list-header", target.getName(), selected == null ? "none" : selected));
+                        if (data.getOwnedTags().isEmpty()) {
+                            sender.sendMessage(message("tag-list-empty"));
+                            return;
+                        }
+                        sender.sendMessage(formatMessage("tag-list-items", "", String.join(", ", data.getOwnedTags())));
+                    }));
                 return true;
             }
             case "create" -> {
@@ -144,8 +147,7 @@ public final class TagAdminCommand implements CommandExecutor, TabCompleter {
                 String displayName = joinArgs(args, 2);
                 boolean created = tagService.createTag(id, displayName, displayName);
                 if (!created) {
-                    sender.sendMessage(message("unknown-tag").replaceText(builder ->
-                        builder.matchLiteral("{tag}").replacement(id)));
+                    sender.sendMessage(formatMessage("unknown-tag", "", id));
                 } else {
                     sender.sendMessage(Component.text("Created tag " + id + "."));
                 }
@@ -201,7 +203,7 @@ public final class TagAdminCommand implements CommandExecutor, TabCompleter {
             || args[0].equalsIgnoreCase("clear")
             || args[0].equalsIgnoreCase("list"))) {
             List<String> names = new ArrayList<>();
-            for (Player player : Bukkit.getOnlinePlayers()) {
+            for (var player : Bukkit.getOnlinePlayers()) {
                 names.add(player.getName());
             }
             return names;
@@ -249,8 +251,7 @@ public final class TagAdminCommand implements CommandExecutor, TabCompleter {
     }
 
     private Component message(String key) {
-        String raw = tagService.getMessages().get(key);
-        return LegacyComponentSerializer.legacyAmpersand().deserialize(raw);
+        return LegacyComponentSerializer.legacyAmpersand().deserialize(tagService.getMessages().get(key));
     }
 
     private Component formatMessage(String key, String playerName, String tagId) {

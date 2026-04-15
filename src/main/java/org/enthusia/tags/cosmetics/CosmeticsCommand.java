@@ -7,6 +7,7 @@ import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
 import org.bukkit.command.TabCompleter;
 import org.bukkit.entity.Player;
+import org.enthusia.tags.EnthusiaTagsPlugin;
 import org.enthusia.tags.Messages;
 import org.enthusia.tags.TagService;
 
@@ -14,14 +15,17 @@ import java.util.Collections;
 import java.util.List;
 
 public final class CosmeticsCommand implements CommandExecutor, TabCompleter {
-    private final CosmeticsService cosmeticsService;
     private final CosmeticsMenu cosmeticsMenu;
     private final Messages messages;
+    private final EnthusiaTagsPlugin plugin;
 
-    public CosmeticsCommand(CosmeticsService cosmeticsService, TagService tagService, Messages messages) {
-        this.cosmeticsService = cosmeticsService;
+    public CosmeticsCommand(CosmeticsService cosmeticsService,
+                            TagService tagService,
+                            Messages messages,
+                            EnthusiaTagsPlugin plugin) {
         this.cosmeticsMenu = new CosmeticsMenu(cosmeticsService, tagService, messages);
         this.messages = messages;
+        this.plugin = plugin;
     }
 
     @Override
@@ -31,8 +35,8 @@ public final class CosmeticsCommand implements CommandExecutor, TabCompleter {
                 sender.sendMessage(message("no-permission"));
                 return true;
             }
-            cosmeticsService.reload();
-            sender.sendMessage(message("cosmetics-reloaded"));
+            plugin.reloadAllFiles();
+            sender.sendMessage(message("config-reloaded"));
             return true;
         }
         if (!(sender instanceof Player player)) {
@@ -56,7 +60,6 @@ public final class CosmeticsCommand implements CommandExecutor, TabCompleter {
     }
 
     private Component message(String key) {
-        String raw = messages.get(key);
-        return LegacyComponentSerializer.legacyAmpersand().deserialize(raw);
+        return LegacyComponentSerializer.legacyAmpersand().deserialize(messages.get(key));
     }
 }

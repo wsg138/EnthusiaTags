@@ -1,8 +1,27 @@
+# Format shown above the player. `{tag}` is replaced with the configured tag text.
 line-format: "&7[{tag}&7]"
+
+# Main /tags GUI title.
 gui-title: "Your Tags"
+
+# Menu labels.
 clear-item-name: "&cClear Tag"
 no-tags-item-name: "&7No tags yet"
+
+# Vertical offset for the floating tag display.
 display-offset: 0.06
+
+# Operational settings.
+performance:
+  # How often vanished / visibility state is rechecked.
+  tag-visibility-refresh-ticks: 20
+
+  # How often trail cosmetics tick.
+  cosmetics-trail-ticks: 10
+
+  # How often reward progress caches are flushed to disk.
+  reward-save-interval-ticks: 200
+
 tags:
   beta_tester:
     display-name: "&#39c5ffBeta &#6ee7ffTester"

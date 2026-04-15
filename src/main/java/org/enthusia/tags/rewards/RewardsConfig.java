@@ -1,8 +1,7 @@
 package org.enthusia.tags.rewards;
 
-import org.bukkit.configuration.file.FileConfiguration;
-
 import org.bukkit.Material;
+import org.bukkit.configuration.file.FileConfiguration;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -12,6 +11,8 @@ public record RewardsConfig(String playtimeActivePlaceholder,
                             String playtimeTotalPlaceholder,
                             String playtimeStatePlaceholder,
                             int undergroundMaxY,
+                            boolean allowPlaceholderPlaytimeFallback,
+                            String baltopPluginName,
                             Map<String, RewardCategory> categories) {
     public static RewardsConfig from(FileConfiguration config) {
         Map<String, RewardCategory> categories = new LinkedHashMap<>();
@@ -37,6 +38,8 @@ public record RewardsConfig(String playtimeActivePlaceholder,
             config.getString("placeholders.playtime-total-minutes", "%playtime_total%"),
             config.getString("placeholders.playtime-state", "%playtime_state%"),
             config.getInt("underground-max-y", 56),
+            config.getBoolean("integrations.playtime.allow-placeholder-fallback", false),
+            config.getString("integrations.baltop.plugin-name", "EnthusiaCurrency"),
             categories
         );
     }

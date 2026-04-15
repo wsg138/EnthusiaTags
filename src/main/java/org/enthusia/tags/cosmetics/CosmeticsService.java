@@ -1,16 +1,16 @@
 package org.enthusia.tags.cosmetics;
 
-import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
 import org.bukkit.Particle;
 import org.bukkit.Sound;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.YamlConfiguration;
+import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
 import org.bukkit.entity.Projectile;
-import org.bukkit.entity.Entity;
 import org.bukkit.plugin.java.JavaPlugin;
+import org.bukkit.scheduler.BukkitTask;
 import org.enthusia.tags.Messages;
 
 import java.io.File;
@@ -20,6 +20,7 @@ import java.sql.SQLException;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 
 public final class CosmeticsService {
@@ -28,10 +29,13 @@ public final class CosmeticsService {
     private final Map<String, CosmeticsCategory> categories = new LinkedHashMap<>();
     private final Map<String, CosmeticDefinition> cosmetics = new LinkedHashMap<>();
     private final Map<UUID, Map<String, String>> selections = new ConcurrentHashMap<>();
+    private final Map<UUID, CompletableFuture<Void>> pendingLoads = new ConcurrentHashMap<>();
     private final Map<UUID, CosmeticDefinition> projectiles = new ConcurrentHashMap<>();
     private final Map<UUID, Double> spiralAngles = new ConcurrentHashMap<>();
+    private final Map<UUID, org.bukkit.Location> lastTrailLocations = new ConcurrentHashMap<>();
+
     private CosmeticsStorage storage;
-    private int trailTaskId = -1;
+    private BukkitTask trailTask;
 
     public CosmeticsService(JavaPlugin plugin, Messages messages) {
         this.plugin = plugin;
@@ -40,14 +44,18 @@ public final class CosmeticsService {
 
     public void enable() {
         ensureDefaults();
-        reload();
         initStorage();
+        reload();
         startTrailTask();
     }
 
     public void disable() {
         stopTrailTask();
+        pendingLoads.clear();
         selections.clear();
+        spiralAngles.clear();
+        projectiles.clear();
+        lastTrailLocations.clear();
         if (storage != null) {
             storage.close();
         }
@@ -58,7 +66,47 @@ public final class CosmeticsService {
         categories.clear();
         cosmetics.clear();
         loadConfig();
-        reopenStorage();
+        startTrailTask();
+        for (Player player : Bukkit.getOnlinePlayers()) {
+            preloadPlayer(player.getUniqueId());
+        }
+    }
+
+    public void preloadPlayer(UUID playerId) {
+        if (selections.containsKey(playerId)) {
+            return;
+        }
+        pendingLoads.computeIfAbsent(playerId, ignored ->
+            storage.loadSelectionsAsync(playerId).handle((data, throwable) -> {
+                if (throwable != null) {
+                    plugin.getLogger().warning("Failed to load cosmetics for " + playerId + ": " + throwable.getMessage());
+                } else {
+                    selections.put(playerId, new ConcurrentHashMap<>(data));
+                }
+                return (Void) null;
+            }).whenComplete((ignoredResult, ignoredThrowable) -> pendingLoads.remove(playerId)));
+    }
+
+    public void preloadPlayerBlocking(UUID playerId) {
+        if (selections.containsKey(playerId)) {
+            return;
+        }
+        try {
+            selections.put(playerId, new ConcurrentHashMap<>(storage.loadSelectionsNow(playerId)));
+        } catch (SQLException ex) {
+            plugin.getLogger().warning("Failed to preload cosmetics for " + playerId + ": " + ex.getMessage());
+        }
+    }
+
+    public void loadPlayer(Player player) {
+        preloadPlayer(player.getUniqueId());
+    }
+
+    public void unloadPlayer(Player player) {
+        selections.remove(player.getUniqueId());
+        pendingLoads.remove(player.getUniqueId());
+        spiralAngles.remove(player.getUniqueId());
+        lastTrailLocations.remove(player.getUniqueId());
     }
 
     public Map<String, CosmeticsCategory> getCategories() {
@@ -77,20 +125,16 @@ public final class CosmeticsService {
         return map.get(category);
     }
 
-    public void loadPlayer(Player player) {
-        Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
-            try {
-                Map<String, String> data = storage.loadSelections(player.getUniqueId());
-                selections.put(player.getUniqueId(), data);
-            } catch (SQLException ex) {
-                plugin.getLogger().warning("Failed to load cosmetics for " + player.getUniqueId() + ": " + ex.getMessage());
-            }
-        });
-    }
-
-    public void unloadPlayer(Player player) {
-        selections.remove(player.getUniqueId());
-        spiralAngles.remove(player.getUniqueId());
+    public String getActiveSelection(UUID playerId, String category, Player player) {
+        String selection = getSelection(playerId, category);
+        if (selection == null) {
+            return null;
+        }
+        CosmeticDefinition cosmetic = cosmetics.get(selection.toLowerCase());
+        if (cosmetic == null || !player.hasPermission(cosmetic.getPermission())) {
+            return null;
+        }
+        return selection;
     }
 
     public boolean toggleCosmetic(Player player, CosmeticDefinition cosmetic) {
@@ -107,15 +151,18 @@ public final class CosmeticsService {
     }
 
     public boolean setSelection(Player player, String category, String cosmeticId) {
-        selections.computeIfAbsent(player.getUniqueId(), ignored -> new ConcurrentHashMap<>())
-            .put(category, cosmeticId);
-        Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
-            try {
-                storage.setSelection(player.getUniqueId(), category, cosmeticId);
-            } catch (SQLException ex) {
-                plugin.getLogger().warning("Failed to store cosmetic selection: " + ex.getMessage());
-            }
-        });
+        selections.computeIfAbsent(player.getUniqueId(), ignored -> new ConcurrentHashMap<>());
+        if (cosmeticId == null) {
+            selections.get(player.getUniqueId()).remove(category);
+        } else {
+            selections.get(player.getUniqueId()).put(category, cosmeticId.toLowerCase());
+        }
+        storage.setSelectionAsync(player.getUniqueId(), category, cosmeticId == null ? null : cosmeticId.toLowerCase())
+            .exceptionally(throwable -> {
+                plugin.getLogger().warning("Failed to store cosmetic selection for " + player.getUniqueId() + ": "
+                    + throwable.getMessage());
+                return null;
+            });
         return true;
     }
 
@@ -151,10 +198,7 @@ public final class CosmeticsService {
 
     public String getKillMessage(Player killer, Player victim) {
         CosmeticDefinition cosmetic = getActiveCosmetic(killer, "kill_message");
-        if (cosmetic == null || cosmetic.getType() != CosmeticType.KILL_MESSAGE) {
-            return null;
-        }
-        if (cosmetic.getMessage() == null) {
+        if (cosmetic == null || cosmetic.getType() != CosmeticType.KILL_MESSAGE || cosmetic.getMessage() == null) {
             return null;
         }
         return cosmetic.getMessage()
@@ -178,21 +222,6 @@ public final class CosmeticsService {
         return cosmetic.getMessage().replace("{player}", player.getName());
     }
 
-    private CosmeticDefinition getActiveCosmetic(Player player, String category) {
-        String cosmeticId = getSelection(player.getUniqueId(), category);
-        if (cosmeticId == null) {
-            return null;
-        }
-        CosmeticDefinition cosmetic = cosmetics.get(cosmeticId.toLowerCase());
-        if (cosmetic == null) {
-            return null;
-        }
-        if (!player.hasPermission(cosmetic.getPermission())) {
-            return null;
-        }
-        return cosmetic;
-    }
-
     public void registerProjectile(Projectile projectile, CosmeticDefinition cosmetic) {
         if (cosmetic == null || cosmetic.getParticle() == null) {
             return;
@@ -204,14 +233,29 @@ public final class CosmeticsService {
         projectiles.remove(entity.getUniqueId());
     }
 
-    private void startTrailTask() {
-        if (trailTaskId != -1) {
-            return;
+    private CosmeticDefinition getActiveCosmetic(Player player, String category) {
+        String cosmeticId = getSelection(player.getUniqueId(), category);
+        if (cosmeticId == null) {
+            return null;
         }
-        trailTaskId = Bukkit.getScheduler().runTaskTimer(plugin, () -> {
+        CosmeticDefinition cosmetic = cosmetics.get(cosmeticId.toLowerCase());
+        if (cosmetic == null || !player.hasPermission(cosmetic.getPermission())) {
+            return null;
+        }
+        return cosmetic;
+    }
+
+    private void startTrailTask() {
+        stopTrailTask();
+        long interval = Math.max(2L, plugin.getConfig().getLong("performance.cosmetics-trail-ticks", 10L));
+        trailTask = Bukkit.getScheduler().runTaskTimer(plugin, () -> {
             for (Player player : Bukkit.getOnlinePlayers()) {
                 CosmeticDefinition cosmetic = getActiveCosmetic(player, "trail");
                 if (cosmetic == null) {
+                    lastTrailLocations.remove(player.getUniqueId());
+                    continue;
+                }
+                if (!hasMovedEnoughForTrail(player)) {
                     continue;
                 }
                 if (cosmetic.getType() == CosmeticType.TRAIL_PARTICLE) {
@@ -223,7 +267,7 @@ public final class CosmeticsService {
             if (!projectiles.isEmpty()) {
                 for (Map.Entry<UUID, CosmeticDefinition> entry : projectiles.entrySet()) {
                     Entity entity = Bukkit.getEntity(entry.getKey());
-                    if (!(entity instanceof Projectile projectile) || projectile.isDead()) {
+                    if (!(entity instanceof Projectile projectile) || projectile.isDead() || !projectile.isValid()) {
                         projectiles.remove(entry.getKey());
                         continue;
                     }
@@ -239,13 +283,13 @@ public final class CosmeticsService {
                         cosmetic.getSpeed());
                 }
             }
-        }, 20L, 10L).getTaskId();
+        }, interval, interval);
     }
 
     private void stopTrailTask() {
-        if (trailTaskId != -1) {
-            Bukkit.getScheduler().cancelTask(trailTaskId);
-            trailTaskId = -1;
+        if (trailTask != null) {
+            trailTask.cancel();
+            trailTask = null;
         }
     }
 
@@ -264,16 +308,14 @@ public final class CosmeticsService {
         Material item = cosmetic.getItem() == null ? Material.GOLD_NUGGET : cosmetic.getItem();
         victim.getWorld().spawnParticle(Particle.ITEM,
             victim.getLocation().add(0, 1.2, 0),
-            20,
+            Math.max(1, cosmetic.getCount()),
             0.4, 0.4, 0.4,
             0.05,
             new org.bukkit.inventory.ItemStack(item));
     }
 
     private void spawnFakeTnt(Player victim) {
-        victim.getWorld().spawnParticle(Particle.EXPLOSION,
-            victim.getLocation().add(0, 0.5, 0),
-            1);
+        victim.getWorld().spawnParticle(Particle.EXPLOSION, victim.getLocation().add(0, 0.5, 0), 1);
         victim.getWorld().playSound(victim.getLocation(), Sound.ENTITY_GENERIC_EXPLODE, 0.8f, 1.2f);
     }
 
@@ -281,18 +323,25 @@ public final class CosmeticsService {
         if (cosmetic.getParticle() == null) {
             return;
         }
-        double angle = spiralAngles.getOrDefault(player.getUniqueId(), 0.0);
-        double radius = cosmetic.getRadius() <= 0 ? 0.6 : cosmetic.getRadius();
+        double angle = spiralAngles.getOrDefault(player.getUniqueId(), 0.0D);
+        double radius = cosmetic.getRadius() <= 0.0D ? 0.6D : cosmetic.getRadius();
         for (int i = 0; i < 2; i++) {
             double x = Math.cos(angle + (i * Math.PI)) * radius;
             double z = Math.sin(angle + (i * Math.PI)) * radius;
             player.getWorld().spawnParticle(cosmetic.getParticle(),
                 player.getLocation().add(x, 1.0, z),
-                1,
-                0.0, 0.0, 0.0,
-                0.0);
+                1, 0.0, 0.0, 0.0, 0.0);
         }
-        spiralAngles.put(player.getUniqueId(), angle + 0.4);
+        spiralAngles.put(player.getUniqueId(), angle + 0.4D);
+    }
+
+    private boolean hasMovedEnoughForTrail(Player player) {
+        org.bukkit.Location current = player.getLocation();
+        org.bukkit.Location previous = lastTrailLocations.put(player.getUniqueId(), current.clone());
+        if (previous == null || !previous.getWorld().equals(current.getWorld())) {
+            return false;
+        }
+        return previous.distanceSquared(current) >= 0.04D;
     }
 
     private void initStorage() {
@@ -308,13 +357,6 @@ public final class CosmeticsService {
         }
     }
 
-    private void reopenStorage() {
-        if (storage != null) {
-            storage.close();
-        }
-        initStorage();
-    }
-
     private void ensureDefaults() {
         File file = new File(plugin.getDataFolder(), "cosmetics.yml");
         if (!file.exists()) {
@@ -325,8 +367,7 @@ public final class CosmeticsService {
             if (stream == null) {
                 return;
             }
-            var defaults = YamlConfiguration.loadConfiguration(
-                new InputStreamReader(stream, StandardCharsets.UTF_8));
+            var defaults = YamlConfiguration.loadConfiguration(new InputStreamReader(stream, StandardCharsets.UTF_8));
             configFile.setDefaults(defaults);
             configFile.options().copyDefaults(true);
             configFile.save(file);
@@ -367,10 +408,10 @@ public final class CosmeticsService {
             int count = entry.getInt("count", defaultCount(type));
             double spread = entry.getDouble("spread", defaultSpread(type));
             double speed = entry.getDouble("speed", defaultSpeed(type));
-            double radius = entry.getDouble("radius", 0.6);
+            double radius = entry.getDouble("radius", 0.6D);
             cosmetics.put(id.toLowerCase(), new CosmeticDefinition(
-                id.toLowerCase(), name, category, type, icon, particle, item, sound, message, permission,
-                count, spread, speed, radius));
+                id.toLowerCase(), name, category, type, icon == null ? Material.PAPER : icon, particle, item, sound,
+                message, permission, count, spread, speed, radius));
         }
     }
 
@@ -400,24 +441,23 @@ public final class CosmeticsService {
         return switch (type) {
             case KILL_PARTICLE, KILL_ITEM_RAIN -> 28;
             case DEATH_PARTICLE, DEATH_TNT -> 32;
-            case TRAIL_PARTICLE, TRAIL_SPIRAL -> 6;
-            case PROJECTILE_TRAIL -> 6;
+            case TRAIL_PARTICLE, TRAIL_SPIRAL, PROJECTILE_TRAIL -> 6;
             default -> 8;
         };
     }
 
     private double defaultSpread(CosmeticType type) {
         return switch (type) {
-            case TRAIL_PARTICLE, PROJECTILE_TRAIL -> 0.25;
-            default -> 0.35;
+            case TRAIL_PARTICLE, PROJECTILE_TRAIL -> 0.25D;
+            default -> 0.35D;
         };
     }
 
     private double defaultSpeed(CosmeticType type) {
         return switch (type) {
-            case KILL_PARTICLE, DEATH_PARTICLE -> 0.05;
-            case PROJECTILE_TRAIL -> 0.02;
-            default -> 0.01;
+            case KILL_PARTICLE, DEATH_PARTICLE -> 0.05D;
+            case PROJECTILE_TRAIL -> 0.02D;
+            default -> 0.01D;
         };
     }
 }

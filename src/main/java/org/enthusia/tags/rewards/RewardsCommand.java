@@ -7,6 +7,7 @@ import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
 import org.bukkit.command.TabCompleter;
 import org.bukkit.entity.Player;
+import org.enthusia.tags.EnthusiaTagsPlugin;
 import org.enthusia.tags.Messages;
 import org.enthusia.tags.TagService;
 
@@ -14,14 +15,14 @@ import java.util.Collections;
 import java.util.List;
 
 public final class RewardsCommand implements CommandExecutor, TabCompleter {
-    private final RewardService rewardService;
     private final RewardMenu rewardMenu;
     private final Messages messages;
+    private final EnthusiaTagsPlugin plugin;
 
-    public RewardsCommand(RewardService rewardService, TagService tagService, Messages messages) {
-        this.rewardService = rewardService;
+    public RewardsCommand(RewardService rewardService, TagService tagService, Messages messages, EnthusiaTagsPlugin plugin) {
         this.rewardMenu = new RewardMenu(rewardService, tagService);
         this.messages = messages;
+        this.plugin = plugin;
     }
 
     @Override
@@ -31,8 +32,8 @@ public final class RewardsCommand implements CommandExecutor, TabCompleter {
                 sender.sendMessage(message("no-permission"));
                 return true;
             }
-            rewardService.reload();
-            sender.sendMessage(message("rewards-reloaded"));
+            plugin.reloadAllFiles();
+            sender.sendMessage(message("config-reloaded"));
             return true;
         }
         if (!(sender instanceof Player player)) {
@@ -56,7 +57,6 @@ public final class RewardsCommand implements CommandExecutor, TabCompleter {
     }
 
     private Component message(String key) {
-        String raw = messages.get(key);
-        return LegacyComponentSerializer.legacyAmpersand().deserialize(raw);
+        return LegacyComponentSerializer.legacyAmpersand().deserialize(messages.get(key));
     }
 }

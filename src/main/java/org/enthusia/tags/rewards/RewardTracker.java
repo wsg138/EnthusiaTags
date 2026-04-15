@@ -1,129 +1,152 @@
 package org.enthusia.tags.rewards;
 
+import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
 import org.bukkit.entity.Chicken;
 import org.bukkit.entity.Player;
+import org.bukkit.entity.Projectile;
 import org.bukkit.event.EventHandler;
+import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.event.entity.EntityPickupItemEvent;
 import org.bukkit.event.entity.PlayerDeathEvent;
+import org.bukkit.event.player.AsyncPlayerPreLoginEvent;
+import org.bukkit.event.player.PlayerJoinEvent;
+import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.plugin.java.JavaPlugin;
-import org.enthusia.tags.PlaceholderApiHook;
-import org.enthusia.tags.TagService;
+import org.bukkit.scheduler.BukkitTask;
 
-import java.sql.SQLException;
-import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 public final class RewardTracker implements Listener {
     private final RewardService rewardService;
-    private final TagService tagService;
-    private final PlaceholderApiHook placeholderApiHook = new PlaceholderApiHook();
-    private final Map<UUID, Map<UUID, Long>> firstHitTimes = new HashMap<>();
-    private int taskId = -1;
+    private final Map<UUID, Map<UUID, Long>> firstHitTimes = new ConcurrentHashMap<>();
+    private BukkitTask playtimeTask;
 
-    public RewardTracker(RewardService rewardService, TagService tagService) {
+    public RewardTracker(RewardService rewardService) {
         this.rewardService = rewardService;
-        this.tagService = tagService;
     }
 
     public void start(JavaPlugin plugin) {
-        if (taskId != -1) {
+        if (playtimeTask != null) {
             return;
         }
-        taskId = Bukkit.getScheduler().runTaskTimer(plugin, this::tickPlaytime, 20L, 1200L).getTaskId();
+        playtimeTask = Bukkit.getScheduler().runTaskTimer(plugin, this::tickPlaytime, 20L, 1200L);
     }
 
     public void stop() {
-        if (taskId != -1) {
-            Bukkit.getScheduler().cancelTask(taskId);
-            taskId = -1;
+        if (playtimeTask != null) {
+            playtimeTask.cancel();
+            playtimeTask = null;
         }
         firstHitTimes.clear();
     }
 
     @EventHandler
+    public void onAsyncPreLogin(AsyncPlayerPreLoginEvent event) {
+        rewardService.preloadPlayerBlocking(event.getUniqueId());
+    }
+
+    @EventHandler
+    public void onJoin(PlayerJoinEvent event) {
+        rewardService.loadPlayer(event.getPlayer());
+        if (event.getPlayer().hasPermission("enthusia.tags.admin")) {
+            for (String warning : rewardService.getStaffWarnings()) {
+                event.getPlayer().sendMessage(LegacyComponentSerializer.legacyAmpersand().deserialize(warning));
+            }
+        }
+    }
+
+    @EventHandler
+    public void onQuit(PlayerQuitEvent event) {
+        rewardService.unloadPlayer(event.getPlayer());
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onDamage(EntityDamageByEntityEvent event) {
         if (!(event.getEntity() instanceof Player victim)) {
             return;
         }
-        if (!(event.getDamager() instanceof Player damager)) {
+        Player damager = resolveDamager(event);
+        if (damager == null) {
             return;
         }
-        firstHitTimes.computeIfAbsent(damager.getUniqueId(), ignored -> new HashMap<>())
+        firstHitTimes.computeIfAbsent(damager.getUniqueId(), ignored -> new ConcurrentHashMap<>())
             .putIfAbsent(victim.getUniqueId(), System.currentTimeMillis());
     }
 
-    @EventHandler
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onBlockBreak(BlockBreakEvent event) {
         Material type = event.getBlock().getType();
         if (type.name().endsWith("_LOG")) {
-            incrementCounter(event.getPlayer().getUniqueId(), "logs_mined", 1);
+            rewardService.incrementCounter(event.getPlayer().getUniqueId(), "logs_mined", 1);
         }
         if (type == Material.DIRT || type == Material.COARSE_DIRT || type == Material.ROOTED_DIRT) {
-            incrementCounter(event.getPlayer().getUniqueId(), "dirt_mined", 1);
+            rewardService.incrementCounter(event.getPlayer().getUniqueId(), "dirt_mined", 1);
         }
         if (type == Material.STONE || type == Material.DEEPSLATE || type == Material.ANDESITE
             || type == Material.DIORITE || type == Material.GRANITE) {
-            incrementCounter(event.getPlayer().getUniqueId(), "stone_mined", 1);
+            rewardService.incrementCounter(event.getPlayer().getUniqueId(), "stone_mined", 1);
         }
         if (type == Material.IRON_ORE || type == Material.DEEPSLATE_IRON_ORE) {
-            incrementCounter(event.getPlayer().getUniqueId(), "iron_ore_mined", 1);
+            rewardService.incrementCounter(event.getPlayer().getUniqueId(), "iron_ore_mined", 1);
         }
         if (type == Material.NETHERRACK) {
-            incrementCounter(event.getPlayer().getUniqueId(), "netherrack_mined", 1);
+            rewardService.incrementCounter(event.getPlayer().getUniqueId(), "netherrack_mined", 1);
         }
     }
 
-    @EventHandler
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onPickup(EntityPickupItemEvent event) {
         if (!(event.getEntity() instanceof Player player)) {
             return;
         }
         if (event.getItem().getItemStack().getType() == Material.DIAMOND) {
-            incrementCounter(player.getUniqueId(), "diamonds_obtained", event.getItem().getItemStack().getAmount());
+            rewardService.incrementCounter(player.getUniqueId(), "diamonds_obtained",
+                event.getItem().getItemStack().getAmount());
         }
     }
 
-    @EventHandler
+    @EventHandler(priority = EventPriority.MONITOR)
     public void onDeath(PlayerDeathEvent event) {
         Player victim = event.getEntity();
         Player killer = victim.getKiller();
 
-        setCounter(victim.getUniqueId(), "kill_streak", 0);
-
+        rewardService.setCounter(victim.getUniqueId(), "kill_streak", 0);
         handleDeathCause(victim);
 
         if (killer == null) {
-            setCounter(victim.getUniqueId(), "death_streak_same", 0);
-            setState(victim.getUniqueId(), "last_killer", "");
+            rewardService.setCounter(victim.getUniqueId(), "death_streak_same", 0);
+            rewardService.setState(victim.getUniqueId(), "last_killer", "");
             return;
         }
 
-        long newKillStreak = incrementCounter(killer.getUniqueId(), "kill_streak", 1);
-
+        rewardService.incrementCounter(killer.getUniqueId(), "kill_streak", 1);
         updateDeathStreakSame(victim, killer);
         updateQuickKill(killer, victim);
         updateFullArmorKill(killer, victim);
         updateLowHealthKill(killer);
 
-        firstHitTimes.computeIfAbsent(killer.getUniqueId(), ignored -> new HashMap<>())
-            .remove(victim.getUniqueId());
+        Map<UUID, Long> hits = firstHitTimes.get(killer.getUniqueId());
+        if (hits != null) {
+            hits.remove(victim.getUniqueId());
+        }
     }
 
     private void updateDeathStreakSame(Player victim, Player killer) {
-        String lastKiller = getState(victim.getUniqueId(), "last_killer");
+        String lastKiller = rewardService.getState(victim.getUniqueId(), "last_killer");
         if (lastKiller != null && lastKiller.equalsIgnoreCase(killer.getUniqueId().toString())) {
-            incrementCounter(victim.getUniqueId(), "death_streak_same", 1);
-        } else {
-            setCounter(victim.getUniqueId(), "death_streak_same", 1);
-            setState(victim.getUniqueId(), "last_killer", killer.getUniqueId().toString());
+            rewardService.incrementCounter(victim.getUniqueId(), "death_streak_same", 1);
+            return;
         }
+        rewardService.setCounter(victim.getUniqueId(), "death_streak_same", 1);
+        rewardService.setState(victim.getUniqueId(), "last_killer", killer.getUniqueId().toString());
     }
 
     private void updateQuickKill(Player killer, Player victim) {
@@ -132,11 +155,8 @@ public final class RewardTracker implements Listener {
             return;
         }
         Long firstHit = victimMap.get(victim.getUniqueId());
-        if (firstHit == null) {
-            return;
-        }
-        if (System.currentTimeMillis() - firstHit <= 10_000) {
-            incrementCounter(killer.getUniqueId(), "quick_kill", 1);
+        if (firstHit != null && System.currentTimeMillis() - firstHit <= 10_000L) {
+            rewardService.incrementCounter(killer.getUniqueId(), "quick_kill", 1);
         }
     }
 
@@ -152,12 +172,12 @@ public final class RewardTracker implements Listener {
             || inv.getBoots().getType().isAir()) {
             return;
         }
-        incrementCounter(killer.getUniqueId(), "kill_full_armor", 1);
+        rewardService.incrementCounter(killer.getUniqueId(), "kill_full_armor", 1);
     }
 
     private void updateLowHealthKill(Player killer) {
         if (killer.getHealth() <= 6.0) {
-            incrementCounter(killer.getUniqueId(), "kill_low_health", 1);
+            rewardService.incrementCounter(killer.getUniqueId(), "kill_low_health", 1);
         }
     }
 
@@ -168,69 +188,40 @@ public final class RewardTracker implements Listener {
         }
         EntityDamageEvent.DamageCause cause = last.getCause();
         if (cause == EntityDamageEvent.DamageCause.FALL) {
-            incrementCounter(victim.getUniqueId(), "death_cause:fall", 1);
+            rewardService.incrementCounter(victim.getUniqueId(), "death_cause:fall", 1);
         } else if (cause == EntityDamageEvent.DamageCause.LAVA) {
-            incrementCounter(victim.getUniqueId(), "death_cause:lava", 1);
+            rewardService.incrementCounter(victim.getUniqueId(), "death_cause:lava", 1);
         } else if (cause == EntityDamageEvent.DamageCause.BLOCK_EXPLOSION
             || cause == EntityDamageEvent.DamageCause.ENTITY_EXPLOSION) {
-            incrementCounter(victim.getUniqueId(), "death_cause:explosion", 1);
+            rewardService.incrementCounter(victim.getUniqueId(), "death_cause:explosion", 1);
         }
-        if (last instanceof EntityDamageByEntityEvent byEntity
-            && byEntity.getDamager() instanceof Chicken) {
-            incrementCounter(victim.getUniqueId(), "death_cause:chicken", 1);
+        if (last instanceof EntityDamageByEntityEvent byEntity && byEntity.getDamager() instanceof Chicken) {
+            rewardService.incrementCounter(victim.getUniqueId(), "death_cause:chicken", 1);
         }
     }
 
     private void tickPlaytime() {
         for (Player player : Bukkit.getOnlinePlayers()) {
-            String state = resolvePlaceholder(player, rewardService.getConfig().playtimeStatePlaceholder());
+            String state = rewardService.getLivePlaytimeState(player);
             if ("ACTIVE".equalsIgnoreCase(state)) {
-                incrementCounter(player.getUniqueId(), "consecutive_active", 1);
+                rewardService.incrementCounter(player.getUniqueId(), "consecutive_active", 1);
             } else {
-                setCounter(player.getUniqueId(), "consecutive_active", 0);
+                rewardService.setCounter(player.getUniqueId(), "consecutive_active", 0);
             }
             int maxY = rewardService.getConfig().undergroundMaxY();
-            if (player.getLocation().getY() <= maxY && "ACTIVE".equalsIgnoreCase(state)) {
-                incrementCounter(player.getUniqueId(), "underground_active", 1);
+            if ("ACTIVE".equalsIgnoreCase(state) && player.getLocation().getY() <= maxY) {
+                rewardService.incrementCounter(player.getUniqueId(), "underground_active", 1);
             }
         }
     }
 
-    private String resolvePlaceholder(Player player, String placeholder) {
-        if (placeholder == null || placeholder.isBlank()) {
-            return "";
+    private Player resolveDamager(EntityDamageByEntityEvent event) {
+        if (event.getDamager() instanceof Player player) {
+            return player;
         }
-        String output = placeholderApiHook.apply(player, placeholder);
-        return output == null ? "" : output.trim();
-    }
-
-    private long incrementCounter(UUID playerId, String key, long delta) {
-        try {
-            return rewardService.getStorage().incrementCounter(playerId, key, delta);
-        } catch (SQLException ex) {
-            return 0L;
+        if (event.getDamager() instanceof Projectile projectile && projectile.getShooter() instanceof Player shooter) {
+            return shooter;
         }
-    }
-
-    private void setCounter(UUID playerId, String key, long value) {
-        try {
-            rewardService.getStorage().setCounter(playerId, key, value);
-        } catch (SQLException ignored) {
-        }
-    }
-
-    private String getState(UUID playerId, String key) {
-        try {
-            return rewardService.getStorage().getState(playerId, key);
-        } catch (SQLException ex) {
-            return null;
-        }
-    }
-
-    private void setState(UUID playerId, String key, String value) {
-        try {
-            rewardService.getStorage().setState(playerId, key, value);
-        } catch (SQLException ignored) {
-        }
+        return null;
     }
 }
