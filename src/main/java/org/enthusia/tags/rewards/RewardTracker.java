@@ -17,6 +17,7 @@ import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.event.player.AsyncPlayerPreLoginEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
+import org.bukkit.event.player.PlayerStatisticIncrementEvent;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitTask;
 
@@ -90,16 +91,11 @@ public final class RewardTracker implements Listener {
         if (type == Material.DIRT || type == Material.COARSE_DIRT || type == Material.ROOTED_DIRT) {
             rewardService.incrementCounter(event.getPlayer().getUniqueId(), "dirt_mined", 1);
         }
-        if (type == Material.STONE || type == Material.DEEPSLATE || type == Material.ANDESITE
-            || type == Material.DIORITE || type == Material.GRANITE) {
-            rewardService.incrementCounter(event.getPlayer().getUniqueId(), "stone_mined", 1);
-        }
-        if (type == Material.IRON_ORE || type == Material.DEEPSLATE_IRON_ORE) {
-            rewardService.incrementCounter(event.getPlayer().getUniqueId(), "iron_ore_mined", 1);
-        }
-        if (type == Material.NETHERRACK) {
-            rewardService.incrementCounter(event.getPlayer().getUniqueId(), "netherrack_mined", 1);
-        }
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onStatisticIncrement(PlayerStatisticIncrementEvent event) {
+        rewardService.invalidateProgress(event.getPlayer().getUniqueId());
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
@@ -127,6 +123,7 @@ public final class RewardTracker implements Listener {
             return;
         }
 
+        rewardService.incrementCounter(victim.getUniqueId(), "PVP_DEATHS", 1);
         rewardService.incrementCounter(killer.getUniqueId(), "kill_streak", 1);
         updateDeathStreakSame(victim, killer);
         updateQuickKill(killer, victim);

@@ -1,3 +1,5 @@
+config-version: 2
+
 placeholders:
   # Placeholder fallback values. These are only used if
   # `integrations.playtime.allow-placeholder-fallback` is enabled.

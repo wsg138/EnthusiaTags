@@ -18,15 +18,22 @@ public final class EnthusiaTagsPlugin extends JavaPlugin {
     private RewardService rewardService;
     private RewardTracker rewardTracker;
     private CosmeticsService cosmeticsService;
+    private PerformanceMonitor performanceMonitor;
+    private ConfigMigrator configMigrator;
 
     @Override
     public void onEnable() {
+        performanceMonitor = new PerformanceMonitor(this);
+        configMigrator = new ConfigMigrator(this);
+        ConfigMigrator.MigrationReport migrationReport = configMigrator.migrateAll();
         messages = new Messages(this);
         messages.reload();
+        reloadConfig();
+        performanceMonitor.reload();
 
-        tagService = new TagService(this, messages);
-        cosmeticsService = new CosmeticsService(this, messages);
-        rewardService = new RewardService(this, tagService, messages);
+        tagService = new TagService(this, messages, performanceMonitor);
+        cosmeticsService = new CosmeticsService(this, messages, performanceMonitor);
+        rewardService = new RewardService(this, tagService, messages, performanceMonitor);
         rewardTracker = new RewardTracker(rewardService);
 
         tagService.enable();
@@ -37,6 +44,7 @@ public final class EnthusiaTagsPlugin extends JavaPlugin {
         Bukkit.getServicesManager().register(TagService.class, tagService, this, ServicePriority.Normal);
         registerListeners();
         registerCommands();
+        migrationReport.summaryLines().forEach(line -> getLogger().info("Startup summary: " + line));
     }
 
     @Override
@@ -53,6 +61,9 @@ public final class EnthusiaTagsPlugin extends JavaPlugin {
         }
         if (tagService != null) {
             tagService.disable();
+        }
+        if (performanceMonitor != null) {
+            performanceMonitor.stop();
         }
     }
 
@@ -72,12 +83,19 @@ public final class EnthusiaTagsPlugin extends JavaPlugin {
         return cosmeticsService;
     }
 
+    public PerformanceMonitor getPerformanceMonitor() {
+        return performanceMonitor;
+    }
+
     public void reloadAllFiles() {
+        ConfigMigrator.MigrationReport migrationReport = configMigrator.migrateAll();
         reloadConfig();
+        performanceMonitor.reload();
         messages.reload();
         tagService.reloadAll();
         rewardService.reload();
         cosmeticsService.reload();
+        migrationReport.summaryLines().forEach(line -> getLogger().info("Reload summary: " + line));
     }
 
     private void registerListeners() {
@@ -130,11 +148,18 @@ public final class EnthusiaTagsPlugin extends JavaPlugin {
                         .deserialize(messages.get("config-reloaded")));
                     return true;
                 }
+                if (args.length == 1 && args[0].equalsIgnoreCase("performance")) {
+                    performanceMonitor.sendTo(sender);
+                    return true;
+                }
+                if (args.length >= 2 && args[0].equalsIgnoreCase("rewards")) {
+                    return rewardService.handleAdminCommand(sender, java.util.Arrays.copyOfRange(args, 1, args.length));
+                }
                 sender.sendMessage(net.kyori.adventure.text.Component.text("Usage: /enthusiatags reload"));
                 return true;
             });
             root.setTabCompleter((sender, command, alias, args) -> args.length == 1 && sender.hasPermission("enthusia.tags.admin")
-                ? java.util.List.of("reload")
+                ? java.util.List.of("reload", "performance", "rewards")
                 : java.util.List.of());
         }
     }

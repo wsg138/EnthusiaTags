@@ -16,6 +16,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 public final class TagDisplayManager {
     private final Map<UUID, TextDisplay> displays = new ConcurrentHashMap<>();
+    private final Map<UUID, Component> lastText = new ConcurrentHashMap<>();
     private BukkitTask cleanupTask;
 
     public void start(JavaPlugin plugin) {
@@ -51,7 +52,10 @@ public final class TagDisplayManager {
             display = spawnDisplay(player);
             displays.put(player.getUniqueId(), display);
         }
-        display.text(component);
+        Component previous = lastText.put(player.getUniqueId(), component);
+        if (!component.equals(previous)) {
+            display.text(component);
+        }
         if (!player.getPassengers().contains(display)) {
             player.addPassenger(display);
         }
@@ -65,6 +69,7 @@ public final class TagDisplayManager {
 
     public void remove(Player player) {
         TextDisplay display = displays.remove(player.getUniqueId());
+        lastText.remove(player.getUniqueId());
         if (display != null && !display.isDead()) {
             display.remove();
         }
@@ -77,6 +82,7 @@ public final class TagDisplayManager {
             }
         }
         displays.clear();
+        lastText.clear();
     }
 
     private TextDisplay spawnDisplay(Player player) {

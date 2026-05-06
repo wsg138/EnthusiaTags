@@ -1,3 +1,5 @@
+config-version: 2
+
 no-permission: "&cYou do not have permission to do that."
 players-only: "&cOnly players can use this command."
 player-not-found: "&cPlayer not found."
@@ -45,3 +47,6 @@ cosmetics-locked-msg: "&cYou do not have access to that cosmetic."
 cosmetics-back: "&cBack"
 cosmetics-tags-item: "&6Open Tags"
 cosmetics-reloaded: "&aCosmetics reloaded."
+rewards-loading: "&eReward data is still loading. Try again in a moment."
+sync-queued: "&aReward sync queued."
+performance-disabled: "&ePerformance debug logging is disabled, but counters are still available."

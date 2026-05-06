@@ -79,8 +79,15 @@ public final class RewardMenu {
         int start = Math.max(0, page) * pageSize;
         int end = Math.min(list.size(), start + pageSize);
         int slot = 0;
+        long renderStart = System.nanoTime();
+        RewardService.ProgressSnapshot snapshot = rewardService.getProgressSnapshot(player);
         for (int i = start; i < end; i++) {
-            inventory.setItem(slot++, createRewardItem(player, list.get(i)));
+            inventory.setItem(slot++, createRewardItem(player, list.get(i), snapshot));
+        }
+        if (tagService.getPlugin() instanceof org.enthusia.tags.EnthusiaTagsPlugin plugin) {
+            plugin.getPerformanceMonitor().add("rewards.gui.items-rendered", end - start);
+            plugin.getPerformanceMonitor().recordDurationMillis("rewards.gui.render",
+                java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - renderStart));
         }
         inventory.setItem(45, createPrevItem());
         inventory.setItem(49, createBackItem());
@@ -108,7 +115,7 @@ public final class RewardMenu {
         return prevKey;
     }
 
-    private ItemStack createRewardItem(Player player, RewardDefinition reward) {
+    private ItemStack createRewardItem(Player player, RewardDefinition reward, RewardService.ProgressSnapshot snapshot) {
         ItemStack stack = new ItemStack(reward.getIcon());
         ItemMeta meta = stack.getItemMeta();
         meta.displayName(LegacyComponentSerializer.legacyAmpersand().deserialize(reward.getName()));
@@ -119,7 +126,14 @@ public final class RewardMenu {
         }
 
         boolean claimed = rewardService.isClaimed(player.getUniqueId(), reward.getId());
-        boolean complete = rewardService.isComplete(player, reward);
+        boolean complete = true;
+        for (RewardCriterion criterion : reward.getCriteria()) {
+            long progress = rewardService.getProgress(player, criterion, snapshot);
+            if (progress < criterion.getAmount()) {
+                complete = false;
+                break;
+            }
+        }
         if (claimed) {
             lore.add(LegacyComponentSerializer.legacyAmpersand()
                 .deserialize(rewardService.getMessage("rewards-status-claimed")));
@@ -136,11 +150,12 @@ public final class RewardMenu {
         lore.add(LegacyComponentSerializer.legacyAmpersand()
             .deserialize(rewardService.getMessage("rewards-progress-title")));
         for (RewardCriterion criterion : reward.getCriteria()) {
-            boolean done = rewardService.getProgress(player, criterion) >= criterion.getAmount();
+            long progress = rewardService.getProgress(player, criterion, snapshot);
+            boolean done = progress >= criterion.getAmount();
             String line = rewardService.getMessage("rewards-progress-line")
                 .replace("{label}", criterion.getLabel())
                 .replace("{color}", done ? "&a" : "&c")
-                .replace("{progress}", rewardService.formatProgress(player, criterion));
+                .replace("{progress}", rewardService.formatProgress(progress, criterion));
             lore.add(LegacyComponentSerializer.legacyAmpersand().deserialize(line));
         }
 

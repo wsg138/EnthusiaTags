@@ -1,3 +1,5 @@
+config-version: 2
+
 # Format shown above the player. `{tag}` is replaced with the configured tag text.
 line-format: "&7[{tag}&7]"
 
@@ -14,13 +16,40 @@ display-offset: 0.06
 # Operational settings.
 performance:
   # How often vanished / visibility state is rechecked.
-  tag-visibility-refresh-ticks: 20
+  tag-visibility-refresh-ticks: 100
 
   # How often trail cosmetics tick.
   cosmetics-trail-ticks: 10
 
   # How often reward progress caches are flushed to disk.
   reward-save-interval-ticks: 200
+
+  # Reward GUI progress cache time-to-live.
+  reward-progress-cache-ticks: 100
+
+  # Cosmetic/projectile caps. Defaults preserve normal behavior while preventing runaway load.
+  max-tracked-projectiles: 300
+  max-projectile-particles-per-tick: 600
+  projectile-trail-max-age-ticks: 200
+
+vanish:
+  metadata-keys:
+    - "vanished"
+    - "vanish"
+  treat-invisibility-effect-as-vanish: false
+
+global-scan:
+  enabled: true
+  interval-minutes: 10
+  max-players-per-tick: 1
+  repair-mode: true
+  report-only: false
+  debug-log-repairs: false
+
+debug:
+  performance:
+    enabled: false
+    log-interval-seconds: 300
 
 tags:
   beta_tester:

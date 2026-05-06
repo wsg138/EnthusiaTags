@@ -17,15 +17,18 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import org.enthusia.tags.PerformanceMonitor;
 
 public final class CosmeticsStorage {
     private final File databaseFile;
     private final ExecutorService executor;
     private final AtomicBoolean closed = new AtomicBoolean(false);
+    private final PerformanceMonitor performanceMonitor;
     private Connection connection;
 
-    public CosmeticsStorage(File databaseFile) {
+    public CosmeticsStorage(File databaseFile, PerformanceMonitor performanceMonitor) {
         this.databaseFile = databaseFile;
+        this.performanceMonitor = performanceMonitor;
         this.executor = Executors.newSingleThreadExecutor(new StorageThreadFactory("enthusia-tags-cosmetics-storage"));
     }
 
@@ -47,27 +50,15 @@ public final class CosmeticsStorage {
     }
 
     public CompletableFuture<Map<String, String>> loadSelectionsAsync(UUID playerId) {
-        return submit(() -> loadSelectionsNow(playerId));
+        return submitMeasured("storage.cosmetics.load", () -> loadSelectionsDirect(playerId));
     }
 
     public Map<String, String> loadSelectionsNow(UUID playerId) throws SQLException {
-        return executeBlocking(() -> {
-            Map<String, String> selections = new HashMap<>();
-            try (PreparedStatement statement = connection.prepareStatement(
-                "SELECT category, cosmetic_id FROM cosmetics_selected WHERE player_uuid = ?")) {
-                statement.setString(1, playerId.toString());
-                try (ResultSet rs = statement.executeQuery()) {
-                    while (rs.next()) {
-                        selections.put(rs.getString("category"), rs.getString("cosmetic_id"));
-                    }
-                }
-            }
-            return selections;
-        });
+        return executeBlockingMeasured("storage.cosmetics.load", () -> loadSelectionsDirect(playerId));
     }
 
     public CompletableFuture<Void> setSelectionAsync(UUID playerId, String category, String cosmeticId) {
-        return submit(() -> {
+        return submitMeasured("storage.cosmetics.save", () -> {
             if (cosmeticId == null) {
                 try (PreparedStatement statement = connection.prepareStatement(
                     "DELETE FROM cosmetics_selected WHERE player_uuid = ? AND category = ?")) {
@@ -123,6 +114,25 @@ public final class CosmeticsStorage {
         }, executor);
     }
 
+    private <T> CompletableFuture<T> submitMeasured(String key, SqlSupplier<T> supplier) {
+        if (closed.get()) {
+            return CompletableFuture.failedFuture(new SQLException("Cosmetics storage is closed"));
+        }
+        return CompletableFuture.supplyAsync(() -> {
+            long start = System.nanoTime();
+            try {
+                T result = supplier.get();
+                performanceMonitor.increment(key + ".success");
+                performanceMonitor.recordDurationMillis(key, elapsedMillis(start));
+                return result;
+            } catch (SQLException ex) {
+                performanceMonitor.increment(key + ".failure");
+                performanceMonitor.recordDurationMillis(key, elapsedMillis(start));
+                throw new StorageRuntimeException(ex);
+            }
+        }, executor);
+    }
+
     private <T> T executeBlocking(SqlSupplier<T> supplier) throws SQLException {
         try {
             return submit(supplier).get();
@@ -137,6 +147,40 @@ public final class CosmeticsStorage {
             }
             throw new SQLException("Cosmetics storage execution failed", cause);
         }
+    }
+
+    private <T> T executeBlockingMeasured(String key, SqlSupplier<T> supplier) throws SQLException {
+        try {
+            return submitMeasured(key, supplier).get();
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            throw new SQLException("Interrupted while waiting for cosmetics storage", ex);
+        } catch (ExecutionException ex) {
+            Throwable cause = ex.getCause();
+            if (cause instanceof StorageRuntimeException storageRuntimeException
+                && storageRuntimeException.getCause() instanceof SQLException sqlException) {
+                throw sqlException;
+            }
+            throw new SQLException("Cosmetics storage execution failed", cause);
+        }
+    }
+
+    private Map<String, String> loadSelectionsDirect(UUID playerId) throws SQLException {
+        Map<String, String> selections = new HashMap<>();
+        try (PreparedStatement statement = connection.prepareStatement(
+            "SELECT category, cosmetic_id FROM cosmetics_selected WHERE player_uuid = ?")) {
+            statement.setString(1, playerId.toString());
+            try (ResultSet rs = statement.executeQuery()) {
+                while (rs.next()) {
+                    selections.put(rs.getString("category"), rs.getString("cosmetic_id"));
+                }
+            }
+        }
+        return selections;
+    }
+
+    private long elapsedMillis(long startNanos) {
+        return TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startNanos);
     }
 
     @FunctionalInterface

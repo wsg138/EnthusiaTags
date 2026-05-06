@@ -4,13 +4,17 @@ import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
 import org.bukkit.Statistic;
+import org.bukkit.command.CommandSender;
 import org.bukkit.configuration.ConfigurationSection;
+import org.bukkit.entity.EntityType;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitTask;
 import org.enthusia.tags.IntegrationStatus;
 import org.enthusia.tags.Messages;
+import org.enthusia.tags.PerformanceMonitor;
+import org.enthusia.tags.PlaceholderApiHook;
 import org.enthusia.tags.TagDefinition;
 import org.enthusia.tags.TagService;
 
@@ -25,6 +29,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.lang.reflect.Method;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -36,22 +41,31 @@ public final class RewardService {
     private final JavaPlugin plugin;
     private final TagService tagService;
     private final Messages messages;
+    private final PerformanceMonitor performanceMonitor;
     private final VaultHook vaultHook = new VaultHook();
     private final PlaytimeHook playtimeHook = new PlaytimeHook();
+    private final PlaceholderApiHook placeholderApiHook = new PlaceholderApiHook();
     private final Map<String, RewardDefinition> rewards = new LinkedHashMap<>();
     private final Map<UUID, RewardPlayerState> playerStates = new ConcurrentHashMap<>();
     private final Map<UUID, CompletableFuture<Void>> pendingLoads = new ConcurrentHashMap<>();
+    private final Map<UUID, Map<String, Long>> pendingCounterDeltas = new ConcurrentHashMap<>();
+    private final Map<UUID, ProgressSnapshot> progressSnapshots = new ConcurrentHashMap<>();
     private final IntegrationStatus integrationStatus = new IntegrationStatus();
 
     private RewardStorage storage;
     private RewardsConfig config;
     private BukkitTask flushTask;
+    private BukkitTask globalScanTask;
     private Plugin baltopPlugin;
+    private Method baltopMethod;
+    private long progressCacheTicks = 100L;
+    private int scanCursor;
 
-    public RewardService(JavaPlugin plugin, TagService tagService, Messages messages) {
+    public RewardService(JavaPlugin plugin, TagService tagService, Messages messages, PerformanceMonitor performanceMonitor) {
         this.plugin = plugin;
         this.tagService = tagService;
         this.messages = messages;
+        this.performanceMonitor = performanceMonitor;
     }
 
     public void enable() {
@@ -59,12 +73,16 @@ public final class RewardService {
         initStorage();
         reload();
         startFlushTask();
+        startGlobalScanTask();
     }
 
     public void disable() {
         stopFlushTask();
+        stopGlobalScanTask();
         flushAllBlocking();
         pendingLoads.clear();
+        pendingCounterDeltas.clear();
+        progressSnapshots.clear();
         playerStates.clear();
         if (storage != null) {
             storage.close();
@@ -76,9 +94,12 @@ public final class RewardService {
         rewards.clear();
         loadConfig();
         refreshIntegrations();
+        progressCacheTicks = Math.max(20L, plugin.getConfig().getLong("performance.reward-progress-cache-ticks", 100L));
         startFlushTask();
+        startGlobalScanTask();
         for (Player player : Bukkit.getOnlinePlayers()) {
             preloadPlayer(player.getUniqueId());
+            queueProgressRefresh(player);
         }
     }
 
@@ -106,6 +127,11 @@ public final class RewardService {
                 } else {
                     RewardPlayerState state = playerStates.computeIfAbsent(playerId, key -> new RewardPlayerState());
                     hydrateState(state, data);
+                    applyPendingDeltas(playerId, state);
+                    Player player = Bukkit.getPlayer(playerId);
+                    if (player != null) {
+                        Bukkit.getScheduler().runTask(plugin, () -> queueProgressRefresh(player));
+                    }
                 }
                 return (Void) null;
             }).whenComplete((ignoredResult, ignoredThrowable) -> pendingLoads.remove(playerId)));
@@ -132,6 +158,8 @@ public final class RewardService {
         UUID playerId = player.getUniqueId();
         flushPlayerBlocking(playerId);
         pendingLoads.remove(playerId);
+        pendingCounterDeltas.remove(playerId);
+        progressSnapshots.remove(playerId);
         playerStates.remove(playerId);
     }
 
@@ -141,8 +169,9 @@ public final class RewardService {
     }
 
     public void claim(Player player, RewardDefinition reward) {
-        RewardPlayerState state = getOrCreateState(player.getUniqueId());
-        if (!state.isLoaded()) {
+        RewardPlayerState state = getLoadedState(player.getUniqueId());
+        if (state == null || !state.isLoaded()) {
+            performanceMonitor.increment("rewards.claim.skipped-loading");
             return;
         }
         String rewardId = reward.getId().toLowerCase();
@@ -165,6 +194,7 @@ public final class RewardService {
 
         state.claimedRewards().add(rewardId);
         state.setDirty(true);
+        invalidateProgress(player.getUniqueId());
         flushPlayerAsync(player.getUniqueId(), state);
     }
 
@@ -172,11 +202,12 @@ public final class RewardService {
         if (!areActionsAvailable(reward)) {
             return false;
         }
+        ProgressSnapshot snapshot = getProgressSnapshot(player);
         for (RewardCriterion criterion : reward.getCriteria()) {
-            if (!isCriterionAvailable(criterion.getType())) {
+            if (!isCriterionAvailable(criterion)) {
                 return false;
             }
-            if (getProgress(player, criterion) < criterion.getAmount()) {
+            if (getProgress(player, criterion, snapshot) < criterion.getAmount()) {
                 return false;
             }
         }
@@ -184,6 +215,38 @@ public final class RewardService {
     }
 
     public long getProgress(Player player, RewardCriterion criterion) {
+        return getProgress(player, criterion, getProgressSnapshot(player));
+    }
+
+    public long getProgress(Player player, RewardCriterion criterion, ProgressSnapshot snapshot) {
+        performanceMonitor.increment("rewards.progress.calls");
+        if (criterion == null || !criterion.isValid()) {
+            return 0L;
+        }
+        String cacheKey = criterionCacheKey(criterion);
+        Long cached = snapshot.values().get(cacheKey);
+        if (cached != null) {
+            return cached;
+        }
+        long value = computeProgress(player, criterion);
+        snapshot.values().put(cacheKey, value);
+        return value;
+    }
+
+    private long computeProgress(Player player, RewardCriterion criterion) {
+        if (criterion.getSourceType() != RewardSourceType.LEGACY) {
+            return switch (criterion.getSourceType()) {
+                case BUKKIT_STAT -> getBukkitStat(player, criterion.getStatistic());
+                case BUKKIT_STAT_MATERIAL -> getBukkitMaterialStat(player, criterion.getStatistic(), criterion.getMaterial());
+                case BUKKIT_STAT_ENTITY -> getBukkitEntityStat(player, criterion.getStatistic(), criterion.getEntityType());
+                case CUSTOM_COUNTER -> getCounter(player.getUniqueId(), criterion.getKey());
+                case PLACEHOLDER -> getPlaytimeFromPlaceholder(player, criterion.getKey());
+                case VAULT_BALANCE -> (long) Math.floor(vaultHook.getBalance(player));
+                case PLAYTIME -> getPlaytimeMinutes(player, criterion.getType(), criterion.getKey());
+                case BALTOP -> isInBaltopTop3(player.getUniqueId()) ? 1 : 0;
+                case LEGACY -> 0L;
+            };
+        }
         return switch (criterion.getType()) {
             case PLAYTIME_ACTIVE_MINUTES -> getPlaytimeMinutes(player, RewardCriterionType.PLAYTIME_ACTIVE_MINUTES,
                 config.playtimeActivePlaceholder());
@@ -217,6 +280,35 @@ public final class RewardService {
         return current + "/" + goal;
     }
 
+    public String formatProgress(long current, RewardCriterion criterion) {
+        return current + "/" + criterion.getAmount();
+    }
+
+    public ProgressSnapshot getProgressSnapshot(Player player) {
+        long nowTick = Bukkit.getCurrentTick();
+        ProgressSnapshot snapshot = progressSnapshots.get(player.getUniqueId());
+        if (snapshot != null && nowTick - snapshot.createdTick() <= progressCacheTicks) {
+            performanceMonitor.increment("rewards.progress.cache-hit");
+            return snapshot;
+        }
+        performanceMonitor.increment("rewards.progress.cache-miss");
+        ProgressSnapshot created = new ProgressSnapshot(nowTick, new ConcurrentHashMap<>());
+        progressSnapshots.put(player.getUniqueId(), created);
+        return created;
+    }
+
+    public void invalidateProgress(UUID playerId) {
+        progressSnapshots.remove(playerId);
+    }
+
+    public void queueProgressRefresh(Player player) {
+        if (player == null || !player.isOnline()) {
+            return;
+        }
+        invalidateProgress(player.getUniqueId());
+        getProgressSnapshot(player);
+    }
+
     public String formatAction(RewardAction action) {
         if (action.getType() == RewardActionType.TAG) {
             TagDefinition tag = tagService.getRegistry().get(action.getValue());
@@ -244,23 +336,31 @@ public final class RewardService {
         if (placeholder == null || placeholder.isBlank()) {
             return "";
         }
-        return new org.enthusia.tags.PlaceholderApiHook().apply(player, placeholder);
+        return placeholderApiHook.apply(player, placeholder);
     }
 
     public long incrementCounter(UUID playerId, String key, long delta) {
-        RewardPlayerState state = getOrCreateState(playerId);
+        RewardPlayerState state = getLoadedState(playerId);
+        if (state == null || !state.isLoaded()) {
+            queueCounterDelta(playerId, key, delta);
+            return 0L;
+        }
         long next = state.counters().getOrDefault(key, 0L) + delta;
         state.counters().put(key, next);
-        state.setLoaded(true);
         state.setDirty(true);
+        invalidateProgress(playerId);
         return next;
     }
 
     public void setCounter(UUID playerId, String key, long value) {
-        RewardPlayerState state = getOrCreateState(playerId);
+        RewardPlayerState state = getLoadedState(playerId);
+        if (state == null || !state.isLoaded()) {
+            performanceMonitor.increment("rewards.state.skipped-unloaded");
+            return;
+        }
         state.counters().put(key, value);
-        state.setLoaded(true);
         state.setDirty(true);
+        invalidateProgress(playerId);
     }
 
     public long getCounter(UUID playerId, String key) {
@@ -279,19 +379,85 @@ public final class RewardService {
         return state.states().get(key);
     }
 
+    public boolean handleAdminCommand(CommandSender sender, String[] args) {
+        if (args.length == 0) {
+            sender.sendMessage("Usage: /enthusiatags rewards <sync|syncall|debug>");
+            return true;
+        }
+        if (args[0].equalsIgnoreCase("syncall")) {
+            queueSyncAll();
+            sender.sendMessage(messages.get("sync-queued"));
+            return true;
+        }
+        if (args.length >= 2 && args[0].equalsIgnoreCase("sync")) {
+            Player target = Bukkit.getPlayerExact(args[1]);
+            if (target == null) {
+                sender.sendMessage(messages.get("player-not-found"));
+                return true;
+            }
+            syncPlayer(target);
+            sender.sendMessage(messages.get("sync-queued"));
+            return true;
+        }
+        if (args.length >= 2 && args[0].equalsIgnoreCase("debug")) {
+            Player target = Bukkit.getPlayerExact(args[1]);
+            if (target == null) {
+                sender.sendMessage(messages.get("player-not-found"));
+                return true;
+            }
+            sendDebug(sender, target);
+            return true;
+        }
+        sender.sendMessage("Usage: /enthusiatags rewards sync <player>");
+        sender.sendMessage("       /enthusiatags rewards syncall");
+        sender.sendMessage("       /enthusiatags rewards debug <player>");
+        return true;
+    }
+
+    private void sendDebug(CommandSender sender, Player player) {
+        RewardPlayerState state = playerStates.get(player.getUniqueId());
+        sender.sendMessage("Reward debug for " + player.getName() + ":");
+        sender.sendMessage("  loaded: " + (state != null && state.isLoaded()));
+        sender.sendMessage("  loading: " + pendingLoads.containsKey(player.getUniqueId()));
+        if (state != null && state.isLoaded()) {
+            sender.sendMessage("  claimed: " + state.claimedRewards());
+            sender.sendMessage("  counters: " + state.counters());
+        }
+        ProgressSnapshot snapshot = getProgressSnapshot(player);
+        for (RewardDefinition reward : rewards.values()) {
+            for (RewardCriterion criterion : reward.getCriteria()) {
+                sender.sendMessage("  " + reward.getId() + " / " + criterion.getLabel() + " [" + criterion.getSourceType()
+                    + "]: " + getProgress(player, criterion, snapshot) + "/" + criterion.getAmount());
+            }
+        }
+    }
+
     public void setState(UUID playerId, String key, String value) {
-        RewardPlayerState state = getOrCreateState(playerId);
+        RewardPlayerState state = getLoadedState(playerId);
+        if (state == null || !state.isLoaded()) {
+            performanceMonitor.increment("rewards.state.skipped-unloaded");
+            return;
+        }
         if (value == null || value.isBlank()) {
             state.states().remove(key);
         } else {
             state.states().put(key, value);
         }
-        state.setLoaded(true);
         state.setDirty(true);
     }
 
     private RewardPlayerState getOrCreateState(UUID playerId) {
         return playerStates.computeIfAbsent(playerId, ignored -> new RewardPlayerState());
+    }
+
+    private RewardPlayerState getOrCreateLoadedState(UUID playerId) {
+        RewardPlayerState state = getOrCreateState(playerId);
+        if (state.isLoaded()) {
+            return state;
+        }
+        preloadPlayer(playerId);
+        performanceMonitor.increment("rewards.state.skipped-unloaded");
+        return state;
     }
 
     private RewardPlayerState getLoadedState(UUID playerId) {
@@ -313,6 +479,24 @@ public final class RewardService {
         state.setDirty(false);
     }
 
+    private void queueCounterDelta(UUID playerId, String key, long delta) {
+        pendingCounterDeltas.computeIfAbsent(playerId, ignored -> new ConcurrentHashMap<>())
+            .merge(key, delta, Long::sum);
+        performanceMonitor.increment("rewards.counter.deferred");
+    }
+
+    private void applyPendingDeltas(UUID playerId, RewardPlayerState state) {
+        Map<String, Long> deltas = pendingCounterDeltas.remove(playerId);
+        if (deltas == null || deltas.isEmpty()) {
+            return;
+        }
+        for (Map.Entry<String, Long> entry : deltas.entrySet()) {
+            state.counters().merge(entry.getKey(), entry.getValue(), Long::sum);
+        }
+        state.setDirty(true);
+        performanceMonitor.add("rewards.counter.deferred-applied", deltas.size());
+    }
+
     private RewardStorage.StoredRewardData snapshotState(RewardPlayerState state) {
         return new RewardStorage.StoredRewardData(
             new java.util.HashSet<>(state.claimedRewards()),
@@ -331,6 +515,44 @@ public final class RewardService {
         }
     }
 
+    private long getBukkitStat(Player player, Statistic statistic) {
+        if (statistic == null) {
+            return 0L;
+        }
+        try {
+            return player.getStatistic(statistic);
+        } catch (IllegalArgumentException ex) {
+            return 0L;
+        }
+    }
+
+    private long getBukkitMaterialStat(Player player, Statistic statistic, Material material) {
+        if (statistic == null || material == null) {
+            return 0L;
+        }
+        try {
+            return player.getStatistic(statistic, material);
+        } catch (IllegalArgumentException ex) {
+            return 0L;
+        }
+    }
+
+    private long getBukkitEntityStat(Player player, Statistic statistic, EntityType entityType) {
+        if (statistic == null || entityType == null) {
+            return 0L;
+        }
+        try {
+            return player.getStatistic(statistic, entityType);
+        } catch (IllegalArgumentException ex) {
+            return 0L;
+        }
+    }
+
+    private String criterionCacheKey(RewardCriterion criterion) {
+        return criterion.getSourceType() + ":" + criterion.getType() + ":" + criterion.getStatistic()
+            + ":" + criterion.getMaterial() + ":" + criterion.getEntityType() + ":" + criterion.getKey();
+    }
+
     private long getPlaytimeMinutes(Player player, RewardCriterionType type, String placeholder) {
         if (!playtimeHook.isAvailable()) {
             return config.allowPlaceholderPlaytimeFallback() ? getPlaytimeFromPlaceholder(player, placeholder) : 0L;
@@ -343,7 +565,7 @@ public final class RewardService {
             return 0L;
         }
         String resolved = tagService.getPlaceholderRegistry().apply(player, placeholder);
-        resolved = new org.enthusia.tags.PlaceholderApiHook().apply(player, resolved);
+        resolved = placeholderApiHook.apply(player, resolved);
         return parsePlaytimeMinutes(resolved, placeholder);
     }
 
@@ -397,12 +619,12 @@ public final class RewardService {
 
     private boolean isInBaltopTop3(UUID playerId) {
         Plugin plugin = baltopPlugin;
-        if (plugin == null) {
+        Method method = baltopMethod;
+        if (plugin == null || method == null) {
             return false;
         }
         try {
-            Object result = plugin.getClass().getMethod("isInBaltopTop", UUID.class, int.class)
-                .invoke(plugin, playerId, 3);
+            Object result = method.invoke(plugin, playerId, 3);
             return result instanceof Boolean && (Boolean) result;
         } catch (ReflectiveOperationException ex) {
             return false;
@@ -421,6 +643,18 @@ public final class RewardService {
         };
     }
 
+    private boolean isCriterionAvailable(RewardCriterion criterion) {
+        if (criterion == null || !criterion.isValid()) {
+            return false;
+        }
+        return switch (criterion.getSourceType()) {
+            case VAULT_BALANCE -> vaultHook.isAvailable();
+            case BALTOP -> baltopPlugin != null;
+            case PLAYTIME -> playtimeHook.isAvailable() || config.allowPlaceholderPlaytimeFallback();
+            default -> isCriterionAvailable(criterion.getType());
+        };
+    }
+
     private boolean areActionsAvailable(RewardDefinition reward) {
         if (!vaultHook.isAvailable()) {
             return reward.getActions().stream().noneMatch(action -> action.getType() == RewardActionType.MONEY);
@@ -432,6 +666,7 @@ public final class RewardService {
         vaultHook.setup();
         playtimeHook.setup();
         baltopPlugin = Bukkit.getPluginManager().getPlugin(config.baltopPluginName());
+        baltopMethod = null;
         if (baltopPlugin == null) {
             for (Plugin plugin : Bukkit.getPluginManager().getPlugins()) {
                 try {
@@ -440,6 +675,13 @@ public final class RewardService {
                     break;
                 } catch (NoSuchMethodException ignored) {
                 }
+            }
+        }
+        if (baltopPlugin != null) {
+            try {
+                baltopMethod = baltopPlugin.getClass().getMethod("isInBaltopTop", UUID.class, int.class);
+            } catch (NoSuchMethodException ignored) {
+                baltopPlugin = null;
             }
         }
         integrationStatus.clear();
@@ -483,7 +725,7 @@ public final class RewardService {
         if (!dataFolder.exists() && !dataFolder.mkdirs()) {
             plugin.getLogger().warning("Failed to create data folder for rewards.");
         }
-        storage = new RewardStorage(new File(dataFolder, "rewards.db"));
+        storage = new RewardStorage(new File(dataFolder, "rewards.db"), performanceMonitor);
         try {
             storage.init();
         } catch (SQLException ex) {
@@ -502,6 +744,52 @@ public final class RewardService {
             flushTask.cancel();
             flushTask = null;
         }
+    }
+
+    private void startGlobalScanTask() {
+        stopGlobalScanTask();
+        if (!plugin.getConfig().getBoolean("global-scan.enabled", true)) {
+            return;
+        }
+        long interval = Math.max(60L, plugin.getConfig().getLong("global-scan.interval-minutes", 10L) * 60L * 20L);
+        globalScanTask = Bukkit.getScheduler().runTaskTimer(plugin, this::processGlobalScanSlice, interval, interval);
+    }
+
+    private void stopGlobalScanTask() {
+        if (globalScanTask != null) {
+            globalScanTask.cancel();
+            globalScanTask = null;
+        }
+    }
+
+    private void processGlobalScanSlice() {
+        List<Player> players = new ArrayList<>(Bukkit.getOnlinePlayers());
+        if (players.isEmpty()) {
+            return;
+        }
+        int max = Math.max(1, plugin.getConfig().getInt("global-scan.max-players-per-tick", 1));
+        for (int i = 0; i < max && !players.isEmpty(); i++) {
+            if (scanCursor >= players.size()) {
+                scanCursor = 0;
+            }
+            Player player = players.get(scanCursor++);
+            queueProgressRefresh(player);
+            performanceMonitor.increment("global-scan.players-processed");
+        }
+    }
+
+    public void queueSyncAll() {
+        scanCursor = 0;
+        processGlobalScanSlice();
+        performanceMonitor.increment("global-scan.syncall-queued");
+    }
+
+    public void syncPlayer(Player player) {
+        if (player == null) {
+            return;
+        }
+        queueProgressRefresh(player);
+        performanceMonitor.increment("global-scan.manual-player-sync");
     }
 
     private void flushDirtyPlayers() {
@@ -572,7 +860,7 @@ public final class RewardService {
         for (String id : section.getKeys(false)) {
             String name = section.getString(id + ".name", id);
             List<String> description = section.getStringList(id + ".description");
-            Material icon = Material.matchMaterial(section.getString(id + ".icon", "NAME_TAG"));
+            Material icon = parseMaterial(section.getString(id + ".icon", "NAME_TAG"), "rewards." + id + ".icon", true);
             List<RewardCriterion> criteria = loadCriteria(section.getConfigurationSection(id + ".criteria"));
             List<RewardAction> actions = loadActions(section.getConfigurationSection(id + ".rewards"));
             String category = section.getString(id + ".category", inferCategory(criteria));
@@ -590,17 +878,36 @@ public final class RewardService {
             if (entry == null) {
                 continue;
             }
-            RewardCriterionType type = RewardCriterionType.valueOf(entry.getString("type", "CUSTOM_COUNTER"));
-            long amount = entry.getLong("amount", 1);
-            Material material = Material.matchMaterial(entry.getString("material", ""));
+            RewardCriterionType type = parseEnum(RewardCriterionType.class, entry.getString("type", "CUSTOM_COUNTER"),
+                section.getCurrentPath() + "." + key + ".type");
+            if (type == null) {
+                continue;
+            }
+            long amount = entry.contains("required") ? entry.getLong("required", 1) : entry.getLong("amount", 1);
+            Material material = parseMaterial(entry.getString("material", ""), section.getCurrentPath() + "." + key + ".material", false);
             String counterKey = entry.getString("key", "");
+            if (entry.contains("counter")) {
+                counterKey = entry.getString("counter", counterKey);
+            }
             int maxY = entry.getInt("max-y", config.undergroundMaxY());
             if (type == RewardCriterionType.CUSTOM_COUNTER && "steps_walked".equalsIgnoreCase(counterKey)) {
                 type = RewardCriterionType.STEPS_WALKED;
                 counterKey = "";
             }
+            RewardSourceType sourceType = parseSource(entry.getString("source", ""));
+            Statistic statistic = parseStatistic(entry.getString("statistic", ""), section.getCurrentPath() + "." + key + ".statistic", false);
+            EntityType entityType = parseEnum(EntityType.class, entry.getString("entity", ""), section.getCurrentPath() + "." + key + ".entity");
+            if (sourceType == RewardSourceType.LEGACY) {
+                SourceDefaults defaults = legacySource(type, counterKey, material);
+                sourceType = defaults.sourceType();
+                statistic = defaults.statistic() == null ? statistic : defaults.statistic();
+                material = defaults.material() == null ? material : defaults.material();
+                counterKey = defaults.key() == null ? counterKey : defaults.key();
+            }
+            boolean valid = validateCriterionSource(sourceType, statistic, material, entityType, counterKey,
+                section.getCurrentPath() + "." + key);
             String label = entry.getString("label", defaultLabel(type, material, counterKey));
-            criteria.add(new RewardCriterion(type, amount, material, counterKey, maxY, label));
+            criteria.add(new RewardCriterion(type, sourceType, amount, material, statistic, entityType, counterKey, maxY, label, valid));
         }
         return criteria;
     }
@@ -615,7 +922,11 @@ public final class RewardService {
             if (entry == null) {
                 continue;
             }
-            RewardActionType type = RewardActionType.valueOf(entry.getString("type", "TAG"));
+            RewardActionType type = parseEnum(RewardActionType.class, entry.getString("type", "TAG"),
+                section.getCurrentPath() + "." + key + ".type");
+            if (type == null) {
+                continue;
+            }
             String value = entry.getString("id", "");
             double amount = entry.getDouble("amount", 0.0);
             String label = entry.getString("label", "");
@@ -641,6 +952,123 @@ public final class RewardService {
         };
     }
 
+    private RewardSourceType parseSource(String value) {
+        if (value == null || value.isBlank()) {
+            return RewardSourceType.LEGACY;
+        }
+        RewardSourceType parsed = parseEnum(RewardSourceType.class, value, "source");
+        return parsed == null ? RewardSourceType.LEGACY : parsed;
+    }
+
+    private SourceDefaults legacySource(RewardCriterionType type, String key, Material material) {
+        return switch (type) {
+            case KILLS_TOTAL -> new SourceDefaults(RewardSourceType.BUKKIT_STAT, Statistic.PLAYER_KILLS, null, null);
+            case DEATHS_TOTAL -> new SourceDefaults(RewardSourceType.BUKKIT_STAT, Statistic.DEATHS, null, null);
+            case STEPS_WALKED -> new SourceDefaults(RewardSourceType.LEGACY, null, null, null);
+            case BLOCK_MINED -> new SourceDefaults(RewardSourceType.BUKKIT_STAT_MATERIAL, Statistic.MINE_BLOCK, material, null);
+            case BALANCE_AT_LEAST -> new SourceDefaults(RewardSourceType.VAULT_BALANCE, null, null, null);
+            case BALTOP_TOP3 -> new SourceDefaults(RewardSourceType.BALTOP, null, null, null);
+            case PLAYTIME_ACTIVE_MINUTES, PLAYTIME_AFK_MINUTES, PLAYTIME_TOTAL_MINUTES ->
+                new SourceDefaults(RewardSourceType.PLAYTIME, null, null, key);
+            case CUSTOM_COUNTER -> legacyCustomCounterSource(key);
+            default -> new SourceDefaults(RewardSourceType.CUSTOM_COUNTER, null, null, keyForType(type, key));
+        };
+    }
+
+    private SourceDefaults legacyCustomCounterSource(String key) {
+        String normalized = key == null ? "" : key.toLowerCase();
+        return switch (normalized) {
+            case "netherrack_mined" -> new SourceDefaults(RewardSourceType.BUKKIT_STAT_MATERIAL, Statistic.MINE_BLOCK, Material.NETHERRACK, key);
+            case "stone_mined" -> new SourceDefaults(RewardSourceType.BUKKIT_STAT_MATERIAL, Statistic.MINE_BLOCK, Material.STONE, key);
+            case "iron_ore_mined" -> new SourceDefaults(RewardSourceType.BUKKIT_STAT_MATERIAL, Statistic.MINE_BLOCK, Material.IRON_ORE, key);
+            default -> new SourceDefaults(RewardSourceType.CUSTOM_COUNTER, null, null, key);
+        };
+    }
+
+    private String keyForType(RewardCriterionType type, String key) {
+        if (key != null && !key.isBlank()) {
+            return key;
+        }
+        return switch (type) {
+            case KILL_STREAK_CURRENT -> "kill_streak";
+            case DEATH_STREAK_SAME -> "death_streak_same";
+            case QUICK_KILL_COUNT -> "quick_kill";
+            case KILL_FULL_ARMOR_COUNT -> "kill_full_armor";
+            case KILL_LOW_HEALTH_COUNT -> "kill_low_health";
+            case PROJECTILE_HITS -> "projectile_hits";
+            default -> key;
+        };
+    }
+
+    private boolean validateCriterionSource(RewardSourceType sourceType,
+                                            Statistic statistic,
+                                            Material material,
+                                            EntityType entityType,
+                                            String key,
+                                            String path) {
+        boolean valid = true;
+        if ((sourceType == RewardSourceType.BUKKIT_STAT || sourceType == RewardSourceType.BUKKIT_STAT_MATERIAL
+            || sourceType == RewardSourceType.BUKKIT_STAT_ENTITY) && statistic == null) {
+            plugin.getLogger().warning("Invalid reward criterion at " + path + ": missing/bad Bukkit statistic.");
+            valid = false;
+        }
+        if (sourceType == RewardSourceType.BUKKIT_STAT_MATERIAL && material == null) {
+            plugin.getLogger().warning("Invalid reward criterion at " + path + ": missing/bad material.");
+            valid = false;
+        }
+        if (sourceType == RewardSourceType.BUKKIT_STAT_ENTITY && entityType == null) {
+            plugin.getLogger().warning("Invalid reward criterion at " + path + ": missing/bad entity.");
+            valid = false;
+        }
+        if (sourceType == RewardSourceType.CUSTOM_COUNTER && (key == null || key.isBlank())) {
+            plugin.getLogger().warning("Invalid reward criterion at " + path + ": missing custom counter key.");
+            valid = false;
+        }
+        if (!valid) {
+            performanceMonitor.increment("config.validation.reward-criterion-invalid");
+        }
+        return valid;
+    }
+
+    private Material parseMaterial(String value, String path, boolean fallbackNameTag) {
+        if (value == null || value.isBlank()) {
+            return fallbackNameTag ? Material.NAME_TAG : null;
+        }
+        Material material = Material.matchMaterial(value);
+        if (material == null) {
+            plugin.getLogger().warning("Invalid material at " + path + ": " + value);
+            performanceMonitor.increment("config.validation.bad-material");
+            return fallbackNameTag ? Material.NAME_TAG : null;
+        }
+        return material;
+    }
+
+    private Statistic parseStatistic(String value, String path, boolean required) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        try {
+            return Statistic.valueOf(value.toUpperCase());
+        } catch (IllegalArgumentException ex) {
+            plugin.getLogger().warning("Invalid statistic at " + path + ": " + value);
+            performanceMonitor.increment("config.validation.bad-statistic");
+            return null;
+        }
+    }
+
+    private <E extends Enum<E>> E parseEnum(Class<E> type, String value, String path) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        try {
+            return Enum.valueOf(type, value.toUpperCase());
+        } catch (IllegalArgumentException ex) {
+            plugin.getLogger().warning("Invalid " + type.getSimpleName() + " at " + path + ": " + value);
+            performanceMonitor.increment("config.validation.bad-enum");
+            return null;
+        }
+    }
+
     private String defaultLabel(RewardCriterionType type, Material material, String key) {
         return switch (type) {
             case PLAYTIME_ACTIVE_MINUTES -> "Active playtime (min)";
@@ -664,5 +1092,11 @@ public final class RewardService {
             case PROJECTILE_HITS -> "Projectile hits";
             case CUSTOM_COUNTER -> key.isBlank() ? "Progress" : key;
         };
+    }
+
+    public record ProgressSnapshot(long createdTick, Map<String, Long> values) {
+    }
+
+    private record SourceDefaults(RewardSourceType sourceType, Statistic statistic, Material material, String key) {
     }
 }

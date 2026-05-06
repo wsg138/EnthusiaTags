@@ -12,6 +12,7 @@ import org.bukkit.entity.Projectile;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitTask;
 import org.enthusia.tags.Messages;
+import org.enthusia.tags.PerformanceMonitor;
 
 import java.io.File;
 import java.io.InputStreamReader;
@@ -26,20 +27,27 @@ import java.util.concurrent.ConcurrentHashMap;
 public final class CosmeticsService {
     private final JavaPlugin plugin;
     private final Messages messages;
+    private final PerformanceMonitor performanceMonitor;
     private final Map<String, CosmeticsCategory> categories = new LinkedHashMap<>();
     private final Map<String, CosmeticDefinition> cosmetics = new LinkedHashMap<>();
     private final Map<UUID, Map<String, String>> selections = new ConcurrentHashMap<>();
     private final Map<UUID, CompletableFuture<Void>> pendingLoads = new ConcurrentHashMap<>();
     private final Map<UUID, CosmeticDefinition> projectiles = new ConcurrentHashMap<>();
+    private final Map<UUID, Long> projectileBirthTicks = new ConcurrentHashMap<>();
+    private final java.util.Set<UUID> activeTrailPlayers = ConcurrentHashMap.newKeySet();
     private final Map<UUID, Double> spiralAngles = new ConcurrentHashMap<>();
     private final Map<UUID, org.bukkit.Location> lastTrailLocations = new ConcurrentHashMap<>();
 
     private CosmeticsStorage storage;
     private BukkitTask trailTask;
+    private int maxTrackedProjectiles = 300;
+    private int maxProjectileParticlesPerTick = 600;
+    private long projectileTrailMaxAgeTicks = 200L;
 
-    public CosmeticsService(JavaPlugin plugin, Messages messages) {
+    public CosmeticsService(JavaPlugin plugin, Messages messages, PerformanceMonitor performanceMonitor) {
         this.plugin = plugin;
         this.messages = messages;
+        this.performanceMonitor = performanceMonitor;
     }
 
     public void enable() {
@@ -55,6 +63,8 @@ public final class CosmeticsService {
         selections.clear();
         spiralAngles.clear();
         projectiles.clear();
+        projectileBirthTicks.clear();
+        activeTrailPlayers.clear();
         lastTrailLocations.clear();
         if (storage != null) {
             storage.close();
@@ -66,9 +76,11 @@ public final class CosmeticsService {
         categories.clear();
         cosmetics.clear();
         loadConfig();
+        reloadPerformanceConfig();
         startTrailTask();
         for (Player player : Bukkit.getOnlinePlayers()) {
             preloadPlayer(player.getUniqueId());
+            refreshActiveTrail(player);
         }
     }
 
@@ -82,6 +94,10 @@ public final class CosmeticsService {
                     plugin.getLogger().warning("Failed to load cosmetics for " + playerId + ": " + throwable.getMessage());
                 } else {
                     selections.put(playerId, new ConcurrentHashMap<>(data));
+                    Player player = Bukkit.getPlayer(playerId);
+                    if (player != null) {
+                        Bukkit.getScheduler().runTask(plugin, () -> refreshActiveTrail(player));
+                    }
                 }
                 return (Void) null;
             }).whenComplete((ignoredResult, ignoredThrowable) -> pendingLoads.remove(playerId)));
@@ -107,6 +123,7 @@ public final class CosmeticsService {
         pendingLoads.remove(player.getUniqueId());
         spiralAngles.remove(player.getUniqueId());
         lastTrailLocations.remove(player.getUniqueId());
+        activeTrailPlayers.remove(player.getUniqueId());
     }
 
     public Map<String, CosmeticsCategory> getCategories() {
@@ -157,6 +174,7 @@ public final class CosmeticsService {
         } else {
             selections.get(player.getUniqueId()).put(category, cosmeticId.toLowerCase());
         }
+        refreshActiveTrail(player);
         storage.setSelectionAsync(player.getUniqueId(), category, cosmeticId == null ? null : cosmeticId.toLowerCase())
             .exceptionally(throwable -> {
                 plugin.getLogger().warning("Failed to store cosmetic selection for " + player.getUniqueId() + ": "
@@ -226,11 +244,32 @@ public final class CosmeticsService {
         if (cosmetic == null || cosmetic.getParticle() == null) {
             return;
         }
+        if (projectiles.size() >= maxTrackedProjectiles) {
+            performanceMonitor.increment("cosmetics.projectile.skipped-cap");
+            return;
+        }
         projectiles.put(projectile.getUniqueId(), cosmetic);
+        projectileBirthTicks.put(projectile.getUniqueId(), (long) Bukkit.getCurrentTick());
     }
 
     public void unregisterProjectile(Entity entity) {
         projectiles.remove(entity.getUniqueId());
+        projectileBirthTicks.remove(entity.getUniqueId());
+    }
+
+    private void refreshActiveTrail(Player player) {
+        String selected = getActiveSelection(player.getUniqueId(), "trail", player);
+        if (selected == null) {
+            activeTrailPlayers.remove(player.getUniqueId());
+            lastTrailLocations.remove(player.getUniqueId());
+            return;
+        }
+        CosmeticDefinition cosmetic = cosmetics.get(selected.toLowerCase());
+        if (cosmetic != null && (cosmetic.getType() == CosmeticType.TRAIL_PARTICLE || cosmetic.getType() == CosmeticType.TRAIL_SPIRAL)) {
+            activeTrailPlayers.add(player.getUniqueId());
+        } else {
+            activeTrailPlayers.remove(player.getUniqueId());
+        }
     }
 
     private CosmeticDefinition getActiveCosmetic(Player player, String category) {
@@ -249,9 +288,19 @@ public final class CosmeticsService {
         stopTrailTask();
         long interval = Math.max(2L, plugin.getConfig().getLong("performance.cosmetics-trail-ticks", 10L));
         trailTask = Bukkit.getScheduler().runTaskTimer(plugin, () -> {
-            for (Player player : Bukkit.getOnlinePlayers()) {
+            if (activeTrailPlayers.isEmpty() && projectiles.isEmpty()) {
+                return;
+            }
+            performanceMonitor.add("cosmetics.trail.active-players", activeTrailPlayers.size());
+            for (UUID playerId : java.util.List.copyOf(activeTrailPlayers)) {
+                Player player = Bukkit.getPlayer(playerId);
+                if (player == null || !player.isOnline()) {
+                    activeTrailPlayers.remove(playerId);
+                    continue;
+                }
                 CosmeticDefinition cosmetic = getActiveCosmetic(player, "trail");
                 if (cosmetic == null) {
+                    activeTrailPlayers.remove(player.getUniqueId());
                     lastTrailLocations.remove(player.getUniqueId());
                     continue;
                 }
@@ -265,20 +314,36 @@ public final class CosmeticsService {
                 }
             }
             if (!projectiles.isEmpty()) {
+                int emitted = 0;
                 for (Map.Entry<UUID, CosmeticDefinition> entry : projectiles.entrySet()) {
+                    performanceMonitor.increment("cosmetics.projectile.scanned");
+                    Long born = projectileBirthTicks.get(entry.getKey());
+                    if (born != null && Bukkit.getCurrentTick() - born > projectileTrailMaxAgeTicks) {
+                        projectiles.remove(entry.getKey());
+                        projectileBirthTicks.remove(entry.getKey());
+                        continue;
+                    }
                     Entity entity = Bukkit.getEntity(entry.getKey());
                     if (!(entity instanceof Projectile projectile) || projectile.isDead() || !projectile.isValid()) {
                         projectiles.remove(entry.getKey());
+                        projectileBirthTicks.remove(entry.getKey());
                         continue;
                     }
                     CosmeticDefinition cosmetic = entry.getValue();
                     if (cosmetic == null || cosmetic.getParticle() == null) {
                         projectiles.remove(entry.getKey());
+                        projectileBirthTicks.remove(entry.getKey());
                         continue;
                     }
+                    int count = Math.max(1, cosmetic.getCount());
+                    if (emitted + count > maxProjectileParticlesPerTick) {
+                        performanceMonitor.increment("cosmetics.projectile.skipped-particle-cap");
+                        break;
+                    }
+                    emitted += count;
                     projectile.getWorld().spawnParticle(cosmetic.getParticle(),
                         projectile.getLocation(),
-                        Math.max(1, cosmetic.getCount()),
+                        count,
                         cosmetic.getSpread(), cosmetic.getSpread(), cosmetic.getSpread(),
                         cosmetic.getSpeed());
                 }
@@ -349,12 +414,18 @@ public final class CosmeticsService {
         if (!dataFolder.exists() && !dataFolder.mkdirs()) {
             plugin.getLogger().warning("Failed to create data folder for cosmetics.");
         }
-        storage = new CosmeticsStorage(new File(dataFolder, "cosmetics.db"));
+        storage = new CosmeticsStorage(new File(dataFolder, "cosmetics.db"), performanceMonitor);
         try {
             storage.init();
         } catch (SQLException ex) {
             plugin.getLogger().severe("Failed to initialize cosmetics database: " + ex.getMessage());
         }
+    }
+
+    private void reloadPerformanceConfig() {
+        maxTrackedProjectiles = Math.max(1, plugin.getConfig().getInt("performance.max-tracked-projectiles", 300));
+        maxProjectileParticlesPerTick = Math.max(1, plugin.getConfig().getInt("performance.max-projectile-particles-per-tick", 600));
+        projectileTrailMaxAgeTicks = Math.max(20L, plugin.getConfig().getLong("performance.projectile-trail-max-age-ticks", 200L));
     }
 
     private void ensureDefaults() {
@@ -398,11 +469,14 @@ public final class CosmeticsService {
             }
             String name = entry.getString("name", id);
             String category = entry.getString("category", "misc").toLowerCase();
-            CosmeticType type = CosmeticType.valueOf(entry.getString("type", "TRAIL_PARTICLE"));
-            Material icon = Material.matchMaterial(entry.getString("icon", "PAPER"));
-            Particle particle = parseParticle(entry.getString("particle", ""));
+            CosmeticType type = parseCosmeticType(entry.getString("type", "TRAIL_PARTICLE"), "cosmetics." + id + ".type");
+            if (type == null) {
+                continue;
+            }
+            Material icon = parseMaterial(entry.getString("icon", "PAPER"), "cosmetics." + id + ".icon");
+            Particle particle = parseParticle(entry.getString("particle", ""), "cosmetics." + id + ".particle");
             Material item = Material.matchMaterial(entry.getString("item", ""));
-            Sound sound = parseSound(entry.getString("sound", ""));
+            Sound sound = parseSound(entry.getString("sound", ""), "cosmetics." + id + ".sound");
             String message = entry.getString("message", null);
             String permission = entry.getString("permission", "enthusia.cosmetics." + id.toLowerCase());
             int count = entry.getInt("count", defaultCount(type));
@@ -415,24 +489,48 @@ public final class CosmeticsService {
         }
     }
 
-    private Particle parseParticle(String value) {
+    private CosmeticType parseCosmeticType(String value, String path) {
+        try {
+            return CosmeticType.valueOf(value.toUpperCase());
+        } catch (Exception ex) {
+            plugin.getLogger().warning("Invalid cosmetic type at " + path + ": " + value);
+            performanceMonitor.increment("config.validation.bad-cosmetic-type");
+            return null;
+        }
+    }
+
+    private Material parseMaterial(String value, String path) {
+        Material material = Material.matchMaterial(value == null ? "" : value);
+        if (material == null) {
+            plugin.getLogger().warning("Invalid material at " + path + ": " + value);
+            performanceMonitor.increment("config.validation.bad-material");
+            return Material.PAPER;
+        }
+        return material;
+    }
+
+    private Particle parseParticle(String value, String path) {
         if (value == null || value.isBlank()) {
             return null;
         }
         try {
             return Particle.valueOf(value.toUpperCase());
         } catch (IllegalArgumentException ex) {
+            plugin.getLogger().warning("Invalid particle at " + path + ": " + value);
+            performanceMonitor.increment("config.validation.bad-particle");
             return null;
         }
     }
 
-    private Sound parseSound(String value) {
+    private Sound parseSound(String value, String path) {
         if (value == null || value.isBlank()) {
             return null;
         }
         try {
             return Sound.valueOf(value.toUpperCase());
         } catch (IllegalArgumentException ex) {
+            plugin.getLogger().warning("Invalid sound at " + path + ": " + value);
+            performanceMonitor.increment("config.validation.bad-sound");
             return null;
         }
     }

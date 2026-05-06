@@ -22,6 +22,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public final class TagService {
     private final JavaPlugin plugin;
     private final Messages messages;
+    private final PerformanceMonitor performanceMonitor;
     private final TagRegistry registry = new TagRegistry();
     private final PlaceholderRegistry placeholderRegistry = new PlaceholderRegistry();
     private final PlaceholderApiHook placeholderApiHook = new PlaceholderApiHook();
@@ -38,9 +39,10 @@ public final class TagService {
     private double displayOffset;
     private BukkitTask vanishTask;
 
-    public TagService(JavaPlugin plugin, Messages messages) {
+    public TagService(JavaPlugin plugin, Messages messages, PerformanceMonitor performanceMonitor) {
         this.plugin = plugin;
         this.messages = messages;
+        this.performanceMonitor = performanceMonitor;
     }
 
     public void enable() {
@@ -49,6 +51,7 @@ public final class TagService {
         placeholderRegistry.register("player", Player::getName);
         initStorage();
         loadConfigTags();
+        vanishHook.reload(plugin);
         displayManager.start(plugin);
         startVanishWatcher();
         for (Player player : Bukkit.getOnlinePlayers()) {
@@ -120,6 +123,7 @@ public final class TagService {
         reloadConfigValues();
         registry.clear();
         loadConfigTags();
+        vanishHook.reload(plugin);
         startVanishWatcher();
         for (Player player : Bukkit.getOnlinePlayers()) {
             updateDisplay(player);
@@ -355,6 +359,7 @@ public final class TagService {
         line = placeholderRegistry.apply(player, line);
         line = placeholderApiHook.apply(player, line);
         Component component = LegacyComponentSerializer.legacyAmpersand().deserialize(line);
+        performanceMonitor.increment("tags.refresh");
         displayManager.update(player, component, displayOffset);
     }
 
@@ -382,7 +387,7 @@ public final class TagService {
         if (!dataFolder.exists() && !dataFolder.mkdirs()) {
             plugin.getLogger().warning("Failed to create data folder.");
         }
-        storage = new TagStorage(new File(dataFolder, "tags.db"));
+        storage = new TagStorage(new File(dataFolder, "tags.db"), performanceMonitor);
         try {
             storage.init();
         } catch (SQLException ex) {
@@ -419,7 +424,7 @@ public final class TagService {
 
     private void startVanishWatcher() {
         stopVanishWatcher();
-        long interval = Math.max(20L, plugin.getConfig().getLong("performance.tag-visibility-refresh-ticks", 20L));
+        long interval = Math.max(20L, plugin.getConfig().getLong("performance.tag-visibility-refresh-ticks", 100L));
         vanishTask = Bukkit.getScheduler().runTaskTimer(plugin, this::refreshVanishStates, interval, interval);
     }
 

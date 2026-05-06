@@ -19,6 +19,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import org.enthusia.tags.PerformanceMonitor;
 
 public final class RewardStorage {
     public record StoredRewardData(Set<String> claims, Map<String, Long> counters, Map<String, String> states) {
@@ -32,10 +33,12 @@ public final class RewardStorage {
     private final File databaseFile;
     private final ExecutorService executor;
     private final AtomicBoolean closed = new AtomicBoolean(false);
+    private final PerformanceMonitor performanceMonitor;
     private Connection connection;
 
-    public RewardStorage(File databaseFile) {
+    public RewardStorage(File databaseFile, PerformanceMonitor performanceMonitor) {
         this.databaseFile = databaseFile;
+        this.performanceMonitor = performanceMonitor;
         this.executor = Executors.newSingleThreadExecutor(new StorageThreadFactory("enthusia-tags-rewards-storage"));
     }
 
@@ -73,51 +76,15 @@ public final class RewardStorage {
     }
 
     public CompletableFuture<StoredRewardData> loadAsync(UUID playerId) {
-        return submit(() -> loadNow(playerId));
+        return submitMeasured("storage.rewards.load", () -> loadDirect(playerId));
     }
 
     public StoredRewardData loadNow(UUID playerId) throws SQLException {
-        return executeBlocking(() -> {
-            Set<String> claims = new HashSet<>();
-            Map<String, Long> counters = new HashMap<>();
-            Map<String, String> states = new HashMap<>();
-
-            try (PreparedStatement statement = connection.prepareStatement(
-                "SELECT reward_id FROM reward_claims WHERE player_uuid = ?")) {
-                statement.setString(1, playerId.toString());
-                try (ResultSet rs = statement.executeQuery()) {
-                    while (rs.next()) {
-                        claims.add(rs.getString("reward_id"));
-                    }
-                }
-            }
-
-            try (PreparedStatement statement = connection.prepareStatement(
-                "SELECT counter_key, counter_value FROM reward_counters WHERE player_uuid = ?")) {
-                statement.setString(1, playerId.toString());
-                try (ResultSet rs = statement.executeQuery()) {
-                    while (rs.next()) {
-                        counters.put(rs.getString("counter_key"), rs.getLong("counter_value"));
-                    }
-                }
-            }
-
-            try (PreparedStatement statement = connection.prepareStatement(
-                "SELECT state_key, state_value FROM reward_states WHERE player_uuid = ?")) {
-                statement.setString(1, playerId.toString());
-                try (ResultSet rs = statement.executeQuery()) {
-                    while (rs.next()) {
-                        states.put(rs.getString("state_key"), rs.getString("state_value"));
-                    }
-                }
-            }
-
-            return new StoredRewardData(claims, counters, states);
-        });
+        return executeBlockingMeasured("storage.rewards.load", () -> loadDirect(playerId));
     }
 
     public CompletableFuture<Void> saveAsync(UUID playerId, StoredRewardData data) {
-        return submit(() -> {
+        return submitMeasured("storage.rewards.save", () -> {
             connection.setAutoCommit(false);
             try {
                 try (PreparedStatement deleteClaims = connection.prepareStatement(
@@ -211,6 +178,25 @@ public final class RewardStorage {
         }, executor);
     }
 
+    private <T> CompletableFuture<T> submitMeasured(String key, SqlSupplier<T> supplier) {
+        if (closed.get()) {
+            return CompletableFuture.failedFuture(new SQLException("Reward storage is closed"));
+        }
+        return CompletableFuture.supplyAsync(() -> {
+            long start = System.nanoTime();
+            try {
+                T result = supplier.get();
+                performanceMonitor.increment(key + ".success");
+                performanceMonitor.recordDurationMillis(key, elapsedMillis(start));
+                return result;
+            } catch (SQLException ex) {
+                performanceMonitor.increment(key + ".failure");
+                performanceMonitor.recordDurationMillis(key, elapsedMillis(start));
+                throw new StorageRuntimeException(ex);
+            }
+        }, executor);
+    }
+
     private <T> T executeBlocking(SqlSupplier<T> supplier) throws SQLException {
         try {
             return submit(supplier).get();
@@ -225,6 +211,64 @@ public final class RewardStorage {
             }
             throw new SQLException("Reward storage execution failed", cause);
         }
+    }
+
+    private <T> T executeBlockingMeasured(String key, SqlSupplier<T> supplier) throws SQLException {
+        try {
+            return submitMeasured(key, supplier).get();
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            throw new SQLException("Interrupted while waiting for reward storage", ex);
+        } catch (ExecutionException ex) {
+            Throwable cause = ex.getCause();
+            if (cause instanceof StorageRuntimeException storageRuntimeException
+                && storageRuntimeException.getCause() instanceof SQLException sqlException) {
+                throw sqlException;
+            }
+            throw new SQLException("Reward storage execution failed", cause);
+        }
+    }
+
+    private StoredRewardData loadDirect(UUID playerId) throws SQLException {
+        Set<String> claims = new HashSet<>();
+        Map<String, Long> counters = new HashMap<>();
+        Map<String, String> states = new HashMap<>();
+
+        try (PreparedStatement statement = connection.prepareStatement(
+            "SELECT reward_id FROM reward_claims WHERE player_uuid = ?")) {
+            statement.setString(1, playerId.toString());
+            try (ResultSet rs = statement.executeQuery()) {
+                while (rs.next()) {
+                    claims.add(rs.getString("reward_id"));
+                }
+            }
+        }
+
+        try (PreparedStatement statement = connection.prepareStatement(
+            "SELECT counter_key, counter_value FROM reward_counters WHERE player_uuid = ?")) {
+            statement.setString(1, playerId.toString());
+            try (ResultSet rs = statement.executeQuery()) {
+                while (rs.next()) {
+                    counters.put(rs.getString("counter_key"), rs.getLong("counter_value"));
+                }
+            }
+        }
+
+        try (PreparedStatement statement = connection.prepareStatement(
+            "SELECT state_key, state_value FROM reward_states WHERE player_uuid = ?")) {
+            statement.setString(1, playerId.toString());
+            try (ResultSet rs = statement.executeQuery()) {
+                while (rs.next()) {
+                    states.put(rs.getString("state_key"), rs.getString("state_value"));
+                }
+            }
+        }
+
+        return new StoredRewardData(claims, counters, states);
+    }
+
+    private long elapsedMillis(long startNanos) {
+        return TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startNanos);
     }
 
     @FunctionalInterface

@@ -28,10 +28,12 @@ public final class TagStorage {
     private final File databaseFile;
     private final ExecutorService executor;
     private final AtomicBoolean closed = new AtomicBoolean(false);
+    private final PerformanceMonitor performanceMonitor;
     private Connection connection;
 
-    public TagStorage(File databaseFile) {
+    public TagStorage(File databaseFile, PerformanceMonitor performanceMonitor) {
         this.databaseFile = databaseFile;
+        this.performanceMonitor = performanceMonitor;
         this.executor = Executors.newSingleThreadExecutor(new StorageThreadFactory("enthusia-tags-storage"));
     }
 
@@ -58,38 +60,15 @@ public final class TagStorage {
     }
 
     public CompletableFuture<StoredTagData> loadAsync(UUID playerId) {
-        return submit(() -> loadNow(playerId));
+        return submitMeasured("storage.tags.load", () -> loadDirect(playerId));
     }
 
     public StoredTagData loadNow(UUID playerId) throws SQLException {
-        return executeBlocking(() -> {
-            Set<String> ownedTags = new HashSet<>();
-            try (PreparedStatement statement = connection.prepareStatement(
-                "SELECT tag_id FROM player_tags WHERE player_uuid = ?")) {
-                statement.setString(1, playerId.toString());
-                try (ResultSet rs = statement.executeQuery()) {
-                    while (rs.next()) {
-                        ownedTags.add(rs.getString("tag_id"));
-                    }
-                }
-            }
-
-            String selectedTag = null;
-            try (PreparedStatement statement = connection.prepareStatement(
-                "SELECT selected_tag FROM player_selected WHERE player_uuid = ?")) {
-                statement.setString(1, playerId.toString());
-                try (ResultSet rs = statement.executeQuery()) {
-                    if (rs.next()) {
-                        selectedTag = rs.getString("selected_tag");
-                    }
-                }
-            }
-            return new StoredTagData(ownedTags, selectedTag);
-        });
+        return executeBlockingMeasured("storage.tags.load", () -> loadDirect(playerId));
     }
 
     public CompletableFuture<Void> grantTagAsync(UUID playerId, String tagId) {
-        return submit(() -> {
+        return submitMeasured("storage.tags.grant", () -> {
             try (PreparedStatement statement = connection.prepareStatement(
                 "INSERT OR IGNORE INTO player_tags (player_uuid, tag_id) VALUES (?, ?)")) {
                 statement.setString(1, playerId.toString());
@@ -101,7 +80,7 @@ public final class TagStorage {
     }
 
     public CompletableFuture<Void> revokeTagAsync(UUID playerId, String tagId) {
-        return submit(() -> {
+        return submitMeasured("storage.tags.revoke", () -> {
             try (PreparedStatement statement = connection.prepareStatement(
                 "DELETE FROM player_tags WHERE player_uuid = ? AND tag_id = ?")) {
                 statement.setString(1, playerId.toString());
@@ -113,7 +92,7 @@ public final class TagStorage {
     }
 
     public CompletableFuture<Void> setSelectedTagAsync(UUID playerId, String tagId) {
-        return submit(() -> {
+        return submitMeasured("storage.tags.save-selected", () -> {
             try (PreparedStatement statement = connection.prepareStatement(
                 "INSERT INTO player_selected (player_uuid, selected_tag) VALUES (?, ?) " +
                     "ON CONFLICT(player_uuid) DO UPDATE SET selected_tag = excluded.selected_tag")) {
@@ -163,6 +142,25 @@ public final class TagStorage {
         }, executor);
     }
 
+    private <T> CompletableFuture<T> submitMeasured(String key, SqlSupplier<T> supplier) {
+        if (closed.get()) {
+            return CompletableFuture.failedFuture(new SQLException("Tag storage is closed"));
+        }
+        return CompletableFuture.supplyAsync(() -> {
+            long start = System.nanoTime();
+            try {
+                T result = supplier.get();
+                performanceMonitor.increment(key + ".success");
+                performanceMonitor.recordDurationMillis(key, elapsedMillis(start));
+                return result;
+            } catch (SQLException ex) {
+                performanceMonitor.increment(key + ".failure");
+                performanceMonitor.recordDurationMillis(key, elapsedMillis(start));
+                throw new StorageRuntimeException(ex);
+            }
+        }, executor);
+    }
+
     private <T> T executeBlocking(SqlSupplier<T> supplier) throws SQLException {
         try {
             return submit(supplier).get();
@@ -177,6 +175,51 @@ public final class TagStorage {
             }
             throw new SQLException("Tag storage execution failed", cause);
         }
+    }
+
+    private <T> T executeBlockingMeasured(String key, SqlSupplier<T> supplier) throws SQLException {
+        try {
+            return submitMeasured(key, supplier).get();
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            throw new SQLException("Interrupted while waiting for tag storage", ex);
+        } catch (ExecutionException ex) {
+            Throwable cause = ex.getCause();
+            if (cause instanceof StorageRuntimeException storageRuntimeException
+                && storageRuntimeException.getCause() instanceof SQLException sqlException) {
+                throw sqlException;
+            }
+            throw new SQLException("Tag storage execution failed", cause);
+        }
+    }
+
+    private StoredTagData loadDirect(UUID playerId) throws SQLException {
+        Set<String> ownedTags = new HashSet<>();
+        try (PreparedStatement statement = connection.prepareStatement(
+            "SELECT tag_id FROM player_tags WHERE player_uuid = ?")) {
+            statement.setString(1, playerId.toString());
+            try (ResultSet rs = statement.executeQuery()) {
+                while (rs.next()) {
+                    ownedTags.add(rs.getString("tag_id"));
+                }
+            }
+        }
+
+        String selectedTag = null;
+        try (PreparedStatement statement = connection.prepareStatement(
+            "SELECT selected_tag FROM player_selected WHERE player_uuid = ?")) {
+            statement.setString(1, playerId.toString());
+            try (ResultSet rs = statement.executeQuery()) {
+                if (rs.next()) {
+                    selectedTag = rs.getString("selected_tag");
+                }
+            }
+        }
+        return new StoredTagData(ownedTags, selectedTag);
+    }
+
+    private long elapsedMillis(long startNanos) {
+        return TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startNanos);
     }
 
     @FunctionalInterface

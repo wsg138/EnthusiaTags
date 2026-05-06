@@ -4,23 +4,36 @@ import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 import org.bukkit.metadata.MetadataValue;
 import org.bukkit.plugin.Plugin;
+import org.bukkit.plugin.java.JavaPlugin;
 
 import java.lang.reflect.Method;
+import java.util.ArrayList;
 import java.util.List;
 
 public final class VanishHook {
-    private static final String[] METADATA_KEYS = new String[] {
-        "vanished",
-        "vanish",
-        "invisible",
-        "invis"
-    };
+    private List<String> metadataKeys = List.of("vanished", "vanish");
+    private boolean treatInvisibilityEffectAsVanish;
+    private Plugin essentialsPlugin;
+    private Class<?> essentialsClass;
+    private Method essentialsGetUserPlayer;
+    private Method essentialsGetUserUuid;
+    private Method myzelyamMethod;
+
+    public void reload(JavaPlugin plugin) {
+        metadataKeys = new ArrayList<>(plugin.getConfig().getStringList("vanish.metadata-keys"));
+        if (metadataKeys.isEmpty()) {
+            metadataKeys = List.of("vanished", "vanish");
+        }
+        treatInvisibilityEffectAsVanish = plugin.getConfig().getBoolean("vanish.treat-invisibility-effect-as-vanish", false);
+        cacheEssentials();
+        cacheMyzelyam();
+    }
 
     public boolean isVanished(Player player) {
         if (player == null) {
             return false;
         }
-        if (player.isInvisible()) {
+        if (treatInvisibilityEffectAsVanish && player.isInvisible()) {
             return true;
         }
         if (hasVanishedMetadata(player)) {
@@ -33,7 +46,7 @@ public final class VanishHook {
     }
 
     private boolean hasVanishedMetadata(Player player) {
-        for (String key : METADATA_KEYS) {
+        for (String key : metadataKeys) {
             if (!player.hasMetadata(key)) {
                 continue;
             }
@@ -51,58 +64,86 @@ public final class VanishHook {
     }
 
     private boolean isEssentialsVanished(Player player) {
-        Plugin plugin = Bukkit.getPluginManager().getPlugin("Essentials");
-        if (plugin == null) {
+        Plugin plugin = essentialsPlugin;
+        if (plugin == null || essentialsClass == null) {
             return false;
         }
         try {
-            Class<?> essentialsClass = Class.forName("com.earth2me.essentials.Essentials");
             if (!essentialsClass.isInstance(plugin)) {
                 return false;
             }
-            Object user = tryInvokeGetUser(essentialsClass, plugin, player);
+            Object user = tryInvokeGetUser(plugin, player);
             if (user == null) {
                 return false;
             }
             Method isVanished = user.getClass().getMethod("isVanished");
             Object result = isVanished.invoke(user);
             return result instanceof Boolean && (Boolean) result;
-        } catch (ClassNotFoundException ignored) {
-            return false;
         } catch (Exception ignored) {
             return false;
         }
     }
 
-    private Object tryInvokeGetUser(Class<?> essentialsClass, Plugin plugin, Player player) {
+    private Object tryInvokeGetUser(Plugin plugin, Player player) {
+        if (essentialsGetUserPlayer != null) {
+            try {
+                return essentialsGetUserPlayer.invoke(plugin, player);
+            } catch (Exception ignored) {
+            }
+        }
+        if (essentialsGetUserUuid != null) {
+            try {
+                return essentialsGetUserUuid.invoke(plugin, player.getUniqueId());
+            } catch (Exception ignored) {
+            }
+        }
+        return null;
+    }
+
+    private void cacheEssentials() {
+        essentialsPlugin = Bukkit.getPluginManager().getPlugin("Essentials");
+        essentialsClass = null;
+        essentialsGetUserPlayer = null;
+        essentialsGetUserUuid = null;
+        if (essentialsPlugin == null) {
+            return;
+        }
         try {
-            Method getUser = essentialsClass.getMethod("getUser", Player.class);
-            return getUser.invoke(plugin, player);
+            essentialsClass = Class.forName("com.earth2me.essentials.Essentials");
+            essentialsGetUserPlayer = essentialsClass.getMethod("getUser", Player.class);
         } catch (Exception ignored) {
         }
         try {
-            Method getUser = essentialsClass.getMethod("getUser", java.util.UUID.class);
-            return getUser.invoke(plugin, player.getUniqueId());
+            if (essentialsClass == null) {
+                essentialsClass = Class.forName("com.earth2me.essentials.Essentials");
+            }
+            essentialsGetUserUuid = essentialsClass.getMethod("getUser", java.util.UUID.class);
         } catch (Exception ignored) {
-            return null;
         }
     }
 
     private boolean isMyzelyamVanished(Player player) {
-        try {
-            Class<?> vanishApi = Class.forName("de.myzelyam.api.vanish.VanishAPI");
-            Method method;
-            try {
-                method = vanishApi.getMethod("isInvisible", Player.class);
-            } catch (NoSuchMethodException ignored) {
-                method = vanishApi.getMethod("isVanished", Player.class);
-            }
-            Object result = method.invoke(null, player);
-            return result instanceof Boolean && (Boolean) result;
-        } catch (ClassNotFoundException ignored) {
+        if (myzelyamMethod == null) {
             return false;
+        }
+        try {
+            Object result = myzelyamMethod.invoke(null, player);
+            return result instanceof Boolean && (Boolean) result;
         } catch (Exception ignored) {
             return false;
+        }
+    }
+
+    private void cacheMyzelyam() {
+        myzelyamMethod = null;
+        try {
+            Class<?> vanishApi = Class.forName("de.myzelyam.api.vanish.VanishAPI");
+            try {
+                myzelyamMethod = vanishApi.getMethod("isInvisible", Player.class);
+            } catch (NoSuchMethodException ignored) {
+                myzelyamMethod = vanishApi.getMethod("isVanished", Player.class);
+            }
+        } catch (Exception ignored) {
         }
     }
 }
