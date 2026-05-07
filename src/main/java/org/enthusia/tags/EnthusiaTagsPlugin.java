@@ -150,6 +150,7 @@ public final class EnthusiaTagsPlugin extends JavaPlugin {
                 }
                 if (args.length == 1 && args[0].equalsIgnoreCase("performance")) {
                     performanceMonitor.sendTo(sender);
+                    sender.sendMessage("Reward sync: " + rewardService.syncStatus());
                     return true;
                 }
                 if (args.length >= 2 && args[0].equalsIgnoreCase("rewards")) {

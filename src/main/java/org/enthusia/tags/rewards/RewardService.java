@@ -28,6 +28,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.concurrent.ConcurrentHashMap;
 import java.lang.reflect.Method;
 import java.util.regex.Matcher;
@@ -50,16 +51,23 @@ public final class RewardService {
     private final Map<UUID, CompletableFuture<Void>> pendingLoads = new ConcurrentHashMap<>();
     private final Map<UUID, Map<String, Long>> pendingCounterDeltas = new ConcurrentHashMap<>();
     private final Map<UUID, ProgressSnapshot> progressSnapshots = new ConcurrentHashMap<>();
+    private final ConcurrentLinkedDeque<UUID> rewardSyncQueue = new ConcurrentLinkedDeque<>();
+    private final java.util.Set<UUID> queuedRewardSyncPlayers = ConcurrentHashMap.newKeySet();
     private final IntegrationStatus integrationStatus = new IntegrationStatus();
 
     private RewardStorage storage;
     private RewardsConfig config;
     private BukkitTask flushTask;
     private BukkitTask globalScanTask;
+    private BukkitTask syncDrainTask;
     private Plugin baltopPlugin;
     private Method baltopMethod;
     private long progressCacheTicks = 100L;
-    private int scanCursor;
+    private long syncQueuedTotal;
+    private long syncProcessedTotal;
+    private long syncLastDurationMillis;
+    private long syncRepairedStates;
+    private long syncStaleStates;
 
     public RewardService(JavaPlugin plugin, TagService tagService, Messages messages, PerformanceMonitor performanceMonitor) {
         this.plugin = plugin;
@@ -79,10 +87,13 @@ public final class RewardService {
     public void disable() {
         stopFlushTask();
         stopGlobalScanTask();
+        stopSyncDrainTask();
         flushAllBlocking();
         pendingLoads.clear();
         pendingCounterDeltas.clear();
         progressSnapshots.clear();
+        rewardSyncQueue.clear();
+        queuedRewardSyncPlayers.clear();
         playerStates.clear();
         if (storage != null) {
             storage.close();
@@ -386,7 +397,7 @@ public final class RewardService {
         }
         if (args[0].equalsIgnoreCase("syncall")) {
             queueSyncAll();
-            sender.sendMessage(messages.get("sync-queued"));
+            sender.sendMessage(messages.get("sync-queued") + " " + syncStatus());
             return true;
         }
         if (args.length >= 2 && args[0].equalsIgnoreCase("sync")) {
@@ -396,7 +407,7 @@ public final class RewardService {
                 return true;
             }
             syncPlayer(target);
-            sender.sendMessage(messages.get("sync-queued"));
+            sender.sendMessage(messages.get("sync-queued") + " " + syncStatus());
             return true;
         }
         if (args.length >= 2 && args[0].equalsIgnoreCase("debug")) {
@@ -419,6 +430,7 @@ public final class RewardService {
         sender.sendMessage("Reward debug for " + player.getName() + ":");
         sender.sendMessage("  loaded: " + (state != null && state.isLoaded()));
         sender.sendMessage("  loading: " + pendingLoads.containsKey(player.getUniqueId()));
+        sender.sendMessage("  sync: " + syncStatus());
         if (state != null && state.isLoaded()) {
             sender.sendMessage("  claimed: " + state.claimedRewards());
             sender.sendMessage("  counters: " + state.counters());
@@ -752,7 +764,7 @@ public final class RewardService {
             return;
         }
         long interval = Math.max(60L, plugin.getConfig().getLong("global-scan.interval-minutes", 10L) * 60L * 20L);
-        globalScanTask = Bukkit.getScheduler().runTaskTimer(plugin, this::processGlobalScanSlice, interval, interval);
+        globalScanTask = Bukkit.getScheduler().runTaskTimer(plugin, () -> enqueueOnlinePlayers(false), interval, interval);
     }
 
     private void stopGlobalScanTask() {
@@ -762,25 +774,8 @@ public final class RewardService {
         }
     }
 
-    private void processGlobalScanSlice() {
-        List<Player> players = new ArrayList<>(Bukkit.getOnlinePlayers());
-        if (players.isEmpty()) {
-            return;
-        }
-        int max = Math.max(1, plugin.getConfig().getInt("global-scan.max-players-per-tick", 1));
-        for (int i = 0; i < max && !players.isEmpty(); i++) {
-            if (scanCursor >= players.size()) {
-                scanCursor = 0;
-            }
-            Player player = players.get(scanCursor++);
-            queueProgressRefresh(player);
-            performanceMonitor.increment("global-scan.players-processed");
-        }
-    }
-
     public void queueSyncAll() {
-        scanCursor = 0;
-        processGlobalScanSlice();
+        enqueueOnlinePlayers(false);
         performanceMonitor.increment("global-scan.syncall-queued");
     }
 
@@ -788,8 +783,134 @@ public final class RewardService {
         if (player == null) {
             return;
         }
-        queueProgressRefresh(player);
+        if (enqueueRewardSync(player.getUniqueId(), true)) {
+            syncQueuedTotal++;
+            performanceMonitor.increment("global-scan.players-queued");
+            startSyncDrainTask();
+        }
         performanceMonitor.increment("global-scan.manual-player-sync");
+    }
+
+    private void enqueueOnlinePlayers(boolean front) {
+        int added = 0;
+        for (Player player : Bukkit.getOnlinePlayers()) {
+            if (enqueueRewardSync(player.getUniqueId(), front)) {
+                added++;
+            }
+        }
+        if (added > 0) {
+            syncQueuedTotal += added;
+            performanceMonitor.add("global-scan.players-queued", added);
+            startSyncDrainTask();
+        }
+    }
+
+    private boolean enqueueRewardSync(UUID playerId, boolean front) {
+        if (playerId == null || !queuedRewardSyncPlayers.add(playerId)) {
+            return false;
+        }
+        if (front) {
+            rewardSyncQueue.addFirst(playerId);
+        } else {
+            rewardSyncQueue.addLast(playerId);
+        }
+        return true;
+    }
+
+    private void startSyncDrainTask() {
+        if (syncDrainTask != null) {
+            return;
+        }
+        syncDrainTask = Bukkit.getScheduler().runTaskTimer(plugin, this::drainRewardSyncQueue, 1L, 1L);
+    }
+
+    private void stopSyncDrainTask() {
+        if (syncDrainTask != null) {
+            syncDrainTask.cancel();
+            syncDrainTask = null;
+        }
+    }
+
+    private void drainRewardSyncQueue() {
+        long started = System.nanoTime();
+        int max = Math.max(1, plugin.getConfig().getInt("global-scan.max-players-per-tick", 1));
+        int processed = 0;
+        while (processed < max) {
+            UUID playerId = rewardSyncQueue.pollFirst();
+            if (playerId == null) {
+                break;
+            }
+            queuedRewardSyncPlayers.remove(playerId);
+            Player player = Bukkit.getPlayer(playerId);
+            if (player == null || !player.isOnline()) {
+                syncStaleStates++;
+                performanceMonitor.increment("global-scan.players-stale");
+                processed++;
+                continue;
+            }
+            syncPlayerNow(player);
+            processed++;
+        }
+        if (processed > 0) {
+            syncProcessedTotal += processed;
+            syncLastDurationMillis = java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started);
+            performanceMonitor.add("global-scan.players-processed", processed);
+            performanceMonitor.recordDurationMillis("global-scan.drain", syncLastDurationMillis);
+        }
+        if (rewardSyncQueue.isEmpty()) {
+            stopSyncDrainTask();
+        }
+    }
+
+    private void syncPlayerNow(Player player) {
+        RewardPlayerState state = playerStates.get(player.getUniqueId());
+        if (state == null || !state.isLoaded()) {
+            syncStaleStates++;
+            preloadPlayer(player.getUniqueId());
+        } else {
+            syncRepairedStates += repairCustomCountersFromBukkit(player, state);
+        }
+        queueProgressRefresh(player);
+    }
+
+    private int repairCustomCountersFromBukkit(Player player, RewardPlayerState state) {
+        if (!plugin.getConfig().getBoolean("global-scan.repair-mode", true)
+            || plugin.getConfig().getBoolean("global-scan.report-only", false)) {
+            return 0;
+        }
+        int repaired = 0;
+        repaired += raiseCounterToAtLeast(player, state, "netherrack_mined",
+            getBukkitMaterialStat(player, Statistic.MINE_BLOCK, Material.NETHERRACK));
+        repaired += raiseCounterToAtLeast(player, state, "stone_mined",
+            getBukkitMaterialStat(player, Statistic.MINE_BLOCK, Material.STONE));
+        repaired += raiseCounterToAtLeast(player, state, "iron_ore_mined",
+            getBukkitMaterialStat(player, Statistic.MINE_BLOCK, Material.IRON_ORE));
+        if (repaired > 0) {
+            state.setDirty(true);
+            flushPlayerAsync(player.getUniqueId(), state);
+        }
+        return repaired;
+    }
+
+    private int raiseCounterToAtLeast(Player player, RewardPlayerState state, String key, long realValue) {
+        long cached = state.counters().getOrDefault(key, 0L);
+        if (realValue <= cached) {
+            return 0;
+        }
+        state.counters().put(key, realValue);
+        if (plugin.getConfig().getBoolean("global-scan.debug-log-repairs", false)) {
+            plugin.getLogger().info("Reward sync repaired " + player.getName() + " " + key + ": " + cached + " -> " + realValue);
+        }
+        return 1;
+    }
+
+    public String syncStatus() {
+        return "queued=" + syncQueuedTotal
+            + ", processed=" + syncProcessedTotal
+            + ", remaining=" + rewardSyncQueue.size()
+            + ", last-ms=" + syncLastDurationMillis
+            + ", repaired=" + syncRepairedStates
+            + ", stale=" + syncStaleStates;
     }
 
     private void flushDirtyPlayers() {

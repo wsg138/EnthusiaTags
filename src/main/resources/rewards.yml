@@ -363,9 +363,11 @@ rewards:
     category: "mining"
     criteria:
       c1:
-        type: CUSTOM_COUNTER
-        key: netherrack_mined
-        amount: 1000
+        type: BLOCK_MINED
+        source: bukkit_stat_material
+        statistic: MINE_BLOCK
+        material: NETHERRACK
+        required: 1000
     rewards:
       r1:
         type: TAG
