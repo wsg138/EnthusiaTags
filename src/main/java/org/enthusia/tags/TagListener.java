@@ -4,6 +4,7 @@ import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
+import org.bukkit.event.entity.EntityPotionEffectEvent;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
@@ -19,6 +20,7 @@ import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.persistence.PersistentDataContainer;
 import org.bukkit.persistence.PersistentDataType;
+import org.bukkit.potion.PotionEffectType;
 import org.enthusia.tags.rewards.RewardMenu;
 import org.enthusia.tags.rewards.RewardService;
 
@@ -66,6 +68,17 @@ public final class TagListener implements Listener {
     @EventHandler(priority = EventPriority.MONITOR)
     public void onTeleportEnd(PlayerTeleportEvent event) {
         Bukkit.getScheduler().runTask(tagService.getPlugin(), () -> tagService.updateDisplay(event.getPlayer()));
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onInvisibilityChange(EntityPotionEffectEvent event) {
+        if (!(event.getEntity() instanceof Player player)) {
+            return;
+        }
+        if (event.getModifiedType() != PotionEffectType.INVISIBILITY) {
+            return;
+        }
+        Bukkit.getScheduler().runTask(tagService.getPlugin(), () -> tagService.updateDisplay(player));
     }
 
     @EventHandler

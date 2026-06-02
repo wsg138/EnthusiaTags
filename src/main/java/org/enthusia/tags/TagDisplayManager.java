@@ -1,6 +1,7 @@
 package org.enthusia.tags;
 
 import net.kyori.adventure.text.Component;
+import org.bukkit.Color;
 import org.bukkit.entity.Display;
 import org.bukkit.entity.Player;
 import org.bukkit.entity.TextDisplay;
@@ -90,6 +91,8 @@ public final class TagDisplayManager {
             entity.setBillboard(Display.Billboard.CENTER);
             entity.setSeeThrough(false);
             entity.setShadowed(false);
+            entity.setDefaultBackground(false);
+            entity.setBackgroundColor(Color.fromARGB(0, 0, 0, 0));
             entity.setAlignment(TextDisplay.TextAlignment.CENTER);
             entity.setPersistent(false);
         });

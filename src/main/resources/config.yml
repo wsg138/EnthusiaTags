@@ -1,4 +1,4 @@
-config-version: 2
+config-version: 3
 
 # Format shown above the player. `{tag}` is replaced with the configured tag text.
 line-format: "&7[{tag}&7]"
@@ -36,7 +36,7 @@ vanish:
   metadata-keys:
     - "vanished"
     - "vanish"
-  treat-invisibility-effect-as-vanish: false
+  treat-invisibility-effect-as-vanish: true
 
 global-scan:
   enabled: true

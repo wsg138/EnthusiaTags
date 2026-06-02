@@ -15,7 +15,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 public final class ConfigMigrator {
-    public static final int CURRENT_CONFIG_VERSION = 2;
+    public static final int CURRENT_CONFIG_VERSION = 3;
     private static final DateTimeFormatter BACKUP_FORMAT = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
 
     private final JavaPlugin plugin;
@@ -51,11 +51,13 @@ public final class ConfigMigrator {
             }
 
             int existingVersion = config.getInt("config-version", 0);
+            int targetVersion = targetVersion(resourceName, defaults);
             boolean changed = false;
-            if (existingVersion < CURRENT_CONFIG_VERSION) {
+            if (existingVersion < targetVersion) {
                 backup(file, resourceName, report);
-                config.set("config-version", CURRENT_CONFIG_VERSION);
-                report.migrated(resourceName + ": config-version " + existingVersion + " -> " + CURRENT_CONFIG_VERSION);
+                changed |= migrateKnownValues(resourceName, config, existingVersion, report);
+                config.set("config-version", targetVersion);
+                report.migrated(resourceName + ": config-version " + existingVersion + " -> " + targetVersion);
                 changed = true;
             }
             changed |= copyMissing(defaults, config, "", resourceName, report);
@@ -65,6 +67,33 @@ public final class ConfigMigrator {
         } catch (Exception ex) {
             report.warning(resourceName + ": migration failed: " + ex.getMessage());
         }
+    }
+
+    private int targetVersion(String resourceName, YamlConfiguration defaults) {
+        if ("config.yml".equals(resourceName)) {
+            return CURRENT_CONFIG_VERSION;
+        }
+        return defaults.getInt("config-version", CURRENT_CONFIG_VERSION);
+    }
+
+    private boolean migrateKnownValues(String resourceName,
+                                       YamlConfiguration config,
+                                       int existingVersion,
+                                       MigrationReport report) {
+        if (!"config.yml".equals(resourceName) || existingVersion >= CURRENT_CONFIG_VERSION) {
+            return false;
+        }
+        return migrateInvisibilityDefault(config, report);
+    }
+
+    private boolean migrateInvisibilityDefault(YamlConfiguration config, MigrationReport report) {
+        String path = "vanish.treat-invisibility-effect-as-vanish";
+        if (!config.contains(path) || config.getBoolean(path)) {
+            return false;
+        }
+        config.set(path, true);
+        report.migrated("config.yml: " + path + " false -> true");
+        return true;
     }
 
     private boolean copyMissing(ConfigurationSection defaults,
