@@ -1,4 +1,4 @@
-config-version: 2
+config-version: 3
 
 placeholders:
   # Placeholder fallback values. These are only used if
@@ -65,7 +65,7 @@ rewards:
     rewards:
       r1:
         type: MONEY
-        amount: 500
+        amount: 200
   starter_pack:
     name: "&dStarter Pack"
     description:
@@ -354,7 +354,7 @@ rewards:
         id: diamond_hands
       r2:
         type: MONEY
-        amount: 500
+        amount: 200
   nether_enjoyer:
     name: "&cNether Enjoyer"
     description:

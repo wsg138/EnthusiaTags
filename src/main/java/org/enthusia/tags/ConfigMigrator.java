@@ -16,6 +16,7 @@ import java.util.List;
 
 public final class ConfigMigrator {
     public static final int CURRENT_CONFIG_VERSION = 3;
+    private static final int REWARDS_CONFIG_VERSION = 3;
     private static final DateTimeFormatter BACKUP_FORMAT = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
 
     private final JavaPlugin plugin;
@@ -73,6 +74,9 @@ public final class ConfigMigrator {
         if ("config.yml".equals(resourceName)) {
             return CURRENT_CONFIG_VERSION;
         }
+        if ("rewards.yml".equals(resourceName)) {
+            return REWARDS_CONFIG_VERSION;
+        }
         return defaults.getInt("config-version", CURRENT_CONFIG_VERSION);
     }
 
@@ -80,10 +84,15 @@ public final class ConfigMigrator {
                                        YamlConfiguration config,
                                        int existingVersion,
                                        MigrationReport report) {
-        if (!"config.yml".equals(resourceName) || existingVersion >= CURRENT_CONFIG_VERSION) {
-            return false;
+        boolean changed = false;
+        if ("config.yml".equals(resourceName) && existingVersion < CURRENT_CONFIG_VERSION) {
+            changed |= migrateInvisibilityDefault(config, report);
         }
-        return migrateInvisibilityDefault(config, report);
+        if ("rewards.yml".equals(resourceName) && existingVersion < REWARDS_CONFIG_VERSION) {
+            changed |= replaceRewardMoneyAmount(config, "rewards.payday.rewards.r1.amount", 500.0, 200.0, report);
+            changed |= replaceRewardMoneyAmount(config, "rewards.diamond_hands.rewards.r2.amount", 500.0, 200.0, report);
+        }
+        return changed;
     }
 
     private boolean migrateInvisibilityDefault(YamlConfiguration config, MigrationReport report) {
@@ -93,6 +102,19 @@ public final class ConfigMigrator {
         }
         config.set(path, true);
         report.migrated("config.yml: " + path + " false -> true");
+        return true;
+    }
+
+    private boolean replaceRewardMoneyAmount(YamlConfiguration config,
+                                             String path,
+                                             double oldAmount,
+                                             double newAmount,
+                                             MigrationReport report) {
+        if (!config.contains(path) || Double.compare(config.getDouble(path), oldAmount) != 0) {
+            return false;
+        }
+        config.set(path, newAmount);
+        report.migrated("rewards.yml: " + path + " " + oldAmount + " -> " + newAmount);
         return true;
     }
 

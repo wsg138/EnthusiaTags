@@ -57,6 +57,15 @@ public final class RewardStorage {
                 )
                 """);
             statement.executeUpdate("""
+                CREATE TABLE IF NOT EXISTS reward_ip_claims (
+                    reward_id TEXT NOT NULL,
+                    ip_address TEXT NOT NULL,
+                    player_uuid TEXT NOT NULL,
+                    claimed_at INTEGER NOT NULL,
+                    PRIMARY KEY (reward_id, ip_address)
+                )
+                """);
+            statement.executeUpdate("""
                 CREATE TABLE IF NOT EXISTS reward_counters (
                     player_uuid TEXT NOT NULL,
                     counter_key TEXT NOT NULL,
@@ -142,6 +151,20 @@ public final class RewardStorage {
             }
             return null;
         });
+    }
+
+    public boolean reserveIpClaimNow(UUID playerId, String rewardId, String ipAddress) throws SQLException {
+        if (rewardId == null || rewardId.isBlank() || ipAddress == null || ipAddress.isBlank()) {
+            return true;
+        }
+        return executeBlockingMeasured("storage.rewards.ip-claim", () -> reserveIpClaimDirect(playerId, rewardId, ipAddress));
+    }
+
+    public CompletableFuture<Boolean> reserveIpClaimAsync(UUID playerId, String rewardId, String ipAddress) {
+        if (rewardId == null || rewardId.isBlank() || ipAddress == null || ipAddress.isBlank()) {
+            return CompletableFuture.completedFuture(true);
+        }
+        return submitMeasured("storage.rewards.ip-claim", () -> reserveIpClaimDirect(playerId, rewardId, ipAddress));
     }
 
     public void close() {
@@ -265,6 +288,29 @@ public final class RewardStorage {
         }
 
         return new StoredRewardData(claims, counters, states);
+    }
+
+    private boolean reserveIpClaimDirect(UUID playerId, String rewardId, String ipAddress) throws SQLException {
+        try (PreparedStatement select = connection.prepareStatement(
+            "SELECT player_uuid FROM reward_ip_claims WHERE reward_id = ? AND ip_address = ?")) {
+            select.setString(1, rewardId);
+            select.setString(2, ipAddress);
+            try (ResultSet rs = select.executeQuery()) {
+                if (rs.next()) {
+                    return playerId.toString().equals(rs.getString("player_uuid"));
+                }
+            }
+        }
+
+        try (PreparedStatement insert = connection.prepareStatement(
+            "INSERT INTO reward_ip_claims (reward_id, ip_address, player_uuid, claimed_at) VALUES (?, ?, ?, ?)")) {
+            insert.setString(1, rewardId);
+            insert.setString(2, ipAddress);
+            insert.setString(3, playerId.toString());
+            insert.setLong(4, System.currentTimeMillis());
+            insert.executeUpdate();
+            return true;
+        }
     }
 
     private long elapsedMillis(long startNanos) {

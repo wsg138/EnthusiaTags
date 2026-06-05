@@ -141,7 +141,10 @@ public final class RewardService {
                     applyPendingDeltas(playerId, state);
                     Player player = Bukkit.getPlayer(playerId);
                     if (player != null) {
-                        Bukkit.getScheduler().runTask(plugin, () -> queueProgressRefresh(player));
+                        Bukkit.getScheduler().runTask(plugin, () -> {
+                            reserveExistingIpClaims(player, state);
+                            queueProgressRefresh(player);
+                        });
                     }
                 }
                 return (Void) null;
@@ -163,6 +166,10 @@ public final class RewardService {
 
     public void loadPlayer(Player player) {
         preloadPlayer(player.getUniqueId());
+        RewardPlayerState state = getLoadedState(player.getUniqueId());
+        if (state != null) {
+            reserveExistingIpClaims(player, state);
+        }
     }
 
     public void unloadPlayer(Player player) {
@@ -179,15 +186,21 @@ public final class RewardService {
         return state != null && state.claimedRewards().contains(rewardId.toLowerCase());
     }
 
-    public void claim(Player player, RewardDefinition reward) {
+    public RewardClaimResult claim(Player player, RewardDefinition reward) {
         RewardPlayerState state = getLoadedState(player.getUniqueId());
         if (state == null || !state.isLoaded()) {
             performanceMonitor.increment("rewards.claim.skipped-loading");
-            return;
+            return RewardClaimResult.LOADING;
         }
         String rewardId = reward.getId().toLowerCase();
-        if (state.claimedRewards().contains(rewardId) || !isComplete(player, reward)) {
-            return;
+        if (state.claimedRewards().contains(rewardId)) {
+            return RewardClaimResult.ALREADY_CLAIMED;
+        }
+        if (!isComplete(player, reward)) {
+            return RewardClaimResult.NOT_READY;
+        }
+        if (!reserveIpClaim(player, rewardId)) {
+            return RewardClaimResult.IP_ALREADY_CLAIMED;
         }
 
         for (RewardAction action : reward.getActions()) {
@@ -207,6 +220,7 @@ public final class RewardService {
         state.setDirty(true);
         invalidateProgress(player.getUniqueId());
         flushPlayerAsync(player.getUniqueId(), state);
+        return RewardClaimResult.SUCCESS;
     }
 
     public boolean isComplete(Player player, RewardDefinition reward) {
@@ -478,6 +492,53 @@ public final class RewardService {
             return null;
         }
         return state;
+    }
+
+    private boolean reserveIpClaim(Player player, String rewardId) {
+        String ipAddress = getPlayerIpAddress(player);
+        if (ipAddress.isBlank()) {
+            performanceMonitor.increment("rewards.claim.ip-missing");
+            return true;
+        }
+        try {
+            boolean reserved = storage.reserveIpClaimNow(player.getUniqueId(), rewardId, ipAddress);
+            if (!reserved) {
+                performanceMonitor.increment("rewards.claim.ip-blocked");
+            }
+            return reserved;
+        } catch (SQLException ex) {
+            plugin.getLogger().warning("Failed to check reward IP claim for " + player.getUniqueId() + ": " + ex.getMessage());
+            performanceMonitor.increment("rewards.claim.ip-check-failed");
+            return false;
+        }
+    }
+
+    private String getPlayerIpAddress(Player player) {
+        java.net.InetSocketAddress address = player.getAddress();
+        if (address == null) {
+            return "";
+        }
+        if (address.getAddress() != null) {
+            return address.getAddress().getHostAddress();
+        }
+        return address.getHostString() == null ? "" : address.getHostString();
+    }
+
+    private void reserveExistingIpClaims(Player player, RewardPlayerState state) {
+        if (state == null || !state.isLoaded() || state.claimedRewards().isEmpty()) {
+            return;
+        }
+        String ipAddress = getPlayerIpAddress(player);
+        if (ipAddress.isBlank()) {
+            return;
+        }
+        UUID playerId = player.getUniqueId();
+        for (String rewardId : state.claimedRewards()) {
+            storage.reserveIpClaimAsync(playerId, rewardId, ipAddress).exceptionally(throwable -> {
+                plugin.getLogger().warning("Failed to backfill reward IP claim for " + playerId + ": " + throwable.getMessage());
+                return false;
+            });
+        }
     }
 
     private void hydrateState(RewardPlayerState state, RewardStorage.StoredRewardData data) {

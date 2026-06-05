@@ -69,19 +69,21 @@ public final class RewardListener implements Listener {
         if (reward == null) {
             return;
         }
-        if (rewardService.isClaimed(player.getUniqueId(), reward.getId())) {
-            player.sendMessage(LegacyComponentSerializer.legacyAmpersand()
+        RewardClaimResult result = rewardService.claim(player, reward);
+        switch (result) {
+            case SUCCESS -> {
+                player.sendMessage(LegacyComponentSerializer.legacyAmpersand()
+                    .deserialize(rewardService.getMessage("rewards-claimed")));
+                player.openInventory(rewardMenu.create(player));
+            }
+            case LOADING -> player.sendMessage(LegacyComponentSerializer.legacyAmpersand()
+                .deserialize(rewardService.getMessage("rewards-loading")));
+            case ALREADY_CLAIMED -> player.sendMessage(LegacyComponentSerializer.legacyAmpersand()
                 .deserialize(rewardService.getMessage("rewards-already-claimed")));
-            return;
-        }
-        if (!rewardService.isComplete(player, reward)) {
-            player.sendMessage(LegacyComponentSerializer.legacyAmpersand()
+            case NOT_READY -> player.sendMessage(LegacyComponentSerializer.legacyAmpersand()
                 .deserialize(rewardService.getMessage("rewards-not-ready")));
-            return;
+            case IP_ALREADY_CLAIMED -> player.sendMessage(LegacyComponentSerializer.legacyAmpersand()
+                .deserialize(rewardService.getMessage("rewards-ip-already-claimed")));
         }
-        rewardService.claim(player, reward);
-        player.sendMessage(LegacyComponentSerializer.legacyAmpersand()
-            .deserialize(rewardService.getMessage("rewards-claimed")));
-        player.openInventory(rewardMenu.create(player));
     }
 }
