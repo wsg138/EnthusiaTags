@@ -96,6 +96,7 @@ public final class RewardTracker implements Listener {
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onStatisticIncrement(PlayerStatisticIncrementEvent event) {
         rewardService.invalidateProgress(event.getPlayer().getUniqueId());
+        rewardService.queueUnlockCheck(event.getPlayer());
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)

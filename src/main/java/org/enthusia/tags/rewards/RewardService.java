@@ -26,6 +26,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentLinkedDeque;
@@ -35,6 +36,8 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public final class RewardService {
+    private static final String REWARD_UNLOCK_NOTIFIED_PREFIX = "reward-unlocked:";
+    private static final int MAX_UNLOCK_CHECKS_PER_RUN = 25;
     private static final Pattern HOURS_PATTERN = Pattern.compile("(?i)(\\d+)\\s*h");
     private static final Pattern MINUTES_PATTERN = Pattern.compile("(?i)(\\d+)\\s*m");
     private static final Pattern SECONDS_PATTERN = Pattern.compile("(?i)(\\d+)\\s*s");
@@ -53,6 +56,7 @@ public final class RewardService {
     private final Map<UUID, ProgressSnapshot> progressSnapshots = new ConcurrentHashMap<>();
     private final ConcurrentLinkedDeque<UUID> rewardSyncQueue = new ConcurrentLinkedDeque<>();
     private final java.util.Set<UUID> queuedRewardSyncPlayers = ConcurrentHashMap.newKeySet();
+    private final Set<UUID> queuedUnlockChecks = ConcurrentHashMap.newKeySet();
     private final IntegrationStatus integrationStatus = new IntegrationStatus();
 
     private RewardStorage storage;
@@ -60,6 +64,7 @@ public final class RewardService {
     private BukkitTask flushTask;
     private BukkitTask globalScanTask;
     private BukkitTask syncDrainTask;
+    private BukkitTask unlockCheckTask;
     private Plugin baltopPlugin;
     private Method baltopMethod;
     private long progressCacheTicks = 100L;
@@ -88,12 +93,14 @@ public final class RewardService {
         stopFlushTask();
         stopGlobalScanTask();
         stopSyncDrainTask();
+        stopUnlockCheckTask();
         flushAllBlocking();
         pendingLoads.clear();
         pendingCounterDeltas.clear();
         progressSnapshots.clear();
         rewardSyncQueue.clear();
         queuedRewardSyncPlayers.clear();
+        queuedUnlockChecks.clear();
         playerStates.clear();
         if (storage != null) {
             storage.close();
@@ -169,6 +176,7 @@ public final class RewardService {
         RewardPlayerState state = getLoadedState(player.getUniqueId());
         if (state != null) {
             reserveExistingIpClaims(player, state);
+            queueProgressRefresh(player);
         }
     }
 
@@ -224,10 +232,13 @@ public final class RewardService {
     }
 
     public boolean isComplete(Player player, RewardDefinition reward) {
+        return isComplete(player, reward, getProgressSnapshot(player));
+    }
+
+    private boolean isComplete(Player player, RewardDefinition reward, ProgressSnapshot snapshot) {
         if (!areActionsAvailable(reward)) {
             return false;
         }
-        ProgressSnapshot snapshot = getProgressSnapshot(player);
         for (RewardCriterion criterion : reward.getCriteria()) {
             if (!isCriterionAvailable(criterion)) {
                 return false;
@@ -331,7 +342,15 @@ public final class RewardService {
             return;
         }
         invalidateProgress(player.getUniqueId());
-        getProgressSnapshot(player);
+        ProgressSnapshot snapshot = getProgressSnapshot(player);
+        notifyUnlockedRewards(player, snapshot);
+    }
+
+    public void queueUnlockCheck(Player player) {
+        if (player == null || !player.isOnline()) {
+            return;
+        }
+        queueUnlockCheck(player.getUniqueId());
     }
 
     public String formatAction(RewardAction action) {
@@ -374,6 +393,7 @@ public final class RewardService {
         state.counters().put(key, next);
         state.setDirty(true);
         invalidateProgress(playerId);
+        queueUnlockCheck(playerId);
         return next;
     }
 
@@ -386,6 +406,7 @@ public final class RewardService {
         state.counters().put(key, value);
         state.setDirty(true);
         invalidateProgress(playerId);
+        queueUnlockCheck(playerId);
     }
 
     public long getCounter(UUID playerId, String key) {
@@ -538,6 +559,37 @@ public final class RewardService {
                 plugin.getLogger().warning("Failed to backfill reward IP claim for " + playerId + ": " + throwable.getMessage());
                 return false;
             });
+        }
+    }
+
+    private void notifyUnlockedRewards(Player player, ProgressSnapshot snapshot) {
+        RewardPlayerState state = getLoadedState(player.getUniqueId());
+        if (state == null || !state.isLoaded()) {
+            return;
+        }
+        boolean changed = false;
+        for (RewardDefinition reward : rewards.values()) {
+            String rewardId = reward.getId().toLowerCase();
+            if (state.claimedRewards().contains(rewardId)) {
+                continue;
+            }
+            String notificationKey = REWARD_UNLOCK_NOTIFIED_PREFIX + rewardId;
+            if (state.states().containsKey(notificationKey)) {
+                continue;
+            }
+            if (!isComplete(player, reward, snapshot)) {
+                continue;
+            }
+            state.states().put(notificationKey, "true");
+            changed = true;
+            player.sendMessage(LegacyComponentSerializer.legacyAmpersand().deserialize(messages.get("rewards-unlocked")
+                .replace("{reward}", reward.getName())
+                .replace("{reward_id}", reward.getId())));
+            performanceMonitor.increment("rewards.unlock-notified");
+        }
+        if (changed) {
+            state.setDirty(true);
+            flushPlayerAsync(player.getUniqueId(), state);
         }
     }
 
@@ -889,6 +941,43 @@ public final class RewardService {
         if (syncDrainTask != null) {
             syncDrainTask.cancel();
             syncDrainTask = null;
+        }
+    }
+
+    private void queueUnlockCheck(UUID playerId) {
+        if (playerId == null) {
+            return;
+        }
+        queuedUnlockChecks.add(playerId);
+        if (unlockCheckTask == null) {
+            unlockCheckTask = Bukkit.getScheduler().runTaskTimer(plugin, this::drainUnlockChecks, 20L, 20L);
+        }
+    }
+
+    private void stopUnlockCheckTask() {
+        if (unlockCheckTask != null) {
+            unlockCheckTask.cancel();
+            unlockCheckTask = null;
+        }
+    }
+
+    private void drainUnlockChecks() {
+        int processed = 0;
+        for (UUID playerId : List.copyOf(queuedUnlockChecks)) {
+            if (processed >= MAX_UNLOCK_CHECKS_PER_RUN) {
+                break;
+            }
+            if (!queuedUnlockChecks.remove(playerId)) {
+                continue;
+            }
+            Player player = Bukkit.getPlayer(playerId);
+            if (player != null && player.isOnline()) {
+                queueProgressRefresh(player);
+            }
+            processed++;
+        }
+        if (queuedUnlockChecks.isEmpty()) {
+            stopUnlockCheckTask();
         }
     }
 
