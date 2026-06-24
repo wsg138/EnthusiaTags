@@ -15,6 +15,7 @@ import org.enthusia.tags.TagService;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 public final class RewardMenu {
@@ -188,7 +189,7 @@ public final class RewardMenu {
         }
 
         meta.lore(lore);
-        meta.getPersistentDataContainer().set(rewardKey, PersistentDataType.STRING, reward.getId().toLowerCase());
+        meta.getPersistentDataContainer().set(rewardKey, PersistentDataType.STRING, reward.getId().toLowerCase(Locale.ROOT));
         stack.setItemMeta(meta);
         return stack;
     }

@@ -13,6 +13,7 @@ import org.bukkit.persistence.PersistentDataType;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 
 public final class TagMenu {
@@ -82,7 +83,7 @@ public final class TagMenu {
             }
             meta.lore(lore);
         }
-        meta.getPersistentDataContainer().set(tagIdKey, PersistentDataType.STRING, tag.getId().toLowerCase());
+        meta.getPersistentDataContainer().set(tagIdKey, PersistentDataType.STRING, tag.getId().toLowerCase(Locale.ROOT));
         stack.setItemMeta(meta);
         return stack;
     }

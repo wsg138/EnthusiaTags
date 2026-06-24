@@ -4,6 +4,7 @@ import org.bukkit.Material;
 import org.bukkit.configuration.file.FileConfiguration;
 
 import java.util.LinkedHashMap;
+import java.util.Locale;
 import java.util.Map;
 
 public record RewardsConfig(String playtimeActivePlaceholder,
@@ -21,7 +22,8 @@ public record RewardsConfig(String playtimeActivePlaceholder,
             for (String key : section.getKeys(false)) {
                 String name = section.getString(key + ".name", key);
                 Material icon = Material.matchMaterial(section.getString(key + ".icon", "PAPER"));
-                categories.put(key.toLowerCase(), new RewardCategory(key.toLowerCase(), name, icon));
+                String normalizedKey = key.toLowerCase(Locale.ROOT);
+                categories.put(normalizedKey, new RewardCategory(normalizedKey, name, icon));
             }
         }
         if (categories.isEmpty()) {

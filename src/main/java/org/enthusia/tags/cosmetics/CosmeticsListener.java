@@ -22,6 +22,8 @@ import org.enthusia.tags.TagMenu;
 import org.enthusia.tags.TagService;
 import org.enthusia.tags.rewards.RewardService;
 
+import java.util.Locale;
+
 public final class CosmeticsListener implements Listener {
     private final CosmeticsService cosmeticsService;
     private final CosmeticsMenu cosmeticsMenu;
@@ -88,7 +90,7 @@ public final class CosmeticsListener implements Listener {
         if (selected == null) {
             return;
         }
-        CosmeticDefinition cosmetic = cosmeticsService.getCosmetics().get(selected.toLowerCase());
+        CosmeticDefinition cosmetic = cosmeticsService.getCosmetics().get(selected.toLowerCase(Locale.ROOT));
         if (cosmetic == null || cosmetic.getType() != CosmeticType.PROJECTILE_TRAIL) {
             return;
         }
@@ -136,7 +138,7 @@ public final class CosmeticsListener implements Listener {
         if (cosmeticId == null) {
             return;
         }
-        CosmeticDefinition cosmetic = cosmeticsService.getCosmetics().get(cosmeticId.toLowerCase());
+        CosmeticDefinition cosmetic = cosmeticsService.getCosmetics().get(cosmeticId.toLowerCase(Locale.ROOT));
         if (cosmetic == null) {
             return;
         }

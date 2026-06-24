@@ -13,6 +13,7 @@ import org.bukkit.scheduler.BukkitTask;
 import java.io.File;
 import java.sql.SQLException;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -187,7 +188,7 @@ public final class TagService {
     }
 
     public boolean createTag(String id, String displayName, String tagText) {
-        String key = id.toLowerCase();
+        String key = id.toLowerCase(Locale.ROOT);
         if (registry.get(key) != null) {
             return false;
         }
@@ -200,7 +201,7 @@ public final class TagService {
     }
 
     public boolean updateTagText(String id, String tagText) {
-        String key = id.toLowerCase();
+        String key = id.toLowerCase(Locale.ROOT);
         TagDefinition existing = registry.get(key);
         if (existing == null) {
             return false;
@@ -212,7 +213,7 @@ public final class TagService {
     }
 
     public void grantTag(UUID playerId, String tagId) {
-        String lowered = tagId.toLowerCase();
+        String lowered = tagId.toLowerCase(Locale.ROOT);
         PlayerTagData data = cache.computeIfAbsent(playerId, ignored -> new PlayerTagData());
         data.getOwnedTags().add(lowered);
         storage.grantTagAsync(playerId, lowered).exceptionally(throwable -> {
@@ -228,7 +229,7 @@ public final class TagService {
         if (registry.get(tagId) == null) {
             return CompletableFuture.completedFuture(TagAdminResult.UNKNOWN_TAG);
         }
-        String lowered = tagId.toLowerCase();
+        String lowered = tagId.toLowerCase(Locale.ROOT);
         return loadDataAsync(player.getUniqueId()).thenCompose(data -> {
             data.getOwnedTags().add(lowered);
             cache.put(player.getUniqueId(), data);
@@ -247,7 +248,7 @@ public final class TagService {
     }
 
     public void revokeTag(UUID playerId, String tagId) {
-        String lowered = tagId.toLowerCase();
+        String lowered = tagId.toLowerCase(Locale.ROOT);
         PlayerTagData data = cache.computeIfAbsent(playerId, ignored -> new PlayerTagData());
         data.getOwnedTags().remove(lowered);
         if (lowered.equalsIgnoreCase(data.getSelectedTag())) {
@@ -268,7 +269,7 @@ public final class TagService {
         if (player == null) {
             return CompletableFuture.completedFuture(TagAdminResult.PLAYER_NOT_FOUND);
         }
-        String lowered = tagId.toLowerCase();
+        String lowered = tagId.toLowerCase(Locale.ROOT);
         if (registry.get(lowered) == null) {
             return CompletableFuture.completedFuture(TagAdminResult.UNKNOWN_TAG);
         }
@@ -284,7 +285,7 @@ public final class TagService {
     }
 
     public boolean setSelectedTag(Player player, String tagId) {
-        String normalized = tagId == null ? null : tagId.toLowerCase();
+        String normalized = tagId == null ? null : tagId.toLowerCase(Locale.ROOT);
         PlayerTagData data = cache.computeIfAbsent(player.getUniqueId(), ignored -> new PlayerTagData());
         if (normalized != null && !data.getOwnedTags().contains(normalized)) {
             return false;
@@ -302,7 +303,7 @@ public final class TagService {
         if (player == null) {
             return CompletableFuture.completedFuture(TagAdminResult.PLAYER_NOT_FOUND);
         }
-        String normalized = tagId == null ? null : tagId.toLowerCase();
+        String normalized = tagId == null ? null : tagId.toLowerCase(Locale.ROOT);
         if (normalized != null && registry.get(normalized) == null) {
             return CompletableFuture.completedFuture(TagAdminResult.UNKNOWN_TAG);
         }
@@ -378,7 +379,7 @@ public final class TagService {
     private PlayerTagData toPlayerTagData(TagStorage.StoredTagData data) {
         PlayerTagData state = new PlayerTagData();
         state.getOwnedTags().addAll(data.ownedTags());
-        state.setSelectedTag(data.selectedTag() == null ? null : data.selectedTag().toLowerCase());
+        state.setSelectedTag(data.selectedTag() == null ? null : data.selectedTag().toLowerCase(Locale.ROOT));
         return state;
     }
 
@@ -411,7 +412,7 @@ public final class TagService {
     }
 
     private void refreshSelectedForTag(String tagId) {
-        String lowered = tagId.toLowerCase();
+        String lowered = tagId.toLowerCase(Locale.ROOT);
         for (Map.Entry<UUID, PlayerTagData> entry : cache.entrySet()) {
             if (lowered.equals(entry.getValue().getSelectedTag())) {
                 Player player = Bukkit.getPlayer(entry.getKey());

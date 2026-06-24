@@ -2,6 +2,7 @@ package org.enthusia.tags;
 
 import org.bukkit.entity.Player;
 
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
@@ -10,7 +11,7 @@ public final class PlaceholderRegistry {
     private final Map<String, Function<Player, String>> placeholders = new ConcurrentHashMap<>();
 
     public void register(String key, Function<Player, String> resolver) {
-        placeholders.put(key.toLowerCase(), resolver);
+        placeholders.put(key.toLowerCase(Locale.ROOT), resolver);
     }
 
     public String apply(Player player, String input) {

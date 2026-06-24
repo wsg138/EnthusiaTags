@@ -23,8 +23,10 @@ public final class Messages {
             plugin.saveResource("messages.yml", false);
         }
         config = YamlConfiguration.loadConfiguration(file);
-        InputStream defaultsStream = plugin.getResource("messages.yml");
-        if (defaultsStream != null) {
+        try (InputStream defaultsStream = plugin.getResource("messages.yml")) {
+            if (defaultsStream == null) {
+                return;
+            }
             YamlConfiguration defaults = YamlConfiguration.loadConfiguration(
                 new InputStreamReader(defaultsStream, StandardCharsets.UTF_8));
             config.setDefaults(defaults);
@@ -33,6 +35,7 @@ public final class Messages {
                 config.save(file);
             } catch (Exception ignored) {
             }
+        } catch (Exception ignored) {
         }
     }
 

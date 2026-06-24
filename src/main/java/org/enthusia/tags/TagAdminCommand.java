@@ -12,6 +12,7 @@ import org.bukkit.command.TabCompleter;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 
 public final class TagAdminCommand implements CommandExecutor, TabCompleter {
@@ -35,7 +36,7 @@ public final class TagAdminCommand implements CommandExecutor, TabCompleter {
             sendUsage(sender);
             return true;
         }
-        String sub = args[0].toLowerCase();
+        String sub = args[0].toLowerCase(Locale.ROOT);
         switch (sub) {
             case "give" -> {
                 if (args.length < 3) {
@@ -47,7 +48,7 @@ public final class TagAdminCommand implements CommandExecutor, TabCompleter {
                     sender.sendMessage(message("player-not-found"));
                     return true;
                 }
-                String tagId = args[2].toLowerCase();
+                String tagId = args[2].toLowerCase(Locale.ROOT);
                 tagService.grantTagAsync(target, tagId).thenAccept(result ->
                     Bukkit.getScheduler().runTask(plugin, () -> sender.sendMessage(switch (result) {
                         case PLAYER_NOT_FOUND -> message("player-not-found");
@@ -66,7 +67,7 @@ public final class TagAdminCommand implements CommandExecutor, TabCompleter {
                     sender.sendMessage(message("player-not-found"));
                     return true;
                 }
-                String tagId = args[2].toLowerCase();
+                String tagId = args[2].toLowerCase(Locale.ROOT);
                 tagService.revokeTagAsync(target, tagId).thenAccept(result ->
                     Bukkit.getScheduler().runTask(plugin, () -> sender.sendMessage(switch (result) {
                         case PLAYER_NOT_FOUND -> message("player-not-found");
@@ -106,7 +107,7 @@ public final class TagAdminCommand implements CommandExecutor, TabCompleter {
                     sender.sendMessage(message("player-not-found"));
                     return true;
                 }
-                String tagId = args[2].toLowerCase();
+                String tagId = args[2].toLowerCase(Locale.ROOT);
                 tagService.setSelectedTagAsync(target, tagId).thenAccept(result ->
                     Bukkit.getScheduler().runTask(plugin, () -> sender.sendMessage(switch (result) {
                         case PLAYER_NOT_FOUND -> message("player-not-found");
@@ -143,7 +144,7 @@ public final class TagAdminCommand implements CommandExecutor, TabCompleter {
                     sendUsage(sender);
                     return true;
                 }
-                String id = args[1].toLowerCase();
+                String id = args[1].toLowerCase(Locale.ROOT);
                 String displayName = joinArgs(args, 2);
                 boolean created = tagService.createTag(id, displayName, displayName);
                 if (!created) {
@@ -158,7 +159,7 @@ public final class TagAdminCommand implements CommandExecutor, TabCompleter {
                     sendUsage(sender);
                     return true;
                 }
-                String id = args[1].toLowerCase();
+                String id = args[1].toLowerCase(Locale.ROOT);
                 String tagText = joinArgs(args, 2);
                 boolean updated = tagService.updateTagText(id, tagText);
                 if (!updated) {
@@ -211,7 +212,7 @@ public final class TagAdminCommand implements CommandExecutor, TabCompleter {
         if (args.length == 2 && args[0].equalsIgnoreCase("edit")) {
             List<String> ids = new ArrayList<>();
             for (TagDefinition tag : tagService.getRegistry().getAll()) {
-                ids.add(tag.getId().toLowerCase());
+                ids.add(tag.getId().toLowerCase(Locale.ROOT));
             }
             return ids;
         }
@@ -220,7 +221,7 @@ public final class TagAdminCommand implements CommandExecutor, TabCompleter {
             || args[0].equalsIgnoreCase("set"))) {
             Set<String> ids = new java.util.HashSet<>();
             for (TagDefinition tag : tagService.getRegistry().getAll()) {
-                ids.add(tag.getId().toLowerCase());
+                ids.add(tag.getId().toLowerCase(Locale.ROOT));
             }
             return new ArrayList<>(ids);
         }

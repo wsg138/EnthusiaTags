@@ -11,6 +11,8 @@ import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.persistence.PersistentDataContainer;
 import org.bukkit.persistence.PersistentDataType;
 
+import java.util.Locale;
+
 public final class RewardListener implements Listener {
     private final RewardService rewardService;
     private final RewardMenu rewardMenu;
@@ -65,7 +67,7 @@ public final class RewardListener implements Listener {
         if (rewardId == null) {
             return;
         }
-        RewardDefinition reward = rewardService.getRewards().get(rewardId.toLowerCase());
+        RewardDefinition reward = rewardService.getRewards().get(rewardId.toLowerCase(Locale.ROOT));
         if (reward == null) {
             return;
         }

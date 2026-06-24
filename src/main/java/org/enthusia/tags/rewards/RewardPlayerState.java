@@ -5,22 +5,22 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 final class RewardPlayerState {
-    private final Set<String> claimedRewards = ConcurrentHashMap.newKeySet();
-    private final Map<String, Long> counters = new ConcurrentHashMap<>();
-    private final Map<String, String> states = new ConcurrentHashMap<>();
+    private final Set<String> claimedRewardIds = ConcurrentHashMap.newKeySet();
+    private final Map<String, Long> counterValues = new ConcurrentHashMap<>();
+    private final Map<String, String> stateValues = new ConcurrentHashMap<>();
     private volatile boolean loaded;
     private volatile boolean dirty;
 
     Set<String> claimedRewards() {
-        return claimedRewards;
+        return claimedRewardIds;
     }
 
     Map<String, Long> counters() {
-        return counters;
+        return counterValues;
     }
 
     Map<String, String> states() {
-        return states;
+        return stateValues;
     }
 
     boolean isLoaded() {

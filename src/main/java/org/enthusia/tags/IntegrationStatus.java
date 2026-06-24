@@ -4,23 +4,23 @@ import java.util.ArrayList;
 import java.util.List;
 
 public final class IntegrationStatus {
-    private final List<String> warnings = new ArrayList<>();
+    private final List<String> warningMessages = new ArrayList<>();
 
     public void clear() {
-        warnings.clear();
+        warningMessages.clear();
     }
 
     public void addWarning(String warning) {
         if (warning != null && !warning.isBlank()) {
-            warnings.add(warning);
+            warningMessages.add(warning);
         }
     }
 
     public boolean hasWarnings() {
-        return !warnings.isEmpty();
+        return !warningMessages.isEmpty();
     }
 
     public List<String> warnings() {
-        return List.copyOf(warnings);
+        return List.copyOf(warningMessages);
     }
 }

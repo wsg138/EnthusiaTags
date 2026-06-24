@@ -19,6 +19,7 @@ import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.sql.SQLException;
 import java.util.LinkedHashMap;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -147,7 +148,7 @@ public final class CosmeticsService {
         if (selection == null) {
             return null;
         }
-        CosmeticDefinition cosmetic = cosmetics.get(selection.toLowerCase());
+        CosmeticDefinition cosmetic = cosmetics.get(selection.toLowerCase(Locale.ROOT));
         if (cosmetic == null || !player.hasPermission(cosmetic.getPermission())) {
             return null;
         }
@@ -172,10 +173,10 @@ public final class CosmeticsService {
         if (cosmeticId == null) {
             selections.get(player.getUniqueId()).remove(category);
         } else {
-            selections.get(player.getUniqueId()).put(category, cosmeticId.toLowerCase());
+            selections.get(player.getUniqueId()).put(category, cosmeticId.toLowerCase(Locale.ROOT));
         }
         refreshActiveTrail(player);
-        storage.setSelectionAsync(player.getUniqueId(), category, cosmeticId == null ? null : cosmeticId.toLowerCase())
+        storage.setSelectionAsync(player.getUniqueId(), category, cosmeticId == null ? null : cosmeticId.toLowerCase(Locale.ROOT))
             .exceptionally(throwable -> {
                 plugin.getLogger().warning("Failed to store cosmetic selection for " + player.getUniqueId() + ": "
                     + throwable.getMessage());
@@ -264,7 +265,7 @@ public final class CosmeticsService {
             lastTrailLocations.remove(player.getUniqueId());
             return;
         }
-        CosmeticDefinition cosmetic = cosmetics.get(selected.toLowerCase());
+        CosmeticDefinition cosmetic = cosmetics.get(selected.toLowerCase(Locale.ROOT));
         if (cosmetic != null && (cosmetic.getType() == CosmeticType.TRAIL_PARTICLE || cosmetic.getType() == CosmeticType.TRAIL_SPIRAL)) {
             activeTrailPlayers.add(player.getUniqueId());
         } else {
@@ -277,7 +278,7 @@ public final class CosmeticsService {
         if (cosmeticId == null) {
             return null;
         }
-        CosmeticDefinition cosmetic = cosmetics.get(cosmeticId.toLowerCase());
+        CosmeticDefinition cosmetic = cosmetics.get(cosmeticId.toLowerCase(Locale.ROOT));
         if (cosmetic == null || !player.hasPermission(cosmetic.getPermission())) {
             return null;
         }
@@ -454,7 +455,8 @@ public final class CosmeticsService {
             for (String key : categorySection.getKeys(false)) {
                 String name = categorySection.getString(key + ".name", key);
                 Material icon = Material.matchMaterial(categorySection.getString(key + ".icon", "PAPER"));
-                categories.put(key.toLowerCase(), new CosmeticsCategory(key.toLowerCase(), name, icon));
+                String normalizedKey = key.toLowerCase(Locale.ROOT);
+                categories.put(normalizedKey, new CosmeticsCategory(normalizedKey, name, icon));
             }
         }
 
@@ -468,7 +470,7 @@ public final class CosmeticsService {
                 continue;
             }
             String name = entry.getString("name", id);
-            String category = entry.getString("category", "misc").toLowerCase();
+            String category = entry.getString("category", "misc").toLowerCase(Locale.ROOT);
             CosmeticType type = parseCosmeticType(entry.getString("type", "TRAIL_PARTICLE"), "cosmetics." + id + ".type");
             if (type == null) {
                 continue;
@@ -478,20 +480,21 @@ public final class CosmeticsService {
             Material item = Material.matchMaterial(entry.getString("item", ""));
             Sound sound = parseSound(entry.getString("sound", ""), "cosmetics." + id + ".sound");
             String message = entry.getString("message", null);
-            String permission = entry.getString("permission", "enthusia.cosmetics." + id.toLowerCase());
+            String permission = entry.getString("permission", "enthusia.cosmetics." + id.toLowerCase(Locale.ROOT));
             int count = entry.getInt("count", defaultCount(type));
             double spread = entry.getDouble("spread", defaultSpread(type));
             double speed = entry.getDouble("speed", defaultSpeed(type));
             double radius = entry.getDouble("radius", 0.6D);
-            cosmetics.put(id.toLowerCase(), new CosmeticDefinition(
-                id.toLowerCase(), name, category, type, icon == null ? Material.PAPER : icon, particle, item, sound,
+            String normalizedId = id.toLowerCase(Locale.ROOT);
+            cosmetics.put(normalizedId, new CosmeticDefinition(
+                normalizedId, name, category, type, icon == null ? Material.PAPER : icon, particle, item, sound,
                 message, permission, count, spread, speed, radius));
         }
     }
 
     private CosmeticType parseCosmeticType(String value, String path) {
         try {
-            return CosmeticType.valueOf(value.toUpperCase());
+            return CosmeticType.valueOf(value.toUpperCase(Locale.ROOT));
         } catch (Exception ex) {
             plugin.getLogger().warning("Invalid cosmetic type at " + path + ": " + value);
             performanceMonitor.increment("config.validation.bad-cosmetic-type");
@@ -514,7 +517,7 @@ public final class CosmeticsService {
             return null;
         }
         try {
-            return Particle.valueOf(value.toUpperCase());
+            return Particle.valueOf(value.toUpperCase(Locale.ROOT));
         } catch (IllegalArgumentException ex) {
             plugin.getLogger().warning("Invalid particle at " + path + ": " + value);
             performanceMonitor.increment("config.validation.bad-particle");
@@ -527,7 +530,7 @@ public final class CosmeticsService {
             return null;
         }
         try {
-            return Sound.valueOf(value.toUpperCase());
+            return Sound.valueOf(value.toUpperCase(Locale.ROOT));
         } catch (IllegalArgumentException ex) {
             plugin.getLogger().warning("Invalid sound at " + path + ": " + value);
             performanceMonitor.increment("config.validation.bad-sound");

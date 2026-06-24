@@ -25,6 +25,7 @@ import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -191,7 +192,7 @@ public final class RewardService {
 
     public boolean isClaimed(UUID playerId, String rewardId) {
         RewardPlayerState state = getLoadedState(playerId);
-        return state != null && state.claimedRewards().contains(rewardId.toLowerCase());
+        return state != null && state.claimedRewards().contains(rewardId.toLowerCase(Locale.ROOT));
     }
 
     public RewardClaimResult claim(Player player, RewardDefinition reward) {
@@ -200,7 +201,7 @@ public final class RewardService {
             performanceMonitor.increment("rewards.claim.skipped-loading");
             return RewardClaimResult.LOADING;
         }
-        String rewardId = reward.getId().toLowerCase();
+        String rewardId = reward.getId().toLowerCase(Locale.ROOT);
         if (state.claimedRewards().contains(rewardId)) {
             return RewardClaimResult.ALREADY_CLAIMED;
         }
@@ -569,7 +570,7 @@ public final class RewardService {
         }
         boolean changed = false;
         for (RewardDefinition reward : rewards.values()) {
-            String rewardId = reward.getId().toLowerCase();
+            String rewardId = reward.getId().toLowerCase(Locale.ROOT);
             if (state.claimedRewards().contains(rewardId)) {
                 continue;
             }
@@ -732,7 +733,7 @@ public final class RewardService {
 
         try {
             long value = Long.parseLong(digits);
-            String token = placeholder == null ? "" : placeholder.toLowerCase();
+            String token = placeholder == null ? "" : placeholder.toLowerCase(Locale.ROOT);
             if (token.contains("%playtime_") && !token.contains("formatted")) {
                 return value / 60L;
             }
@@ -1135,7 +1136,7 @@ public final class RewardService {
             List<RewardCriterion> criteria = loadCriteria(section.getConfigurationSection(id + ".criteria"));
             List<RewardAction> actions = loadActions(section.getConfigurationSection(id + ".rewards"));
             String category = section.getString(id + ".category", inferCategory(criteria));
-            rewards.put(id.toLowerCase(), new RewardDefinition(id, name, description, icon, criteria, actions, category));
+            rewards.put(id.toLowerCase(Locale.ROOT), new RewardDefinition(id, name, description, icon, criteria, actions, category));
         }
     }
 
@@ -1247,7 +1248,7 @@ public final class RewardService {
     }
 
     private SourceDefaults legacyCustomCounterSource(String key) {
-        String normalized = key == null ? "" : key.toLowerCase();
+        String normalized = key == null ? "" : key.toLowerCase(Locale.ROOT);
         return switch (normalized) {
             case "netherrack_mined" -> new SourceDefaults(RewardSourceType.BUKKIT_STAT_MATERIAL, Statistic.MINE_BLOCK, Material.NETHERRACK, key);
             case "stone_mined" -> new SourceDefaults(RewardSourceType.BUKKIT_STAT_MATERIAL, Statistic.MINE_BLOCK, Material.STONE, key);
@@ -1319,7 +1320,7 @@ public final class RewardService {
             return null;
         }
         try {
-            return Statistic.valueOf(value.toUpperCase());
+            return Statistic.valueOf(value.toUpperCase(Locale.ROOT));
         } catch (IllegalArgumentException ex) {
             plugin.getLogger().warning("Invalid statistic at " + path + ": " + value);
             performanceMonitor.increment("config.validation.bad-statistic");
@@ -1332,7 +1333,7 @@ public final class RewardService {
             return null;
         }
         try {
-            return Enum.valueOf(type, value.toUpperCase());
+            return Enum.valueOf(type, value.toUpperCase(Locale.ROOT));
         } catch (IllegalArgumentException ex) {
             plugin.getLogger().warning("Invalid " + type.getSimpleName() + " at " + path + ": " + value);
             performanceMonitor.increment("config.validation.bad-enum");
