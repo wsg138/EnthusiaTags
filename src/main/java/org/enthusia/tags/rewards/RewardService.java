@@ -23,6 +23,7 @@ import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.sql.SQLException;
 import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -36,6 +37,7 @@ import java.lang.reflect.Method;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+@SuppressWarnings({"PMD.UseConcurrentHashMap", "PMD.NullAssignment", "PMD.AvoidInstantiatingObjectsInLoops"})
 public final class RewardService {
     private static final String REWARD_UNLOCK_NOTIFIED_PREFIX = "reward-unlocked:";
     private static final int MAX_UNLOCK_CHECKS_PER_RUN = 25;
@@ -46,6 +48,11 @@ public final class RewardService {
     private static final String COMMAND_SYNC_ALL = "syncall";
     private static final String COMMAND_SYNC = "sync";
     private static final String COMMAND_DEBUG = "debug";
+    private static final String REWARDS_FILE = "rewards.yml";
+    private static final String INVALID_CRITERION_PREFIX = "Invalid reward criterion at ";
+    private static final String STEPS_WALKED_COUNTER = "steps_walked";
+    private static final Map<RewardCriterionType, String> DEFAULT_LABELS = defaultLabels();
+    private static final Map<RewardCriterionType, String> DEFAULT_COUNTER_KEYS = defaultCounterKeys();
 
     private final JavaPlugin plugin;
     private final TagService tagService;
@@ -1164,12 +1171,12 @@ public final class RewardService {
     }
 
     private void ensureDefaults() {
-        File file = new File(plugin.getDataFolder(), "rewards.yml");
+        File file = new File(plugin.getDataFolder(), REWARDS_FILE);
         if (!file.exists()) {
-            plugin.saveResource("rewards.yml", false);
+            plugin.saveResource(REWARDS_FILE, false);
         }
         var configFile = org.bukkit.configuration.file.YamlConfiguration.loadConfiguration(file);
-        try (var stream = plugin.getResource("rewards.yml")) {
+        try (var stream = plugin.getResource(REWARDS_FILE)) {
             if (stream == null) {
                 return;
             }
@@ -1183,7 +1190,7 @@ public final class RewardService {
     }
 
     private void loadConfig() {
-        File file = new File(plugin.getDataFolder(), "rewards.yml");
+        File file = new File(plugin.getDataFolder(), REWARDS_FILE);
         var configFile = org.bukkit.configuration.file.YamlConfiguration.loadConfiguration(file);
         config = RewardsConfig.from(configFile);
         ConfigurationSection section = configFile.getConfigurationSection("rewards");
@@ -1208,41 +1215,63 @@ public final class RewardService {
         }
         for (String key : section.getKeys(false)) {
             ConfigurationSection entry = section.getConfigurationSection(key);
-            if (entry == null) {
-                continue;
+            RewardCriterion criterion = loadCriterion(section, key, entry);
+            if (criterion != null) {
+                criteria.add(criterion);
             }
-            RewardCriterionType type = parseEnum(RewardCriterionType.class, entry.getString("type", "CUSTOM_COUNTER"),
-                section.getCurrentPath() + "." + key + ".type");
-            if (type == null) {
-                continue;
-            }
-            long amount = entry.contains("required") ? entry.getLong("required", 1) : entry.getLong("amount", 1);
-            Material material = parseMaterial(entry.getString("material", ""), section.getCurrentPath() + "." + key + ".material", false);
-            String counterKey = entry.getString("key", "");
-            if (entry.contains("counter")) {
-                counterKey = entry.getString("counter", counterKey);
-            }
-            int maxY = entry.getInt("max-y", config.undergroundMaxY());
-            if (type == RewardCriterionType.CUSTOM_COUNTER && "steps_walked".equalsIgnoreCase(counterKey)) {
-                type = RewardCriterionType.STEPS_WALKED;
-                counterKey = "";
-            }
-            RewardSourceType sourceType = parseSource(entry.getString("source", ""));
-            Statistic statistic = parseStatistic(entry.getString("statistic", ""), section.getCurrentPath() + "." + key + ".statistic", false);
-            EntityType entityType = parseEnum(EntityType.class, entry.getString("entity", ""), section.getCurrentPath() + "." + key + ".entity");
-            if (sourceType == RewardSourceType.LEGACY) {
-                SourceDefaults defaults = legacySource(type, counterKey, material);
-                sourceType = defaults.sourceType();
-                statistic = defaults.statistic() == null ? statistic : defaults.statistic();
-                material = defaults.material() == null ? material : defaults.material();
-                counterKey = defaults.key() == null ? counterKey : defaults.key();
-            }
-            boolean valid = validateCriterionSource(sourceType, statistic, material, entityType, counterKey,
-                section.getCurrentPath() + "." + key);
-            String label = entry.getString("label", defaultLabel(type, material, counterKey));
-            criteria.add(new RewardCriterion(type, sourceType, amount, material, statistic, entityType, counterKey, maxY, label, valid));
         }
         return criteria;
+    }
+
+    private RewardCriterion loadCriterion(ConfigurationSection section, String key, ConfigurationSection entry) {
+        if (entry == null) {
+            return null;
+        }
+        String path = section.getCurrentPath() + "." + key;
+        RewardCriterionType type = parseEnum(RewardCriterionType.class, entry.getString("type", "CUSTOM_COUNTER"),
+            path + ".type");
+        if (type == null) {
+            return null;
+        }
+        long amount = entry.contains("required") ? entry.getLong("required", 1) : entry.getLong("amount", 1);
+        Material material = parseMaterial(entry.getString("material", ""), path + ".material", false);
+        String counterKey = criterionCounterKey(entry);
+        int maxY = entry.getInt("max-y", config.undergroundMaxY());
+        if (type == RewardCriterionType.CUSTOM_COUNTER && STEPS_WALKED_COUNTER.equalsIgnoreCase(counterKey)) {
+            type = RewardCriterionType.STEPS_WALKED;
+            counterKey = "";
+        }
+        RewardSourceType sourceType = parseSource(entry.getString("source", ""));
+        Statistic statistic = parseStatistic(entry.getString("statistic", ""), path + ".statistic");
+        EntityType entityType = parseEnum(EntityType.class, entry.getString("entity", ""), path + ".entity");
+        CriterionSource resolved = resolveCriterionSource(type, sourceType, statistic, material, counterKey);
+        boolean valid = validateCriterionSource(resolved.sourceType(), resolved.statistic(), resolved.material(), entityType,
+            resolved.key(), path);
+        String label = entry.getString("label", defaultLabel(type, resolved.material(), resolved.key()));
+        return new RewardCriterion(type, resolved.sourceType(), amount, resolved.material(), resolved.statistic(), entityType,
+            resolved.key(), maxY, label, valid);
+    }
+
+    private String criterionCounterKey(ConfigurationSection entry) {
+        String counterKey = entry.getString("key", "");
+        return entry.contains("counter") ? entry.getString("counter", counterKey) : counterKey;
+    }
+
+    private CriterionSource resolveCriterionSource(RewardCriterionType type,
+                                                   RewardSourceType sourceType,
+                                                   Statistic statistic,
+                                                   Material material,
+                                                   String counterKey) {
+        if (sourceType != RewardSourceType.LEGACY) {
+            return new CriterionSource(sourceType, statistic, material, counterKey);
+        }
+        SourceDefaults defaults = legacySource(type, counterKey, material);
+        return new CriterionSource(
+            defaults.sourceType(),
+            defaults.statistic() == null ? statistic : defaults.statistic(),
+            defaults.material() == null ? material : defaults.material(),
+            defaults.key() == null ? counterKey : defaults.key()
+        );
     }
 
     private List<RewardAction> loadActions(ConfigurationSection section) {
@@ -1322,15 +1351,7 @@ public final class RewardService {
         if (key != null && !key.isBlank()) {
             return key;
         }
-        return switch (type) {
-            case KILL_STREAK_CURRENT -> "kill_streak";
-            case DEATH_STREAK_SAME -> "death_streak_same";
-            case QUICK_KILL_COUNT -> "quick_kill";
-            case KILL_FULL_ARMOR_COUNT -> "kill_full_armor";
-            case KILL_LOW_HEALTH_COUNT -> "kill_low_health";
-            case PROJECTILE_HITS -> "projectile_hits";
-            default -> key;
-        };
+        return DEFAULT_COUNTER_KEYS.getOrDefault(type, key);
     }
 
     private boolean validateCriterionSource(RewardSourceType sourceType,
@@ -1339,28 +1360,51 @@ public final class RewardService {
                                             EntityType entityType,
                                             String key,
                                             String path) {
-        boolean valid = true;
-        if ((sourceType == RewardSourceType.BUKKIT_STAT || sourceType == RewardSourceType.BUKKIT_STAT_MATERIAL
-            || sourceType == RewardSourceType.BUKKIT_STAT_ENTITY) && statistic == null) {
-            plugin.getLogger().warning("Invalid reward criterion at " + path + ": missing/bad Bukkit statistic.");
-            valid = false;
-        }
-        if (sourceType == RewardSourceType.BUKKIT_STAT_MATERIAL && material == null) {
-            plugin.getLogger().warning("Invalid reward criterion at " + path + ": missing/bad material.");
-            valid = false;
-        }
-        if (sourceType == RewardSourceType.BUKKIT_STAT_ENTITY && entityType == null) {
-            plugin.getLogger().warning("Invalid reward criterion at " + path + ": missing/bad entity.");
-            valid = false;
-        }
-        if (sourceType == RewardSourceType.CUSTOM_COUNTER && (key == null || key.isBlank())) {
-            plugin.getLogger().warning("Invalid reward criterion at " + path + ": missing custom counter key.");
-            valid = false;
-        }
+        boolean valid = validateStatisticSource(sourceType, statistic, material, entityType, path)
+            && validateCounterSource(sourceType, key, path);
         if (!valid) {
             performanceMonitor.increment("config.validation.reward-criterion-invalid");
         }
         return valid;
+    }
+
+    private boolean validateStatisticSource(RewardSourceType sourceType,
+                                            Statistic statistic,
+                                            Material material,
+                                            EntityType entityType,
+                                            String path) {
+        boolean valid = true;
+        if (requiresStatistic(sourceType) && statistic == null) {
+            logInvalidCriterion(path, "missing/bad Bukkit statistic.");
+            valid = false;
+        }
+        if (sourceType == RewardSourceType.BUKKIT_STAT_MATERIAL && material == null) {
+            logInvalidCriterion(path, "missing/bad material.");
+            valid = false;
+        }
+        if (sourceType == RewardSourceType.BUKKIT_STAT_ENTITY && entityType == null) {
+            logInvalidCriterion(path, "missing/bad entity.");
+            valid = false;
+        }
+        return valid;
+    }
+
+    private boolean validateCounterSource(RewardSourceType sourceType, String key, String path) {
+        if (sourceType != RewardSourceType.CUSTOM_COUNTER || (key != null && !key.isBlank())) {
+            return true;
+        }
+        logInvalidCriterion(path, "missing custom counter key.");
+        return false;
+    }
+
+    private boolean requiresStatistic(RewardSourceType sourceType) {
+        return sourceType == RewardSourceType.BUKKIT_STAT
+            || sourceType == RewardSourceType.BUKKIT_STAT_MATERIAL
+            || sourceType == RewardSourceType.BUKKIT_STAT_ENTITY;
+    }
+
+    private void logInvalidCriterion(String path, String reason) {
+        plugin.getLogger().warning(INVALID_CRITERION_PREFIX + path + ": " + reason);
     }
 
     private Material parseMaterial(String value, String path, boolean fallbackNameTag) {
@@ -1376,7 +1420,7 @@ public final class RewardService {
         return material;
     }
 
-    private Statistic parseStatistic(String value, String path, boolean required) {
+    private Statistic parseStatistic(String value, String path) {
         if (value == null || value.isBlank()) {
             return null;
         }
@@ -1403,33 +1447,55 @@ public final class RewardService {
     }
 
     private String defaultLabel(RewardCriterionType type, Material material, String key) {
-        return switch (type) {
-            case PLAYTIME_ACTIVE_MINUTES -> "Active playtime (min)";
-            case PLAYTIME_AFK_MINUTES -> "AFK playtime (min)";
-            case PLAYTIME_TOTAL_MINUTES -> "Total playtime (min)";
-            case PLAYTIME_CONSECUTIVE_ACTIVE_MINUTES -> "Consecutive active (min)";
-            case UNDERGROUND_ACTIVE_MINUTES -> "Underground active (min)";
-            case KILLS_TOTAL -> "Player kills";
-            case DEATHS_TOTAL -> "Deaths";
-            case BLOCK_MINED -> material == null ? "Blocks mined" : material.name();
-            case KILL_STREAK_CURRENT -> "Kill streak";
-            case DEATH_STREAK_SAME -> "Deaths to same player";
-            case QUICK_KILL_COUNT -> "Quick kills (10s)";
-            case KILL_FULL_ARMOR_COUNT -> "Full armor kills";
-            case KILL_LOW_HEALTH_COUNT -> "Low health wins";
-            case DEATH_CAUSE_COUNT -> "Deaths by cause";
-            case BALANCE_AT_LEAST -> "Balance";
-            case BALTOP_TOP3 -> "Baltop top 3";
-            case PING_MS_AT_LEAST -> "Ping (ms)";
-            case STEPS_WALKED -> "Blocks walked";
-            case PROJECTILE_HITS -> "Projectile hits";
-            case CUSTOM_COUNTER -> key.isBlank() ? "Progress" : key;
-        };
+        if (type == RewardCriterionType.BLOCK_MINED) {
+            return material == null ? "Blocks mined" : material.name();
+        }
+        if (type == RewardCriterionType.CUSTOM_COUNTER) {
+            return key == null || key.isBlank() ? "Progress" : key;
+        }
+        return DEFAULT_LABELS.getOrDefault(type, "Progress");
+    }
+
+    private static Map<RewardCriterionType, String> defaultLabels() {
+        Map<RewardCriterionType, String> labels = new EnumMap<>(RewardCriterionType.class);
+        labels.put(RewardCriterionType.PLAYTIME_ACTIVE_MINUTES, "Active playtime (min)");
+        labels.put(RewardCriterionType.PLAYTIME_AFK_MINUTES, "AFK playtime (min)");
+        labels.put(RewardCriterionType.PLAYTIME_TOTAL_MINUTES, "Total playtime (min)");
+        labels.put(RewardCriterionType.PLAYTIME_CONSECUTIVE_ACTIVE_MINUTES, "Consecutive active (min)");
+        labels.put(RewardCriterionType.UNDERGROUND_ACTIVE_MINUTES, "Underground active (min)");
+        labels.put(RewardCriterionType.KILLS_TOTAL, "Player kills");
+        labels.put(RewardCriterionType.DEATHS_TOTAL, "Deaths");
+        labels.put(RewardCriterionType.KILL_STREAK_CURRENT, "Kill streak");
+        labels.put(RewardCriterionType.DEATH_STREAK_SAME, "Deaths to same player");
+        labels.put(RewardCriterionType.QUICK_KILL_COUNT, "Quick kills (10s)");
+        labels.put(RewardCriterionType.KILL_FULL_ARMOR_COUNT, "Full armor kills");
+        labels.put(RewardCriterionType.KILL_LOW_HEALTH_COUNT, "Low health wins");
+        labels.put(RewardCriterionType.DEATH_CAUSE_COUNT, "Deaths by cause");
+        labels.put(RewardCriterionType.BALANCE_AT_LEAST, "Balance");
+        labels.put(RewardCriterionType.BALTOP_TOP3, "Baltop top 3");
+        labels.put(RewardCriterionType.PING_MS_AT_LEAST, "Ping (ms)");
+        labels.put(RewardCriterionType.STEPS_WALKED, "Blocks walked");
+        labels.put(RewardCriterionType.PROJECTILE_HITS, "Projectile hits");
+        return labels;
+    }
+
+    private static Map<RewardCriterionType, String> defaultCounterKeys() {
+        Map<RewardCriterionType, String> keys = new EnumMap<>(RewardCriterionType.class);
+        keys.put(RewardCriterionType.KILL_STREAK_CURRENT, "kill_streak");
+        keys.put(RewardCriterionType.DEATH_STREAK_SAME, "death_streak_same");
+        keys.put(RewardCriterionType.QUICK_KILL_COUNT, "quick_kill");
+        keys.put(RewardCriterionType.KILL_FULL_ARMOR_COUNT, "kill_full_armor");
+        keys.put(RewardCriterionType.KILL_LOW_HEALTH_COUNT, "kill_low_health");
+        keys.put(RewardCriterionType.PROJECTILE_HITS, "projectile_hits");
+        return keys;
     }
 
     public record ProgressSnapshot(long createdTick, Map<String, Long> values) {
     }
 
     private record SourceDefaults(RewardSourceType sourceType, Statistic statistic, Material material, String key) {
+    }
+
+    private record CriterionSource(RewardSourceType sourceType, Statistic statistic, Material material, String key) {
     }
 }
