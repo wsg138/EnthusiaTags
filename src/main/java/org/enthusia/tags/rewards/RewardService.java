@@ -42,6 +42,10 @@ public final class RewardService {
     private static final Pattern HOURS_PATTERN = Pattern.compile("(?i)(\\d+)\\s*h");
     private static final Pattern MINUTES_PATTERN = Pattern.compile("(?i)(\\d+)\\s*m");
     private static final Pattern SECONDS_PATTERN = Pattern.compile("(?i)(\\d+)\\s*s");
+    private static final Pattern NON_DIGIT_PATTERN = Pattern.compile("[^0-9]");
+    private static final String COMMAND_SYNC_ALL = "syncall";
+    private static final String COMMAND_SYNC = "sync";
+    private static final String COMMAND_DEBUG = "debug";
 
     private final JavaPlugin plugin;
     private final TagService tagService;
@@ -222,6 +226,8 @@ public final class RewardService {
                         .replace("%player%", player.getName());
                     Bukkit.dispatchCommand(Bukkit.getConsoleSender(), command);
                 }
+                default -> {
+                }
             }
         }
 
@@ -272,18 +278,26 @@ public final class RewardService {
 
     private long computeProgress(Player player, RewardCriterion criterion) {
         if (criterion.getSourceType() != RewardSourceType.LEGACY) {
-            return switch (criterion.getSourceType()) {
-                case BUKKIT_STAT -> getBukkitStat(player, criterion.getStatistic());
-                case BUKKIT_STAT_MATERIAL -> getBukkitMaterialStat(player, criterion.getStatistic(), criterion.getMaterial());
-                case BUKKIT_STAT_ENTITY -> getBukkitEntityStat(player, criterion.getStatistic(), criterion.getEntityType());
-                case CUSTOM_COUNTER -> getCounter(player.getUniqueId(), criterion.getKey());
-                case PLACEHOLDER -> getPlaytimeFromPlaceholder(player, criterion.getKey());
-                case VAULT_BALANCE -> (long) Math.floor(vaultHook.getBalance(player));
-                case PLAYTIME -> getPlaytimeMinutes(player, criterion.getType(), criterion.getKey());
-                case BALTOP -> isInBaltopTop3(player.getUniqueId()) ? 1 : 0;
-                case LEGACY -> 0L;
-            };
+            return computeSourceProgress(player, criterion);
         }
+        return computeLegacyProgress(player, criterion);
+    }
+
+    private long computeSourceProgress(Player player, RewardCriterion criterion) {
+        return switch (criterion.getSourceType()) {
+            case BUKKIT_STAT -> getBukkitStat(player, criterion.getStatistic());
+            case BUKKIT_STAT_MATERIAL -> getBukkitMaterialStat(player, criterion.getStatistic(), criterion.getMaterial());
+            case BUKKIT_STAT_ENTITY -> getBukkitEntityStat(player, criterion.getStatistic(), criterion.getEntityType());
+            case CUSTOM_COUNTER -> getCounter(player.getUniqueId(), criterion.getKey());
+            case PLACEHOLDER -> getPlaytimeFromPlaceholder(player, criterion.getKey());
+            case VAULT_BALANCE -> (long) Math.floor(vaultHook.getBalance(player));
+            case PLAYTIME -> getPlaytimeMinutes(player, criterion.getType(), criterion.getKey());
+            case BALTOP -> isInBaltopTop3(player.getUniqueId()) ? 1 : 0;
+            case LEGACY -> 0L;
+        };
+    }
+
+    private long computeLegacyProgress(Player player, RewardCriterion criterion) {
         return switch (criterion.getType()) {
             case PLAYTIME_ACTIVE_MINUTES -> getPlaytimeMinutes(player, RewardCriterionType.PLAYTIME_ACTIVE_MINUTES,
                 config.playtimeActivePlaceholder());
@@ -428,37 +442,60 @@ public final class RewardService {
 
     public boolean handleAdminCommand(CommandSender sender, String[] args) {
         if (args.length == 0) {
-            sender.sendMessage("Usage: /enthusiatags rewards <sync|syncall|debug>");
+            sendAdminUsage(sender);
             return true;
         }
-        if (args[0].equalsIgnoreCase("syncall")) {
+        String subcommand = args[0].toLowerCase(Locale.ROOT);
+        if (COMMAND_SYNC_ALL.equals(subcommand)) {
             queueSyncAll();
             sender.sendMessage(messages.get("sync-queued") + " " + syncStatus());
             return true;
         }
-        if (args.length >= 2 && args[0].equalsIgnoreCase("sync")) {
-            Player target = Bukkit.getPlayerExact(args[1]);
-            if (target == null) {
-                sender.sendMessage(messages.get("player-not-found"));
-                return true;
-            }
-            syncPlayer(target);
-            sender.sendMessage(messages.get("sync-queued") + " " + syncStatus());
+        if (COMMAND_SYNC.equals(subcommand)) {
+            return handleSyncCommand(sender, args);
+        }
+        if (COMMAND_DEBUG.equals(subcommand)) {
+            return handleDebugCommand(sender, args);
+        }
+        sendAdminUsage(sender);
+        return true;
+    }
+
+    private boolean handleSyncCommand(CommandSender sender, String[] args) {
+        Player target = findCommandTarget(sender, args);
+        if (target == null) {
             return true;
         }
-        if (args.length >= 2 && args[0].equalsIgnoreCase("debug")) {
-            Player target = Bukkit.getPlayerExact(args[1]);
-            if (target == null) {
-                sender.sendMessage(messages.get("player-not-found"));
-                return true;
-            }
-            sendDebug(sender, target);
+        syncPlayer(target);
+        sender.sendMessage(messages.get("sync-queued") + " " + syncStatus());
+        return true;
+    }
+
+    private boolean handleDebugCommand(CommandSender sender, String[] args) {
+        Player target = findCommandTarget(sender, args);
+        if (target == null) {
             return true;
         }
+        sendDebug(sender, target);
+        return true;
+    }
+
+    private Player findCommandTarget(CommandSender sender, String[] args) {
+        if (args.length < 2) {
+            sendAdminUsage(sender);
+            return null;
+        }
+        Player target = Bukkit.getPlayerExact(args[1]);
+        if (target == null) {
+            sender.sendMessage(messages.get("player-not-found"));
+        }
+        return target;
+    }
+
+    private void sendAdminUsage(CommandSender sender) {
         sender.sendMessage("Usage: /enthusiatags rewards sync <player>");
         sender.sendMessage("       /enthusiatags rewards syncall");
         sender.sendMessage("       /enthusiatags rewards debug <player>");
-        return true;
     }
 
     private void sendDebug(CommandSender sender, Player player) {
@@ -704,9 +741,16 @@ public final class RewardService {
             return 0L;
         }
 
+        long tokenizedMinutes = parseTokenizedPlaytimeMinutes(raw);
+        if (tokenizedMinutes >= 0L) {
+            return tokenizedMinutes;
+        }
+        return parseNumericPlaytimeMinutes(raw, placeholder);
+    }
+
+    private long parseTokenizedPlaytimeMinutes(String raw) {
         long minutes = 0L;
         boolean matched = false;
-
         Matcher hours = HOURS_PATTERN.matcher(raw);
         if (hours.find()) {
             minutes += Long.parseLong(hours.group(1)) * 60L;
@@ -722,11 +766,11 @@ public final class RewardService {
             minutes += Long.parseLong(secs.group(1)) / 60L;
             matched = true;
         }
-        if (matched) {
-            return minutes;
-        }
+        return matched ? minutes : -1L;
+    }
 
-        String digits = raw.replaceAll("[^0-9]", "");
+    private long parseNumericPlaytimeMinutes(String raw, String placeholder) {
+        String digits = NON_DIGIT_PATTERN.matcher(raw).replaceAll("");
         if (digits.isEmpty()) {
             return 0L;
         }
@@ -791,24 +835,41 @@ public final class RewardService {
     private void refreshIntegrations() {
         vaultHook.setup();
         playtimeHook.setup();
-        baltopPlugin = Bukkit.getPluginManager().getPlugin(config.baltopPluginName());
-        baltopMethod = null;
-        if (baltopPlugin == null) {
-            for (Plugin plugin : Bukkit.getPluginManager().getPlugins()) {
-                try {
-                    plugin.getClass().getMethod("isInBaltopTop", UUID.class, int.class);
-                    baltopPlugin = plugin;
-                    break;
-                } catch (NoSuchMethodException ignored) {
-                }
+        baltopPlugin = findBaltopPlugin();
+        baltopMethod = findBaltopMethod(baltopPlugin);
+        if (baltopMethod == null) {
+            baltopPlugin = null;
+        }
+        refreshIntegrationWarnings();
+    }
+
+    private Plugin findBaltopPlugin() {
+        Plugin configured = Bukkit.getPluginManager().getPlugin(config.baltopPluginName());
+        if (configured != null) {
+            return configured;
+        }
+        for (Plugin candidate : Bukkit.getPluginManager().getPlugins()) {
+            if (findBaltopMethod(candidate) != null) {
+                return candidate;
             }
         }
+        return null;
+    }
+
+    private Method findBaltopMethod(Plugin candidate) {
+        if (candidate == null) {
+            return null;
+        }
+        try {
+            return candidate.getClass().getMethod("isInBaltopTop", UUID.class, int.class);
+        } catch (NoSuchMethodException ignored) {
+            return null;
+        }
+    }
+
+    private void refreshIntegrationWarnings() {
         if (baltopPlugin != null) {
-            try {
-                baltopMethod = baltopPlugin.getClass().getMethod("isInBaltopTop", UUID.class, int.class);
-            } catch (NoSuchMethodException ignored) {
-                baltopPlugin = null;
-            }
+            baltopMethod = findBaltopMethod(baltopPlugin);
         }
         integrationStatus.clear();
 
