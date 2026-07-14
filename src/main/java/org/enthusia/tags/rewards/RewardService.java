@@ -3,6 +3,7 @@ package org.enthusia.tags.rewards;
 import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
+import org.bukkit.OfflinePlayer;
 import org.bukkit.Statistic;
 import org.bukkit.command.CommandSender;
 import org.bukkit.configuration.ConfigurationSection;
@@ -15,6 +16,7 @@ import org.enthusia.tags.IntegrationStatus;
 import org.enthusia.tags.Messages;
 import org.enthusia.tags.PerformanceMonitor;
 import org.enthusia.tags.PlaceholderApiHook;
+import org.enthusia.tags.PlayerLookup;
 import org.enthusia.tags.TagDefinition;
 import org.enthusia.tags.TagService;
 
@@ -48,6 +50,8 @@ public final class RewardService {
     private static final String COMMAND_SYNC_ALL = "syncall";
     private static final String COMMAND_SYNC = "sync";
     private static final String COMMAND_DEBUG = "debug";
+    private static final String COMMAND_IP_BYPASS = "ipbypass";
+    private static final String COMMAND_IP_BYPASS_ALIAS = "bypass";
     private static final String REWARDS_FILE = "rewards.yml";
     private static final String INVALID_CRITERION_PREFIX = "Invalid reward criterion at ";
     private static final String STEPS_WALKED_COUNTER = "steps_walked";
@@ -61,6 +65,7 @@ public final class RewardService {
     private final VaultHook vaultHook = new VaultHook();
     private final PlaytimeHook playtimeHook = new PlaytimeHook();
     private final PlaceholderApiHook placeholderApiHook = new PlaceholderApiHook();
+    private final PlayerLookup playerLookup;
     private final Map<String, RewardDefinition> rewards = new LinkedHashMap<>();
     private final Map<UUID, RewardPlayerState> playerStates = new ConcurrentHashMap<>();
     private final Map<UUID, CompletableFuture<Void>> pendingLoads = new ConcurrentHashMap<>();
@@ -91,6 +96,7 @@ public final class RewardService {
         this.tagService = tagService;
         this.messages = messages;
         this.performanceMonitor = performanceMonitor;
+        this.playerLookup = new PlayerLookup(plugin);
     }
 
     public void enable() {
@@ -464,6 +470,9 @@ public final class RewardService {
         if (COMMAND_DEBUG.equals(subcommand)) {
             return handleDebugCommand(sender, args);
         }
+        if (COMMAND_IP_BYPASS.equals(subcommand) || COMMAND_IP_BYPASS_ALIAS.equals(subcommand)) {
+            return handleIpBypassCommand(sender, args);
+        }
         sendAdminUsage(sender);
         return true;
     }
@@ -487,6 +496,83 @@ public final class RewardService {
         return true;
     }
 
+    private boolean handleIpBypassCommand(CommandSender sender, String[] args) {
+        if (args.length < 2) {
+            sendIpBypassUsage(sender);
+            return true;
+        }
+        String action = args[1].toLowerCase(Locale.ROOT);
+        return switch (action) {
+            case "add" -> handleAddIpBypassCommand(sender, args);
+            case "remove", "delete" -> handleRemoveIpBypassCommand(sender, args);
+            case "list" -> handleListIpBypassCommand(sender, args);
+            default -> {
+                sendIpBypassUsage(sender);
+                yield true;
+            }
+        };
+    }
+
+    private boolean handleAddIpBypassCommand(CommandSender sender, String[] args) {
+        OfflinePlayer first = findOfflineCommandTarget(sender, args, 2);
+        OfflinePlayer second = findOfflineCommandTarget(sender, args, 3);
+        if (first == null || second == null) {
+            return true;
+        }
+        if (first.getUniqueId().equals(second.getUniqueId())) {
+            sender.sendMessage("Players must be two different accounts.");
+            return true;
+        }
+        try {
+            boolean added = storage.addIpBypassPairNow(first.getUniqueId(), second.getUniqueId());
+            sender.sendMessage((added ? "Added" : "Already exists")
+                + " reward IP bypass pair for " + displayName(first) + " and " + displayName(second) + ".");
+        } catch (SQLException ex) {
+            plugin.getLogger().warning("Failed to add reward IP bypass pair: " + ex.getMessage());
+            sender.sendMessage("Failed to add reward IP bypass pair. Check console for details.");
+        }
+        return true;
+    }
+
+    private boolean handleRemoveIpBypassCommand(CommandSender sender, String[] args) {
+        OfflinePlayer first = findOfflineCommandTarget(sender, args, 2);
+        OfflinePlayer second = findOfflineCommandTarget(sender, args, 3);
+        if (first == null || second == null) {
+            return true;
+        }
+        try {
+            boolean removed = storage.removeIpBypassPairNow(first.getUniqueId(), second.getUniqueId());
+            sender.sendMessage((removed ? "Removed" : "No bypass pair found for")
+                + " " + displayName(first) + " and " + displayName(second) + ".");
+        } catch (SQLException ex) {
+            plugin.getLogger().warning("Failed to remove reward IP bypass pair: " + ex.getMessage());
+            sender.sendMessage("Failed to remove reward IP bypass pair. Check console for details.");
+        }
+        return true;
+    }
+
+    private boolean handleListIpBypassCommand(CommandSender sender, String[] args) {
+        OfflinePlayer target = findOfflineCommandTarget(sender, args, 2);
+        if (target == null) {
+            return true;
+        }
+        try {
+            Set<UUID> pairedPlayers = storage.listIpBypassPairsNow(target.getUniqueId());
+            if (pairedPlayers.isEmpty()) {
+                sender.sendMessage("No reward IP bypass pairs found for " + displayName(target) + ".");
+                return true;
+            }
+            sender.sendMessage("Reward IP bypass pairs for " + displayName(target) + ":");
+            for (UUID pairedPlayerId : pairedPlayers) {
+                sender.sendMessage("- " + displayName(Bukkit.getOfflinePlayer(pairedPlayerId)));
+            }
+        } catch (SQLException ex) {
+            plugin.getLogger().warning("Failed to list reward IP bypass pairs: " + ex.getMessage());
+            sender.sendMessage("Failed to list reward IP bypass pairs. Check console for details.");
+        }
+        return true;
+    }
+
     private Player findCommandTarget(CommandSender sender, String[] args) {
         if (args.length < 2) {
             sendAdminUsage(sender);
@@ -499,10 +585,36 @@ public final class RewardService {
         return target;
     }
 
+    private OfflinePlayer findOfflineCommandTarget(CommandSender sender, String[] args, int index) {
+        if (args.length <= index) {
+            sendIpBypassUsage(sender);
+            return null;
+        }
+        OfflinePlayer target = playerLookup.findPlayer(args[index]);
+        if (target == null) {
+            sender.sendMessage(messages.get("player-not-found"));
+        }
+        return target;
+    }
+
     private void sendAdminUsage(CommandSender sender) {
         sender.sendMessage("Usage: /enthusiatags rewards sync <player>");
         sender.sendMessage("       /enthusiatags rewards syncall");
         sender.sendMessage("       /enthusiatags rewards debug <player>");
+        sender.sendMessage("       /enthusiatags rewards ipbypass add <player1> <player2>");
+        sender.sendMessage("       /enthusiatags rewards ipbypass remove <player1> <player2>");
+        sender.sendMessage("       /enthusiatags rewards ipbypass list <player>");
+    }
+
+    private void sendIpBypassUsage(CommandSender sender) {
+        sender.sendMessage("Usage: /enthusiatags rewards ipbypass add <player1> <player2>");
+        sender.sendMessage("       /enthusiatags rewards ipbypass remove <player1> <player2>");
+        sender.sendMessage("       /enthusiatags rewards ipbypass list <player>");
+    }
+
+    private String displayName(OfflinePlayer player) {
+        String name = player.getName();
+        return name == null || name.isBlank() ? player.getUniqueId().toString() : name;
     }
 
     private void sendDebug(CommandSender sender, Player player) {

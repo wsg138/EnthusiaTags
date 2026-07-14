@@ -66,6 +66,14 @@ public final class RewardStorage {
                 )
                 """);
             statement.executeUpdate("""
+                CREATE TABLE IF NOT EXISTS reward_ip_bypass_pairs (
+                    first_uuid TEXT NOT NULL,
+                    second_uuid TEXT NOT NULL,
+                    created_at INTEGER NOT NULL,
+                    PRIMARY KEY (first_uuid, second_uuid)
+                )
+                """);
+            statement.executeUpdate("""
                 CREATE TABLE IF NOT EXISTS reward_counters (
                     player_uuid TEXT NOT NULL,
                     counter_key TEXT NOT NULL,
@@ -165,6 +173,18 @@ public final class RewardStorage {
             return CompletableFuture.completedFuture(true);
         }
         return submitMeasured("storage.rewards.ip-claim", () -> reserveIpClaimDirect(playerId, rewardId, ipAddress));
+    }
+
+    public boolean addIpBypassPairNow(UUID firstPlayerId, UUID secondPlayerId) throws SQLException {
+        return executeBlockingMeasured("storage.rewards.ip-bypass.add", () -> addIpBypassPairDirect(firstPlayerId, secondPlayerId));
+    }
+
+    public boolean removeIpBypassPairNow(UUID firstPlayerId, UUID secondPlayerId) throws SQLException {
+        return executeBlockingMeasured("storage.rewards.ip-bypass.remove", () -> removeIpBypassPairDirect(firstPlayerId, secondPlayerId));
+    }
+
+    public Set<UUID> listIpBypassPairsNow(UUID playerId) throws SQLException {
+        return executeBlockingMeasured("storage.rewards.ip-bypass.list", () -> listIpBypassPairsDirect(playerId));
     }
 
     public void close() {
@@ -297,7 +317,8 @@ public final class RewardStorage {
             select.setString(2, ipAddress);
             try (ResultSet rs = select.executeQuery()) {
                 if (rs.next()) {
-                    return playerId.toString().equals(rs.getString("player_uuid"));
+                    UUID existingPlayerId = UUID.fromString(rs.getString("player_uuid"));
+                    return playerId.equals(existingPlayerId) || isIpBypassPairDirect(playerId, existingPlayerId);
                 }
             }
         }
@@ -311,6 +332,72 @@ public final class RewardStorage {
             insert.executeUpdate();
             return true;
         }
+    }
+
+    private boolean addIpBypassPairDirect(UUID firstPlayerId, UUID secondPlayerId) throws SQLException {
+        if (firstPlayerId == null || secondPlayerId == null || firstPlayerId.equals(secondPlayerId)) {
+            return false;
+        }
+        IpBypassPair pair = normalizePair(firstPlayerId, secondPlayerId);
+        try (PreparedStatement statement = connection.prepareStatement(
+            "INSERT OR IGNORE INTO reward_ip_bypass_pairs (first_uuid, second_uuid, created_at) VALUES (?, ?, ?)")) {
+            statement.setString(1, pair.first().toString());
+            statement.setString(2, pair.second().toString());
+            statement.setLong(3, System.currentTimeMillis());
+            return statement.executeUpdate() > 0;
+        }
+    }
+
+    private boolean removeIpBypassPairDirect(UUID firstPlayerId, UUID secondPlayerId) throws SQLException {
+        if (firstPlayerId == null || secondPlayerId == null || firstPlayerId.equals(secondPlayerId)) {
+            return false;
+        }
+        IpBypassPair pair = normalizePair(firstPlayerId, secondPlayerId);
+        try (PreparedStatement statement = connection.prepareStatement(
+            "DELETE FROM reward_ip_bypass_pairs WHERE first_uuid = ? AND second_uuid = ?")) {
+            statement.setString(1, pair.first().toString());
+            statement.setString(2, pair.second().toString());
+            return statement.executeUpdate() > 0;
+        }
+    }
+
+    private Set<UUID> listIpBypassPairsDirect(UUID playerId) throws SQLException {
+        if (playerId == null) {
+            return Set.of();
+        }
+        Set<UUID> pairedPlayers = new HashSet<>();
+        try (PreparedStatement statement = connection.prepareStatement(
+            "SELECT first_uuid, second_uuid FROM reward_ip_bypass_pairs WHERE first_uuid = ? OR second_uuid = ?")) {
+            String uuid = playerId.toString();
+            statement.setString(1, uuid);
+            statement.setString(2, uuid);
+            try (ResultSet rs = statement.executeQuery()) {
+                while (rs.next()) {
+                    UUID first = UUID.fromString(rs.getString("first_uuid"));
+                    UUID second = UUID.fromString(rs.getString("second_uuid"));
+                    pairedPlayers.add(playerId.equals(first) ? second : first);
+                }
+            }
+        }
+        return pairedPlayers;
+    }
+
+    private boolean isIpBypassPairDirect(UUID firstPlayerId, UUID secondPlayerId) throws SQLException {
+        IpBypassPair pair = normalizePair(firstPlayerId, secondPlayerId);
+        try (PreparedStatement statement = connection.prepareStatement(
+            "SELECT 1 FROM reward_ip_bypass_pairs WHERE first_uuid = ? AND second_uuid = ?")) {
+            statement.setString(1, pair.first().toString());
+            statement.setString(2, pair.second().toString());
+            try (ResultSet rs = statement.executeQuery()) {
+                return rs.next();
+            }
+        }
+    }
+
+    private IpBypassPair normalizePair(UUID firstPlayerId, UUID secondPlayerId) {
+        return firstPlayerId.compareTo(secondPlayerId) <= 0
+            ? new IpBypassPair(firstPlayerId, secondPlayerId)
+            : new IpBypassPair(secondPlayerId, firstPlayerId);
     }
 
     private long elapsedMillis(long startNanos) {
@@ -341,5 +428,8 @@ public final class RewardStorage {
             thread.setDaemon(true);
             return thread;
         }
+    }
+
+    private record IpBypassPair(UUID first, UUID second) {
     }
 }
