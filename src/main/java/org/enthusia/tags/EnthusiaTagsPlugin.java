@@ -4,6 +4,7 @@ import org.bukkit.Bukkit;
 import org.bukkit.command.PluginCommand;
 import org.bukkit.plugin.ServicePriority;
 import org.bukkit.plugin.java.JavaPlugin;
+import org.enthusia.tags.api.TagVisibilityService;
 import org.enthusia.tags.cosmetics.CosmeticsCommand;
 import org.enthusia.tags.cosmetics.CosmeticsListener;
 import org.enthusia.tags.cosmetics.CosmeticsService;
@@ -42,6 +43,7 @@ public final class EnthusiaTagsPlugin extends JavaPlugin {
         rewardTracker.start(this);
 
         Bukkit.getServicesManager().register(TagService.class, tagService, this, ServicePriority.Normal);
+        Bukkit.getServicesManager().register(TagVisibilityService.class, tagService, this, ServicePriority.Normal);
         registerListeners();
         registerCommands();
         migrationReport.summaryLines().forEach(line -> getLogger().info("Startup summary: " + line));

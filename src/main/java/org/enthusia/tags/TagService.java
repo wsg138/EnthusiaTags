@@ -9,6 +9,7 @@ import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitTask;
+import org.enthusia.tags.api.TagVisibilityService;
 
 import java.io.File;
 import java.sql.SQLException;
@@ -20,7 +21,7 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 
-public final class TagService {
+public final class TagService implements TagVisibilityService {
     private final JavaPlugin plugin;
     private final Messages messages;
     private final PerformanceMonitor performanceMonitor;
@@ -31,6 +32,7 @@ public final class TagService {
     private final VanishHook vanishHook = new VanishHook();
     private final Map<UUID, PlayerTagData> cache = new ConcurrentHashMap<>();
     private final Map<UUID, CompletableFuture<Void>> pendingLoads = new ConcurrentHashMap<>();
+    private final Map<UUID, Set<Object>> suppressionOwners = new ConcurrentHashMap<>();
 
     private TagStorage storage;
     private String lineFormat;
@@ -65,6 +67,7 @@ public final class TagService {
         stopVanishWatcher();
         displayManager.stop();
         pendingLoads.clear();
+        suppressionOwners.clear();
         cache.clear();
         if (storage != null) {
             storage.close();
@@ -340,6 +343,10 @@ public final class TagService {
             displayManager.remove(player);
             return;
         }
+        if (isSuppressed(player.getUniqueId())) {
+            displayManager.remove(player);
+            return;
+        }
         PlayerTagData data = cache.get(player.getUniqueId());
         if (data == null) {
             displayManager.update(player, null, displayOffset);
@@ -366,6 +373,44 @@ public final class TagService {
 
     public void removeDisplay(Player player) {
         displayManager.remove(player);
+    }
+
+    @Override
+    public void suppress(UUID playerId, Object owner) {
+        if (playerId == null || owner == null) {
+            return;
+        }
+        suppressionOwners.computeIfAbsent(playerId, unused -> ConcurrentHashMap.newKeySet()).add(owner);
+        Player player = Bukkit.getPlayer(playerId);
+        if (player != null) {
+            displayManager.remove(player);
+        }
+    }
+
+    @Override
+    public void unsuppress(UUID playerId, Object owner) {
+        if (playerId == null || owner == null) {
+            return;
+        }
+        Set<Object> owners = suppressionOwners.get(playerId);
+        if (owners == null) {
+            return;
+        }
+        owners.remove(owner);
+        if (!owners.isEmpty()) {
+            return;
+        }
+        suppressionOwners.remove(playerId, owners);
+        Player player = Bukkit.getPlayer(playerId);
+        if (player != null && player.isOnline()) {
+            updateDisplay(player);
+        }
+    }
+
+    @Override
+    public boolean isSuppressed(UUID playerId) {
+        Set<Object> owners = suppressionOwners.get(playerId);
+        return owners != null && !owners.isEmpty();
     }
 
     private CompletableFuture<PlayerTagData> loadDataAsync(UUID playerId) {
