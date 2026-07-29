@@ -12,7 +12,7 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.entity.EntityDamageEvent;
-import org.bukkit.event.entity.EntityPickupItemEvent;
+import org.bukkit.event.entity.ProjectileHitEvent;
 import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.event.player.AsyncPlayerPreLoginEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
@@ -28,6 +28,8 @@ import java.util.concurrent.ConcurrentHashMap;
 public final class RewardTracker implements Listener {
     private final RewardService rewardService;
     private final Map<UUID, Map<UUID, Long>> firstHitTimes = new ConcurrentHashMap<>();
+    private final java.util.Set<UUID> countedProjectiles = ConcurrentHashMap.newKeySet();
+    private final Map<UUID, Long> activeSampleTimes = new ConcurrentHashMap<>();
     private BukkitTask playtimeTask;
 
     public RewardTracker(RewardService rewardService) {
@@ -47,6 +49,8 @@ public final class RewardTracker implements Listener {
             playtimeTask = null;
         }
         firstHitTimes.clear();
+        activeSampleTimes.clear();
+        countedProjectiles.clear();
     }
 
     @EventHandler
@@ -66,6 +70,12 @@ public final class RewardTracker implements Listener {
 
     @EventHandler
     public void onQuit(PlayerQuitEvent event) {
+        UUID playerId = event.getPlayer().getUniqueId();
+        firstHitTimes.remove(playerId);
+        firstHitTimes.values().forEach(map -> map.remove(playerId));
+        activeSampleTimes.remove(playerId);
+        rewardService.setCounter(playerId, "consecutive_active_ms", 0L);
+        rewardService.setCounter(playerId, "consecutive_active", 0L);
         rewardService.unloadPlayer(event.getPlayer());
     }
 
@@ -78,8 +88,9 @@ public final class RewardTracker implements Listener {
         if (damager == null) {
             return;
         }
+        long now = System.currentTimeMillis();
         firstHitTimes.computeIfAbsent(damager.getUniqueId(), ignored -> new ConcurrentHashMap<>())
-            .putIfAbsent(victim.getUniqueId(), System.currentTimeMillis());
+            .compute(victim.getUniqueId(), (ignored, first) -> first == null || now - first > 10_000L ? now : first);
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
@@ -91,6 +102,9 @@ public final class RewardTracker implements Listener {
         if (type == Material.DIRT || type == Material.COARSE_DIRT || type == Material.ROOTED_DIRT) {
             rewardService.incrementCounter(event.getPlayer().getUniqueId(), "dirt_mined", 1);
         }
+        if (type == Material.DIAMOND_ORE || type == Material.DEEPSLATE_DIAMOND_ORE) {
+            rewardService.incrementCounter(event.getPlayer().getUniqueId(), "diamond_ore_mined", 1);
+        }
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
@@ -100,13 +114,10 @@ public final class RewardTracker implements Listener {
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
-    public void onPickup(EntityPickupItemEvent event) {
-        if (!(event.getEntity() instanceof Player player)) {
-            return;
-        }
-        if (event.getItem().getItemStack().getType() == Material.DIAMOND) {
-            rewardService.incrementCounter(player.getUniqueId(), "diamonds_obtained",
-                event.getItem().getItemStack().getAmount());
+    public void onProjectileHit(ProjectileHitEvent event) {
+        if (!(event.getEntity().getShooter() instanceof Player player) || event.getHitEntity() == null) return;
+        if (countedProjectiles.add(event.getEntity().getUniqueId())) {
+            rewardService.incrementCounter(player.getUniqueId(), "projectile_hits", 1);
         }
     }
 
@@ -124,7 +135,7 @@ public final class RewardTracker implements Listener {
             return;
         }
 
-        rewardService.incrementCounter(victim.getUniqueId(), "PVP_DEATHS", 1);
+        rewardService.incrementCounter(victim.getUniqueId(), "pvp_deaths", 1);
         rewardService.incrementCounter(killer.getUniqueId(), "kill_streak", 1);
         updateDeathStreakSame(victim, killer);
         updateQuickKill(killer, victim);
@@ -199,16 +210,31 @@ public final class RewardTracker implements Listener {
     }
 
     private void tickPlaytime() {
+        long now = System.currentTimeMillis();
         for (Player player : Bukkit.getOnlinePlayers()) {
+            UUID playerId = player.getUniqueId();
+            long oldMaxPing = rewardService.getCounter(playerId, "max_ping_ms");
+            if (player.getPing() > oldMaxPing) {
+                rewardService.setCounter(playerId, "max_ping_ms", player.getPing());
+            }
             String state = rewardService.getLivePlaytimeState(player);
             if ("ACTIVE".equalsIgnoreCase(state)) {
-                rewardService.incrementCounter(player.getUniqueId(), "consecutive_active", 1);
+                Long previous = activeSampleTimes.put(playerId, now);
+                long elapsed = previous == null ? 0L : Math.min(90_000L, Math.max(0L, now - previous));
+                long streakMs = rewardService.incrementCounter(playerId, "consecutive_active_ms", elapsed);
+                long streakMinutes = streakMs / 60_000L;
+                rewardService.setCounter(playerId, "consecutive_active", streakMinutes);
+                rewardService.setCounter(playerId, "max_consecutive_active",
+                    Math.max(streakMinutes, rewardService.getCounter(playerId, "max_consecutive_active")));
+                int maxY = rewardService.getConfig().undergroundMaxY();
+                if (player.getLocation().getY() <= maxY) {
+                    long undergroundMs = rewardService.incrementCounter(playerId, "underground_active_ms", elapsed);
+                    rewardService.setCounter(playerId, "underground_active", undergroundMs / 60_000L);
+                }
             } else {
-                rewardService.setCounter(player.getUniqueId(), "consecutive_active", 0);
-            }
-            int maxY = rewardService.getConfig().undergroundMaxY();
-            if ("ACTIVE".equalsIgnoreCase(state) && player.getLocation().getY() <= maxY) {
-                rewardService.incrementCounter(player.getUniqueId(), "underground_active", 1);
+                activeSampleTimes.remove(playerId);
+                rewardService.setCounter(playerId, "consecutive_active_ms", 0L);
+                rewardService.setCounter(playerId, "consecutive_active", 0L);
             }
         }
     }

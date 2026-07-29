@@ -1,4 +1,4 @@
-config-version: 3
+config-version: 4
 
 placeholders:
   # Placeholder fallback values. These are only used if
@@ -78,8 +78,9 @@ rewards:
         amount: 250
     rewards:
       r1:
-        type: COMMAND
-        id: "give {player} golden_apple 2"
+        type: ITEM
+        material: GOLDEN_APPLE
+        amount: 2
         label: "Starter Pack (2 Golden Apples)"
   trail_starter:
     name: "&bTrail Starter"
@@ -340,13 +341,13 @@ rewards:
   diamond_hands:
     name: "&bDiamond Hands"
     description:
-      - "&7Obtain 64 diamonds."
+      - "&7Mine 64 diamond or deepslate diamond ore."
     icon: "DIAMOND"
     category: "mining"
     criteria:
       c1:
         type: CUSTOM_COUNTER
-        key: diamonds_obtained
+        key: diamond_ore_mined
         amount: 64
     rewards:
       r1:
@@ -471,7 +472,8 @@ rewards:
     icon: "SKELETON_SKULL"
     criteria:
       c1:
-        type: DEATHS_TOTAL
+        type: CUSTOM_COUNTER
+        key: pvp_deaths
         amount: 10
     rewards:
       r1:
@@ -721,7 +723,7 @@ rewards:
   i_swear_it_worked:
     name: "&7I Swear It Worked"
     description:
-      - "&7Die to your own explosion."
+      - "&7Die to an explosion."
     icon: "TNT"
     criteria:
       c1:
@@ -732,20 +734,6 @@ rewards:
       r1:
         type: TAG
         id: i_swear_it_worked
-  died_to_chicken:
-    name: "&eDied to a Chicken"
-    description:
-      - "&7Die to a chicken."
-    icon: "CHICKEN"
-    criteria:
-      c1:
-        type: DEATH_CAUSE_COUNT
-        key: chicken
-        amount: 1
-    rewards:
-      r1:
-        type: TAG
-        id: died_to_chicken
   lag_was_crazy:
     name: "&7Lag Was Crazy"
     description:

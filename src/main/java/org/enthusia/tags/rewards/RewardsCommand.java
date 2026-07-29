@@ -18,9 +18,11 @@ public final class RewardsCommand implements CommandExecutor, TabCompleter {
     private final RewardMenu rewardMenu;
     private final Messages messages;
     private final EnthusiaTagsPlugin plugin;
+    private final RewardService rewardService;
 
     public RewardsCommand(RewardService rewardService, TagService tagService, Messages messages, EnthusiaTagsPlugin plugin) {
         this.rewardMenu = new RewardMenu(rewardService, tagService);
+        this.rewardService = rewardService;
         this.messages = messages;
         this.plugin = plugin;
     }
@@ -40,6 +42,15 @@ public final class RewardsCommand implements CommandExecutor, TabCompleter {
             sender.sendMessage(message("players-only"));
             return true;
         }
+        if (args.length == 2 && args[0].equalsIgnoreCase("open")) {
+            RewardDefinition reward = rewardService.getRewards().get(args[1].toLowerCase(java.util.Locale.ROOT));
+            if (reward == null) {
+                player.sendMessage(Component.text("Unknown reward."));
+                return true;
+            }
+            player.openInventory(rewardMenu.createCategory(player, reward.getCategory()));
+            return true;
+        }
         player.openInventory(rewardMenu.create(player));
         return true;
     }
@@ -47,7 +58,7 @@ public final class RewardsCommand implements CommandExecutor, TabCompleter {
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
         if (args.length == 1 && sender.hasPermission("enthusia.tags.admin")) {
-            return List.of("reload");
+            return List.of("reload", "open");
         }
         return Collections.emptyList();
     }

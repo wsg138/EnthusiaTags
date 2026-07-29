@@ -126,15 +126,9 @@ public final class RewardMenu {
             lore.add(LegacyComponentSerializer.legacyAmpersand().deserialize(line));
         }
 
-        boolean claimed = rewardService.isClaimed(player.getUniqueId(), reward.getId());
-        boolean complete = true;
-        for (RewardCriterion criterion : reward.getCriteria()) {
-            long progress = rewardService.getProgress(player, criterion, snapshot);
-            if (progress < criterion.getAmount()) {
-                complete = false;
-                break;
-            }
-        }
+        RewardEvaluation evaluation = rewardService.evaluate(player, reward, snapshot);
+        boolean claimed = evaluation.status() == RewardStatus.CLAIMED;
+        boolean complete = evaluation.claimable();
         if (claimed) {
             lore.add(LegacyComponentSerializer.legacyAmpersand()
                 .deserialize(rewardService.getMessage("rewards-status-claimed")));

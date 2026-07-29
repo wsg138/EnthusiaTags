@@ -5,6 +5,10 @@ import org.bukkit.entity.Player;
 import org.bukkit.plugin.RegisteredServiceProvider;
 
 public final class VaultHook {
+    public record DepositResult(boolean success, double requestedAmount, double responseAmount,
+                                String responseType, String errorMessage,
+                                double balanceBefore, double balanceAfter) {
+    }
     private Object economy;
     private Class<?> economyClass;
     private java.lang.reflect.Method getBalancePlayer;
@@ -45,19 +49,50 @@ public final class VaultHook {
         return 0.0;
     }
 
-    public void deposit(Player player, double amount) {
+    public boolean deposit(Player player, double amount) {
+        return depositDetailed(player, amount).success();
+    }
+
+    public DepositResult depositDetailed(Player player, double amount) {
+        double before = getBalance(player);
         if (economy == null) {
-            return;
+            return new DepositResult(false, amount, 0D, "UNAVAILABLE", "Vault economy unavailable", before, before);
         }
         try {
+            Object response = null;
             if (depositPlayer != null) {
-                depositPlayer.invoke(economy, player, amount);
-                return;
+                response = depositPlayer.invoke(economy, player, amount);
+            } else if (depositOffline != null) {
+                response = depositOffline.invoke(economy, player, amount);
             }
-            if (depositOffline != null) {
-                depositOffline.invoke(economy, player, amount);
-            }
+            return describeResponse(response, amount, before, getBalance(player));
         } catch (ReflectiveOperationException ignored) {
+            return new DepositResult(false, amount, 0D, "EXCEPTION", ignored.getMessage(), before, getBalance(player));
+        }
+    }
+
+    private DepositResult describeResponse(Object response, double requested, double before, double after) {
+        if (response == null) {
+            return new DepositResult(false, requested, 0D, "NULL", "Economy returned no response", before, after);
+        }
+        try {
+            boolean success = Boolean.TRUE.equals(response.getClass().getMethod("transactionSuccess").invoke(response));
+            double amount = ((Number) response.getClass().getField("amount").get(response)).doubleValue();
+            Object type = response.getClass().getField("type").get(response);
+            Object error = response.getClass().getField("errorMessage").get(response);
+            return new DepositResult(success, requested, amount, String.valueOf(type),
+                error == null ? "" : error.toString(), before, after);
+        } catch (ReflectiveOperationException ex) {
+            return new DepositResult(false, requested, 0D, "INVALID_RESPONSE", ex.getMessage(), before, after);
+        }
+    }
+
+    private boolean transactionSucceeded(Object response) {
+        if (response == null) return false;
+        try {
+            return Boolean.TRUE.equals(response.getClass().getMethod("transactionSuccess").invoke(response));
+        } catch (ReflectiveOperationException ex) {
+            return false;
         }
     }
 

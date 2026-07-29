@@ -1,6 +1,7 @@
 package org.enthusia.tags.rewards;
 
 import org.bukkit.Bukkit;
+import org.bukkit.plugin.RegisteredServiceProvider;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
@@ -8,6 +9,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 public final class PlaytimeHook {
+    private Class<?> serviceClass;
     private Object service;
     private Method getLifetime;
     private Method getLiveState;
@@ -17,7 +19,7 @@ public final class PlaytimeHook {
 
     public void setup() {
         try {
-            Class<?> serviceClass = Class.forName("org.enthusia.playtime.api.PlaytimeService");
+            serviceClass = Class.forName("org.enthusia.playtime.api.PlaytimeService");
             Object loaded = Bukkit.getServicesManager().load(serviceClass);
             if (loaded == null) {
                 clear();
@@ -38,6 +40,7 @@ public final class PlaytimeHook {
     }
 
     public boolean isAvailable() {
+        refreshProvider();
         return service != null && getLifetime != null;
     }
 
@@ -60,7 +63,8 @@ public final class PlaytimeHook {
                 case PLAYTIME_TOTAL_MINUTES -> totalMinutesField.getLong(snapshot);
                 default -> 0L;
             };
-        } catch (ReflectiveOperationException ex) {
+        } catch (ReflectiveOperationException | RuntimeException ex) {
+            setup();
             return 0L;
         }
     }
@@ -72,8 +76,20 @@ public final class PlaytimeHook {
         try {
             Object result = getLiveState.invoke(service, playerId);
             return result == null ? "" : result.toString();
-        } catch (ReflectiveOperationException ex) {
+        } catch (ReflectiveOperationException | RuntimeException ex) {
+            setup();
             return "";
+        }
+    }
+
+    private void refreshProvider() {
+        if (serviceClass == null) {
+            return;
+        }
+        RegisteredServiceProvider<?> registration = Bukkit.getServicesManager().getRegistration(serviceClass);
+        Object current = registration == null ? null : registration.getProvider();
+        if (current != service) {
+            setup();
         }
     }
 

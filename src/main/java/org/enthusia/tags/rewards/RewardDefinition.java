@@ -13,6 +13,7 @@ public final class RewardDefinition {
     private final List<RewardCriterion> criteria;
     private final List<RewardAction> actions;
     private final String category;
+    private final RewardCompletionMode completionMode;
 
     public RewardDefinition(String id,
                             String name,
@@ -21,6 +22,12 @@ public final class RewardDefinition {
                             List<RewardCriterion> criteria,
                             List<RewardAction> actions,
                             String category) {
+        this(id, name, description, icon, criteria, actions, category, RewardCompletionMode.LATCHED);
+    }
+
+    public RewardDefinition(String id, String name, List<String> description, Material icon,
+                            List<RewardCriterion> criteria, List<RewardAction> actions, String category,
+                            RewardCompletionMode completionMode) {
         this.id = Objects.requireNonNull(id, "id");
         this.name = Objects.requireNonNull(name, "name");
         this.description = description == null ? List.of() : List.copyOf(description);
@@ -28,6 +35,7 @@ public final class RewardDefinition {
         this.criteria = criteria == null ? List.of() : List.copyOf(criteria);
         this.actions = actions == null ? List.of() : List.copyOf(actions);
         this.category = category == null ? "misc" : category;
+        this.completionMode = completionMode == null ? RewardCompletionMode.LATCHED : completionMode;
     }
 
     public String getId() {
@@ -56,5 +64,9 @@ public final class RewardDefinition {
 
     public String getCategory() {
         return category;
+    }
+
+    public RewardCompletionMode getCompletionMode() {
+        return completionMode;
     }
 }

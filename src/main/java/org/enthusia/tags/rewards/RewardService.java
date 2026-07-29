@@ -1,10 +1,16 @@
 package org.enthusia.tags.rewards;
 
 import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.event.ClickEvent;
+import net.kyori.adventure.text.event.HoverEvent;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
 import org.bukkit.OfflinePlayer;
 import org.bukkit.Statistic;
+import org.bukkit.Sound;
+import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.command.CommandSender;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.entity.EntityType;
@@ -74,6 +80,7 @@ public final class RewardService {
     private final ConcurrentLinkedDeque<UUID> rewardSyncQueue = new ConcurrentLinkedDeque<>();
     private final java.util.Set<UUID> queuedRewardSyncPlayers = ConcurrentHashMap.newKeySet();
     private final Set<UUID> queuedUnlockChecks = ConcurrentHashMap.newKeySet();
+    private final Set<String> inFlightClaims = ConcurrentHashMap.newKeySet();
     private final IntegrationStatus integrationStatus = new IntegrationStatus();
 
     private RewardStorage storage;
@@ -219,40 +226,99 @@ public final class RewardService {
             return RewardClaimResult.LOADING;
         }
         String rewardId = reward.getId().toLowerCase(Locale.ROOT);
+        String claimKey = player.getUniqueId() + ":" + rewardId;
+        if (!inFlightClaims.add(claimKey)) {
+            return RewardClaimResult.CLAIM_IN_PROGRESS;
+        }
+        try {
         if (state.claimedRewards().contains(rewardId)) {
             return RewardClaimResult.ALREADY_CLAIMED;
         }
-        if (!isComplete(player, reward)) {
+        RewardEvaluation evaluation = evaluate(player, reward);
+        if (!evaluation.claimable()) {
             return RewardClaimResult.NOT_READY;
         }
         if (!reserveIpClaim(player, rewardId)) {
             return RewardClaimResult.IP_ALREADY_CLAIMED;
         }
 
+        state.states().put("reward-delivery:" + rewardId, RewardStatus.CLAIM_PENDING.name());
+        state.setDirty(true);
         for (RewardAction action : reward.getActions()) {
+            boolean delivered;
             switch (action.getType()) {
-                case TAG -> tagService.grantTag(player.getUniqueId(), action.getValue());
-                case MONEY -> vaultHook.deposit(player, action.getAmount());
+                case TAG -> {
+                    delivered = tagService.grantTagPersisted(player.getUniqueId(), action.getValue()).join();
+                }
+                case MONEY -> delivered = vaultHook.deposit(player, action.getAmount());
                 case COMMAND -> {
                     String command = action.getValue()
                         .replace("{player}", player.getName())
                         .replace("%player%", player.getName());
-                    Bukkit.dispatchCommand(Bukkit.getConsoleSender(), command);
+                    delivered = Bukkit.dispatchCommand(Bukkit.getConsoleSender(), command);
                 }
-                default -> {
-                }
+                case ITEM -> delivered = deliverItem(player, action);
+                default -> delivered = false;
+            }
+            if (!delivered) {
+                state.states().put("reward-delivery:" + rewardId, RewardStatus.DELIVERY_FAILED.name());
+                state.setDirty(true);
+                storage.releaseIpClaimAsync(player.getUniqueId(), rewardId, getPlayerIpAddress(player));
+                flushPlayerAsync(player.getUniqueId(), state);
+                plugin.getLogger().warning("Reward delivery failed player=" + player.getUniqueId()
+                    + " name=" + player.getName() + " reward=" + rewardId + " action=" + action.getType());
+                return RewardClaimResult.DELIVERY_FAILED;
             }
         }
 
         state.claimedRewards().add(rewardId);
+        state.states().put("reward-delivery:" + rewardId, RewardStatus.CLAIMED.name());
         state.setDirty(true);
         invalidateProgress(player.getUniqueId());
         flushPlayerAsync(player.getUniqueId(), state);
         return RewardClaimResult.SUCCESS;
+        } finally {
+            inFlightClaims.remove(claimKey);
+        }
     }
 
     public boolean isComplete(Player player, RewardDefinition reward) {
-        return isComplete(player, reward, getProgressSnapshot(player));
+        return evaluate(player, reward).claimable();
+    }
+
+    public RewardEvaluation evaluate(Player player, RewardDefinition reward) {
+        return evaluate(player, reward, getProgressSnapshot(player));
+    }
+
+    public RewardEvaluation evaluate(Player player, RewardDefinition reward, ProgressSnapshot snapshot) {
+        RewardPlayerState state = getLoadedState(player.getUniqueId());
+        Map<String, Long> progress = new LinkedHashMap<>();
+        String rewardId = reward.getId().toLowerCase(Locale.ROOT);
+        if (state == null || !state.isLoaded()) {
+            return new RewardEvaluation(RewardStatus.LOCKED, progress, false, false, "Player state is loading");
+        }
+        if (state.claimedRewards().contains(rewardId)) {
+            return new RewardEvaluation(RewardStatus.CLAIMED, progress, true, false, "Already delivered");
+        }
+        String delivery = state.states().get("reward-delivery:" + rewardId);
+        if (RewardStatus.CLAIM_PENDING.name().equals(delivery)) {
+            return new RewardEvaluation(RewardStatus.REQUIRES_RECONCILIATION, progress, true, false,
+                "A previous delivery may have been interrupted");
+        }
+        boolean unlocked = state.states().containsKey(REWARD_UNLOCK_NOTIFIED_PREFIX + rewardId);
+        boolean currentlyComplete = true;
+        for (RewardCriterion criterion : reward.getCriteria()) {
+            long value = getProgress(player, criterion, snapshot);
+            progress.put(criterion.getLabel(), value);
+            currentlyComplete &= isCriterionAvailable(criterion) && value >= criterion.getAmount();
+        }
+        if (!areActionsAvailable(reward)) {
+            return new RewardEvaluation(RewardStatus.LOCKED, progress, unlocked, false,
+                "A required reward integration or action is unavailable");
+        }
+        boolean complete = currentlyComplete || (unlocked && reward.getCompletionMode() == RewardCompletionMode.LATCHED);
+        return new RewardEvaluation(complete ? RewardStatus.UNLOCKED : RewardStatus.LOCKED, progress, unlocked,
+            complete, complete ? "Ready to claim" : "Requirements not reached");
     }
 
     private boolean isComplete(Player player, RewardDefinition reward, ProgressSnapshot snapshot) {
@@ -318,7 +384,7 @@ public final class RewardService {
                 config.playtimeAfkPlaceholder());
             case PLAYTIME_TOTAL_MINUTES -> getPlaytimeMinutes(player, RewardCriterionType.PLAYTIME_TOTAL_MINUTES,
                 config.playtimeTotalPlaceholder());
-            case PLAYTIME_CONSECUTIVE_ACTIVE_MINUTES -> getCounter(player.getUniqueId(), "consecutive_active");
+            case PLAYTIME_CONSECUTIVE_ACTIVE_MINUTES -> getCounter(player.getUniqueId(), "max_consecutive_active");
             case UNDERGROUND_ACTIVE_MINUTES -> getCounter(player.getUniqueId(), "underground_active");
             case KILLS_TOTAL -> player.getStatistic(Statistic.PLAYER_KILLS);
             case DEATHS_TOTAL -> player.getStatistic(Statistic.DEATHS);
@@ -331,7 +397,7 @@ public final class RewardService {
             case DEATH_CAUSE_COUNT -> getCounter(player.getUniqueId(), "death_cause:" + criterion.getKey());
             case BALANCE_AT_LEAST -> (long) Math.floor(vaultHook.getBalance(player));
             case BALTOP_TOP3 -> isInBaltopTop3(player.getUniqueId()) ? 1 : 0;
-            case PING_MS_AT_LEAST -> player.getPing();
+            case PING_MS_AT_LEAST -> getCounter(player.getUniqueId(), "max_ping_ms");
             case STEPS_WALKED -> player.getStatistic(Statistic.WALK_ONE_CM) / 100;
             case PROJECTILE_HITS -> getCounter(player.getUniqueId(), "projectile_hits");
             case CUSTOM_COUNTER -> getCounter(player.getUniqueId(), criterion.getKey());
@@ -734,14 +800,13 @@ public final class RewardService {
             if (state.states().containsKey(notificationKey)) {
                 continue;
             }
-            if (!isComplete(player, reward, snapshot)) {
+            RewardEvaluation evaluation = evaluate(player, reward, snapshot);
+            if (!evaluation.claimable()) {
                 continue;
             }
             state.states().put(notificationKey, "true");
             changed = true;
-            player.sendMessage(LegacyComponentSerializer.legacyAmpersand().deserialize(messages.get("rewards-unlocked")
-                .replace("{reward}", reward.getName())
-                .replace("{reward_id}", reward.getId())));
+            sendUnlockNotification(player, reward);
             performanceMonitor.increment("rewards.unlock-notified");
         }
         if (changed) {
@@ -757,6 +822,10 @@ public final class RewardService {
         state.counters().putAll(data.counters());
         state.states().clear();
         state.states().putAll(data.states());
+        Long oldPvpDeaths = state.counters().remove("PVP_DEATHS");
+        if (oldPvpDeaths != null) {
+            state.counters().merge("pvp_deaths", oldPvpDeaths, Math::max);
+        }
         state.setLoaded(true);
         state.setDirty(false);
     }
@@ -867,6 +936,38 @@ public final class RewardService {
         return parseNumericPlaytimeMinutes(raw, placeholder);
     }
 
+    private void sendUnlockNotification(Player player, RewardDefinition reward) {
+        String description = reward.getDescription().isEmpty() ? "" : reward.getDescription().get(0);
+        String labels = reward.getActions().stream().map(action -> {
+            String formatted = formatAction(action);
+            return formatted == null || formatted.isBlank() ? action.getLabel() : formatted;
+        }).filter(value -> value != null && !value.isBlank()).reduce((a, b) -> a + ", " + b).orElse("Reward");
+        String template = messages.get("rewards-unlocked-rich")
+            .replace("{reward}", reward.getName()).replace("{reward_id}", reward.getId())
+            .replace("{description}", description).replace("{category}", reward.getCategory())
+            .replace("{rewards}", labels);
+        Component body = LegacyComponentSerializer.legacyAmpersand().deserialize(template);
+        Component button = LegacyComponentSerializer.legacyAmpersand().deserialize(
+            messages.get("rewards-unlocked-button"))
+            .clickEvent(ClickEvent.runCommand("/rewards open " + reward.getId()))
+            .hoverEvent(HoverEvent.showText(LegacyComponentSerializer.legacyAmpersand().deserialize(
+                messages.get("rewards-unlocked-hover"))));
+        player.sendMessage(body.append(Component.newline()).append(button));
+        if (!plugin.getConfig().getBoolean("rewards.unlock-sound.enabled", true)) return;
+        String configured = plugin.getConfig().getString("rewards.unlock-sound.sound", "BLOCK_AMETHYST_BLOCK_CHIME");
+        Sound sound;
+        try {
+            sound = Sound.valueOf(configured.toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException ex) {
+            sound = Sound.BLOCK_AMETHYST_BLOCK_CHIME;
+            plugin.getLogger().warning("Invalid rewards.unlock-sound.sound '" + configured
+                + "'; using BLOCK_AMETHYST_BLOCK_CHIME");
+        }
+        player.playSound(player.getLocation(), sound,
+            (float) plugin.getConfig().getDouble("rewards.unlock-sound.volume", 0.35D),
+            (float) plugin.getConfig().getDouble("rewards.unlock-sound.pitch", 1.15D));
+    }
+
     private long parseTokenizedPlaytimeMinutes(String raw) {
         long minutes = 0L;
         boolean matched = false;
@@ -948,7 +1049,42 @@ public final class RewardService {
         if (!vaultHook.isAvailable()) {
             return reward.getActions().stream().noneMatch(action -> action.getType() == RewardActionType.MONEY);
         }
-        return true;
+        return reward.getActions().stream().allMatch(action -> action.getType() != RewardActionType.ITEM
+            || (action.getMaterial() != null && action.getItemAmount() > 0));
+    }
+
+    private boolean deliverItem(Player player, RewardAction action) {
+        if (action.getMaterial() == null || action.getItemAmount() <= 0) return false;
+        ItemStack item = new ItemStack(action.getMaterial(), action.getItemAmount());
+        ItemMeta meta = item.getItemMeta();
+        if (action.getDisplayName() != null && !action.getDisplayName().isBlank()) {
+            meta.displayName(LegacyComponentSerializer.legacyAmpersand().deserialize(action.getDisplayName()));
+        }
+        if (!action.getLore().isEmpty()) {
+            meta.lore(action.getLore().stream().map(LegacyComponentSerializer.legacyAmpersand()::deserialize).toList());
+        }
+        item.setItemMeta(meta);
+        if (!hasInventoryCapacity(player, item)) {
+            return false;
+        }
+        Map<Integer, ItemStack> leftovers = player.getInventory().addItem(item);
+        return leftovers.isEmpty();
+    }
+
+    private boolean hasInventoryCapacity(Player player, ItemStack item) {
+        int capacity = 0;
+        int maxStack = item.getMaxStackSize();
+        for (ItemStack existing : player.getInventory().getStorageContents()) {
+            if (existing == null || existing.getType().isAir()) {
+                capacity += maxStack;
+            } else if (existing.isSimilar(item)) {
+                capacity += Math.max(0, maxStack - existing.getAmount());
+            }
+            if (capacity >= item.getAmount()) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private void refreshIntegrations() {
@@ -1316,7 +1452,16 @@ public final class RewardService {
             List<RewardCriterion> criteria = loadCriteria(section.getConfigurationSection(id + ".criteria"));
             List<RewardAction> actions = loadActions(section.getConfigurationSection(id + ".rewards"));
             String category = section.getString(id + ".category", inferCategory(criteria));
-            rewards.put(id.toLowerCase(Locale.ROOT), new RewardDefinition(id, name, description, icon, criteria, actions, category));
+            RewardCompletionMode completionMode;
+            try {
+                completionMode = RewardCompletionMode.valueOf(section.getString(id + ".completion-mode", "LATCHED")
+                    .toUpperCase(Locale.ROOT));
+            } catch (IllegalArgumentException ex) {
+                completionMode = RewardCompletionMode.LATCHED;
+                plugin.getLogger().warning("Invalid completion-mode for reward " + id + "; using LATCHED");
+            }
+            rewards.put(id.toLowerCase(Locale.ROOT),
+                new RewardDefinition(id, name, description, icon, criteria, actions, category, completionMode));
         }
     }
 
@@ -1404,7 +1549,13 @@ public final class RewardService {
             String value = entry.getString("id", "");
             double amount = entry.getDouble("amount", 0.0);
             String label = entry.getString("label", "");
-            actions.add(new RewardAction(type, value, amount, label));
+            Material itemMaterial = type == RewardActionType.ITEM
+                ? parseMaterial(entry.getString("material", value), section.getCurrentPath() + "." + key + ".material", false)
+                : null;
+            int itemAmount = type == RewardActionType.ITEM ? entry.getInt("amount", 1) : 0;
+            String displayName = entry.getString("display-name", "");
+            List<String> lore = entry.getStringList("lore");
+            actions.add(new RewardAction(type, value, amount, label, itemMaterial, itemAmount, displayName, lore));
         }
         return actions;
     }

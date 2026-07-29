@@ -46,10 +46,25 @@ global-scan:
   report-only: false
   debug-log-repairs: false
 
+rewards:
+  unlock-sound:
+    enabled: true
+    sound: "BLOCK_AMETHYST_BLOCK_CHIME"
+    volume: 0.35
+    pitch: 1.15
+
 debug:
   performance:
     enabled: false
     log-interval-seconds: 300
+
+daily:
+  timezone: "America/Indiana/Indianapolis"
+  payouts: [5, 10, 15, 20, 30, 40, 50]
+  animation:
+    enabled: true
+    default-player-preference: true
+    duration-ticks: 15
 
 tags:
   beta_tester:

@@ -100,9 +100,6 @@ public final class CosmeticsListener implements Listener {
     @EventHandler(priority = EventPriority.MONITOR)
     public void onProjectileHit(ProjectileHitEvent event) {
         cosmeticsService.unregisterProjectile(event.getEntity());
-        if (event.getHitEntity() instanceof Player && event.getEntity().getShooter() instanceof Player shooter) {
-            rewardService.incrementCounter(shooter.getUniqueId(), "projectile_hits", 1);
-        }
     }
 
     @EventHandler

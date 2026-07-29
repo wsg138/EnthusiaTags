@@ -12,6 +12,7 @@ import org.enthusia.tags.rewards.RewardListener;
 import org.enthusia.tags.rewards.RewardService;
 import org.enthusia.tags.rewards.RewardTracker;
 import org.enthusia.tags.rewards.RewardsCommand;
+import org.enthusia.tags.daily.DailyService;
 
 public final class EnthusiaTagsPlugin extends JavaPlugin {
     private TagService tagService;
@@ -21,6 +22,7 @@ public final class EnthusiaTagsPlugin extends JavaPlugin {
     private CosmeticsService cosmeticsService;
     private PerformanceMonitor performanceMonitor;
     private ConfigMigrator configMigrator;
+    private DailyService dailyService;
 
     @Override
     public void onEnable() {
@@ -36,11 +38,17 @@ public final class EnthusiaTagsPlugin extends JavaPlugin {
         cosmeticsService = new CosmeticsService(this, messages, performanceMonitor);
         rewardService = new RewardService(this, tagService, messages, performanceMonitor);
         rewardTracker = new RewardTracker(rewardService);
+        dailyService = new DailyService(this);
 
         tagService.enable();
         cosmeticsService.enable();
         rewardService.enable();
         rewardTracker.start(this);
+        try {
+            dailyService.enable();
+        } catch (java.sql.SQLException ex) {
+            getLogger().severe("Failed to enable daily rewards: " + ex.getMessage());
+        }
 
         Bukkit.getServicesManager().register(TagService.class, tagService, this, ServicePriority.Normal);
         Bukkit.getServicesManager().register(TagVisibilityService.class, tagService, this, ServicePriority.Normal);
@@ -55,6 +63,7 @@ public final class EnthusiaTagsPlugin extends JavaPlugin {
         if (rewardTracker != null) {
             rewardTracker.stop();
         }
+        if (dailyService != null) dailyService.disable();
         if (rewardService != null) {
             rewardService.disable();
         }
@@ -106,6 +115,9 @@ public final class EnthusiaTagsPlugin extends JavaPlugin {
         RewardsCommand rewardsCommand = new RewardsCommand(rewardService, tagService, messages, this);
         Bukkit.getPluginManager().registerEvents(new RewardListener(rewardService, rewardsCommand.getRewardMenu()), this);
         Bukkit.getPluginManager().registerEvents(rewardTracker, this);
+        Bukkit.getPluginManager().registerEvents(dailyService, this);
+        PluginCommand daily = getCommand("daily");
+        if (daily != null) daily.setExecutor(dailyService);
 
         PluginCommand rewards = getCommand("rewards");
         if (rewards != null) {

@@ -175,6 +175,19 @@ public final class RewardStorage {
         return submitMeasured("storage.rewards.ip-claim", () -> reserveIpClaimDirect(playerId, rewardId, ipAddress));
     }
 
+    public CompletableFuture<Void> releaseIpClaimAsync(UUID playerId, String rewardId, String ipAddress) {
+        return submitMeasured("storage.rewards.ip-release", () -> {
+            try (PreparedStatement statement = connection.prepareStatement(
+                "DELETE FROM reward_ip_claims WHERE player_uuid = ? AND reward_id = ? AND ip_address = ?")) {
+                statement.setString(1, playerId.toString());
+                statement.setString(2, rewardId);
+                statement.setString(3, ipAddress);
+                statement.executeUpdate();
+            }
+            return null;
+        });
+    }
+
     public boolean addIpBypassPairNow(UUID firstPlayerId, UUID secondPlayerId) throws SQLException {
         return executeBlockingMeasured("storage.rewards.ip-bypass.add", () -> addIpBypassPairDirect(firstPlayerId, secondPlayerId));
     }

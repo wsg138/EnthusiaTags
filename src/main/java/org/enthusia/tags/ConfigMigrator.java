@@ -16,7 +16,7 @@ import java.util.List;
 
 public final class ConfigMigrator {
     public static final int CURRENT_CONFIG_VERSION = 3;
-    private static final int REWARDS_CONFIG_VERSION = 3;
+    private static final int REWARDS_CONFIG_VERSION = 4;
     private static final DateTimeFormatter BACKUP_FORMAT = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
 
     private final JavaPlugin plugin;
@@ -91,8 +91,40 @@ public final class ConfigMigrator {
         if ("rewards.yml".equals(resourceName) && existingVersion < REWARDS_CONFIG_VERSION) {
             changed |= replaceRewardMoneyAmount(config, "rewards.payday.rewards.r1.amount", 500.0, 200.0, report);
             changed |= replaceRewardMoneyAmount(config, "rewards.diamond_hands.rewards.r2.amount", 500.0, 200.0, report);
+            changed |= replaceExact(config, "rewards.diamond_hands.description",
+                List.of("&7Obtain 64 diamonds."), List.of("&7Mine 64 diamond or deepslate diamond ore."), report);
+            changed |= replaceExact(config, "rewards.diamond_hands.criteria.c1.key",
+                "diamonds_obtained", "diamond_ore_mined", report);
+            changed |= replaceExact(config, "rewards.fear_me.criteria.c1.type",
+                "DEATHS_TOTAL", "CUSTOM_COUNTER", report);
+            if ("CUSTOM_COUNTER".equals(config.getString("rewards.fear_me.criteria.c1.type"))
+                && !config.contains("rewards.fear_me.criteria.c1.key")) {
+                config.set("rewards.fear_me.criteria.c1.key", "pvp_deaths");
+                report.migrated("rewards.yml: corrected default fear_me counter");
+                changed = true;
+            }
+            changed |= replaceExact(config, "rewards.i_swear_it_worked.description",
+                List.of("&7Die to your own explosion."), List.of("&7Die to an explosion."), report);
+            if ("COMMAND".equalsIgnoreCase(config.getString("rewards.starter_pack.rewards.r1.type"))
+                && "give {player} golden_apple 2".equals(config.getString("rewards.starter_pack.rewards.r1.id"))
+                && "Starter Pack (2 Golden Apples)".equals(config.getString("rewards.starter_pack.rewards.r1.label"))) {
+                config.set("rewards.starter_pack.rewards.r1.type", "ITEM");
+                config.set("rewards.starter_pack.rewards.r1.id", null);
+                config.set("rewards.starter_pack.rewards.r1.material", "GOLDEN_APPLE");
+                config.set("rewards.starter_pack.rewards.r1.amount", 2);
+                report.migrated("rewards.yml: migrated unchanged starter_pack command to ITEM");
+                changed = true;
+            }
         }
         return changed;
+    }
+
+    private boolean replaceExact(YamlConfiguration config, String path, Object oldValue,
+                                 Object newValue, MigrationReport report) {
+        if (!java.util.Objects.equals(config.get(path), oldValue)) return false;
+        config.set(path, newValue);
+        report.migrated("rewards.yml: corrected unchanged bundled value " + path);
+        return true;
     }
 
     private boolean migrateInvisibilityDefault(YamlConfiguration config, MigrationReport report) {
@@ -130,6 +162,9 @@ public final class ConfigMigrator {
                 continue;
             }
             if (!target.contains(childPath)) {
+                if (isAdministratorCollection(resourceName, childPath)) {
+                    continue;
+                }
                 target.set(childPath, defaults.get(childPath));
                 report.added(resourceName + ": added missing key " + childPath);
                 changed = true;
@@ -142,6 +177,11 @@ public final class ConfigMigrator {
             }
         }
         return changed;
+    }
+
+    private boolean isAdministratorCollection(String resourceName, String path) {
+        if ("rewards.yml".equals(resourceName) && path.startsWith("rewards.")) return true;
+        return "config.yml".equals(resourceName) && path.startsWith("tags.");
     }
 
     private void backup(File file, String resourceName, MigrationReport report) throws Exception {

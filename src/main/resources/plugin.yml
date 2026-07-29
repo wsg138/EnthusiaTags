@@ -30,12 +30,19 @@ commands:
     usage: /enthusiatags <reload|performance|rewards>
     aliases: [etags]
     permission: enthusia.tags.admin
+  daily:
+    description: Open the daily reward menu.
+    usage: /daily
+    permission: enthusia.tags.daily
 permissions:
   enthusia.tags.use:
     description: Allows opening the tag selection menu.
     default: true
   enthusia.tags.rewards:
     description: Allows opening the rewards menu.
+    default: true
+  enthusia.tags.daily:
+    description: Allows claiming daily rewards.
     default: true
   enthusia.cosmetics.use:
     description: Allows opening the cosmetics menu.

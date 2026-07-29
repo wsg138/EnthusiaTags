@@ -216,12 +216,24 @@ public final class TagService implements TagVisibilityService {
     }
 
     public void grantTag(UUID playerId, String tagId) {
+        grantTagPersisted(playerId, tagId);
+    }
+
+    public CompletableFuture<Boolean> grantTagPersisted(UUID playerId, String tagId) {
         String lowered = tagId.toLowerCase(Locale.ROOT);
+        if (registry.get(lowered) == null) {
+            return CompletableFuture.completedFuture(false);
+        }
         PlayerTagData data = cache.computeIfAbsent(playerId, ignored -> new PlayerTagData());
         data.getOwnedTags().add(lowered);
-        storage.grantTagAsync(playerId, lowered).exceptionally(throwable -> {
-            plugin.getLogger().warning("Failed to grant tag " + lowered + " to " + playerId + ": " + throwable.getMessage());
-            return null;
+        return storage.grantTagAsync(playerId, lowered).handle((ignored, throwable) -> {
+            if (throwable == null) {
+                return true;
+            }
+            data.getOwnedTags().remove(lowered);
+            plugin.getLogger().warning("Failed to grant tag " + lowered + " to " + playerId + ": "
+                + throwable.getMessage());
+            return false;
         });
     }
 
