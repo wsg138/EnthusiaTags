@@ -95,7 +95,7 @@ public final class RewardService {
 
     private RewardStorage storage;
     private ExecutorService claimExecutor;
-    private volatile RewardsConfig config;
+    private volatile RewardsConfig config = new RewardsConfig("", "", "", "", 56, false, "", Map.of());
     private BukkitTask flushTask;
     private BukkitTask globalScanTask;
     private BukkitTask syncDrainTask;
@@ -157,7 +157,9 @@ public final class RewardService {
                 return;
             }
         }
-        flushAllBlocking();
+        if (storage != null) {
+            flushAllBlocking();
+        }
         pendingLoads.clear();
         pendingCounterDeltas.clear();
         progressSnapshots.clear();
@@ -263,6 +265,7 @@ public final class RewardService {
     }
 
     public void preloadPlayerBlocking(UUID playerId) {
+        if (!isAvailable()) return;
         RewardPlayerState existing = playerStates.get(playerId);
         if (existing != null && existing.isLoaded()) {
             return;
@@ -276,6 +279,7 @@ public final class RewardService {
     }
 
     public void loadPlayer(Player player) {
+        if (!isAvailable()) return;
         preloadPlayer(player.getUniqueId());
         RewardPlayerState state = getLoadedState(player.getUniqueId());
         if (state != null) {
@@ -287,6 +291,7 @@ public final class RewardService {
     }
 
     public void unloadPlayer(Player player) {
+        if (!isAvailable()) return;
         UUID playerId = player.getUniqueId();
         RewardPlayerState state = playerStates.get(playerId);
         if (state != null) {
@@ -299,6 +304,7 @@ public final class RewardService {
     }
 
     public boolean isClaimed(UUID playerId, String rewardId) {
+        if (!isAvailable()) return false;
         RewardPlayerState state = getLoadedState(playerId);
         return state != null && state.isClaimed(rewardId.toLowerCase(Locale.ROOT));
     }
@@ -629,14 +635,23 @@ public final class RewardService {
     }
 
     public boolean isComplete(Player player, RewardDefinition reward) {
+        if (!isAvailable()) return false;
         return evaluate(player, reward).claimable();
     }
 
     public RewardEvaluation evaluate(Player player, RewardDefinition reward) {
+        if (!isAvailable()) {
+            return new RewardEvaluation(RewardStatus.LOCKED, Map.of(), false, false,
+                "Reward storage is unavailable");
+        }
         return evaluate(player, reward, getProgressSnapshot(player));
     }
 
     public RewardEvaluation evaluate(Player player, RewardDefinition reward, ProgressSnapshot snapshot) {
+        if (!isAvailable()) {
+            return new RewardEvaluation(RewardStatus.LOCKED, Map.of(), false, false,
+                "Reward storage is unavailable");
+        }
         RewardPlayerState state = getLoadedState(player.getUniqueId());
         Map<String, Long> progress = new LinkedHashMap<>();
         String rewardId = reward.getId().toLowerCase(Locale.ROOT);
@@ -695,10 +710,12 @@ public final class RewardService {
     }
 
     public long getProgress(Player player, RewardCriterion criterion) {
+        if (!isAvailable()) return 0L;
         return getProgress(player, criterion, getProgressSnapshot(player));
     }
 
     public long getProgress(Player player, RewardCriterion criterion, ProgressSnapshot snapshot) {
+        if (!isAvailable()) return 0L;
         performanceMonitor.increment("rewards.progress.calls");
         if (criterion == null || !criterion.isValid()) {
             return 0L;
@@ -773,6 +790,7 @@ public final class RewardService {
     }
 
     public ProgressSnapshot getProgressSnapshot(Player player) {
+        if (!isAvailable()) return new ProgressSnapshot(0L, Map.of());
         long nowTick = Bukkit.getCurrentTick();
         ProgressSnapshot snapshot = progressSnapshots.get(player.getUniqueId());
         if (snapshot != null && nowTick - snapshot.createdTick() <= progressCacheTicks) {
@@ -786,10 +804,12 @@ public final class RewardService {
     }
 
     public void invalidateProgress(UUID playerId) {
+        if (!isAvailable()) return;
         progressSnapshots.remove(playerId);
     }
 
     public void queueProgressRefresh(Player player) {
+        if (!isAvailable()) return;
         if (player == null || !player.isOnline()) {
             return;
         }
@@ -799,6 +819,7 @@ public final class RewardService {
     }
 
     public void queueUnlockCheck(Player player) {
+        if (!isAvailable()) return;
         if (player == null || !player.isOnline()) {
             return;
         }
@@ -821,6 +842,7 @@ public final class RewardService {
     }
 
     public String getLivePlaytimeState(Player player) {
+        if (!isAvailable()) return "";
         if (playtimeHook.isAvailable()) {
             return playtimeHook.getLiveState(player.getUniqueId());
         }
@@ -835,6 +857,7 @@ public final class RewardService {
     }
 
     public long incrementCounter(UUID playerId, String key, long delta) {
+        if (!isAvailable()) return 0L;
         RewardPlayerState state = getLoadedState(playerId);
         if (state == null || !state.isLoaded()) {
             queueCounterDelta(playerId, key, delta);
@@ -847,6 +870,7 @@ public final class RewardService {
     }
 
     public void setCounter(UUID playerId, String key, long value) {
+        if (!isAvailable()) return;
         RewardPlayerState state = getLoadedState(playerId);
         if (state == null || !state.isLoaded()) {
             performanceMonitor.increment("rewards.state.skipped-unloaded");
@@ -858,6 +882,7 @@ public final class RewardService {
     }
 
     public long getCounter(UUID playerId, String key) {
+        if (!isAvailable()) return 0L;
         RewardPlayerState state = getLoadedState(playerId);
         if (state == null) {
             return 0L;
@@ -866,6 +891,7 @@ public final class RewardService {
     }
 
     public String getState(UUID playerId, String key) {
+        if (!isAvailable()) return null;
         RewardPlayerState state = getLoadedState(playerId);
         if (state == null) {
             return null;
@@ -1457,6 +1483,7 @@ public final class RewardService {
     }
 
     public void setState(UUID playerId, String key, String value) {
+        if (!isAvailable()) return;
         RewardPlayerState state = getLoadedState(playerId);
         if (state == null || !state.isLoaded()) {
             performanceMonitor.increment("rewards.state.skipped-unloaded");
@@ -1622,6 +1649,7 @@ public final class RewardService {
     }
 
     private void queueCounterDelta(UUID playerId, String key, long delta) {
+        if (!isAvailable()) return;
         pendingCounterDeltas.computeIfAbsent(playerId, ignored -> new ConcurrentHashMap<>())
             .merge(key, delta, Long::sum);
         performanceMonitor.increment("rewards.counter.deferred");
@@ -2165,11 +2193,13 @@ public final class RewardService {
     }
 
     public void queueSyncAll() {
+        if (!isAvailable()) return;
         enqueueOnlinePlayers(false);
         performanceMonitor.increment("global-scan.syncall-queued");
     }
 
     public void syncPlayer(Player player) {
+        if (!isAvailable()) return;
         if (player == null) {
             return;
         }
@@ -2222,7 +2252,7 @@ public final class RewardService {
     }
 
     private void queueUnlockCheck(UUID playerId) {
-        if (playerId == null) {
+        if (!isAvailable() || playerId == null) {
             return;
         }
         queuedUnlockChecks.add(playerId);

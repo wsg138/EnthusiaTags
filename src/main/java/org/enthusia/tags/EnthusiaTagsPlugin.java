@@ -37,13 +37,15 @@ public final class EnthusiaTagsPlugin extends JavaPlugin {
         tagService = new TagService(this, messages, performanceMonitor);
         cosmeticsService = new CosmeticsService(this, messages, performanceMonitor);
         rewardService = new RewardService(this, tagService, messages, performanceMonitor);
-        rewardTracker = new RewardTracker(rewardService);
         dailyService = new DailyService(this);
 
         tagService.enable();
         cosmeticsService.enable();
         rewardService.enable();
-        rewardTracker.start(this);
+        if (rewardService.isAvailable()) {
+            rewardTracker = new RewardTracker(rewardService);
+            rewardTracker.start(this);
+        }
         try {
             dailyService.enable();
         } catch (java.sql.SQLException ex) {
@@ -117,8 +119,10 @@ public final class EnthusiaTagsPlugin extends JavaPlugin {
         Bukkit.getPluginManager().registerEvents(new TagListener(tagService, rewardService), this);
         Bukkit.getPluginManager().registerEvents(new CosmeticsListener(cosmeticsService, tagService, messages, rewardService), this);
         RewardsCommand rewardsCommand = new RewardsCommand(rewardService, tagService, messages, this);
-        Bukkit.getPluginManager().registerEvents(new RewardListener(rewardService, rewardsCommand.getRewardMenu()), this);
-        Bukkit.getPluginManager().registerEvents(rewardTracker, this);
+        if (rewardService.isAvailable()) {
+            Bukkit.getPluginManager().registerEvents(new RewardListener(rewardService, rewardsCommand.getRewardMenu()), this);
+            Bukkit.getPluginManager().registerEvents(rewardTracker, this);
+        }
         if (dailyService != null) {
             Bukkit.getPluginManager().registerEvents(dailyService, this);
             PluginCommand daily = getCommand("daily");

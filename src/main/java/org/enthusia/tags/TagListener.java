@@ -28,11 +28,13 @@ public final class TagListener implements Listener {
     private final TagService tagService;
     private final TagMenu tagMenu;
     private final RewardMenu rewardMenu;
+    private final RewardService rewardService;
 
     public TagListener(TagService tagService, RewardService rewardService) {
         this.tagService = tagService;
         this.tagMenu = new TagMenu(tagService);
         this.rewardMenu = new RewardMenu(rewardService, tagService);
+        this.rewardService = rewardService;
     }
 
     @EventHandler
@@ -100,6 +102,10 @@ public final class TagListener implements Listener {
         PersistentDataContainer data = meta.getPersistentDataContainer();
 
         if (data.has(tagMenu.getRewardsKey(), PersistentDataType.BYTE)) {
+            if (!rewardService.isAvailable()) {
+                player.sendMessage(message("rewards-service-unavailable"));
+                return;
+            }
             player.openInventory(rewardMenu.create(player));
             return;
         }
