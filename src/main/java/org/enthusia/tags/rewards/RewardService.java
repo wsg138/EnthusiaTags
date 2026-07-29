@@ -27,8 +27,6 @@ import org.enthusia.tags.TagDefinition;
 import org.enthusia.tags.TagService;
 
 import java.io.File;
-import java.io.InputStreamReader;
-import java.nio.charset.StandardCharsets;
 import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.EnumMap;
@@ -244,7 +242,16 @@ public final class RewardService {
 
         state.states().put("reward-delivery:" + rewardId, RewardStatus.CLAIM_PENDING.name());
         state.setDirty(true);
-        for (RewardAction action : reward.getActions()) {
+        flushPlayerBlocking(player.getUniqueId());
+        for (int actionIndex = 0; actionIndex < reward.getActions().size(); actionIndex++) {
+            RewardAction action = reward.getActions().get(actionIndex);
+            String actionStateKey = "reward-action:" + rewardId + ":" + actionIndex;
+            if (RewardStatus.CLAIMED.name().equals(state.states().get(actionStateKey))) {
+                continue;
+            }
+            state.states().put(actionStateKey, RewardStatus.CLAIM_PENDING.name());
+            state.setDirty(true);
+            flushPlayerBlocking(player.getUniqueId());
             boolean delivered;
             switch (action.getType()) {
                 case TAG -> {
@@ -261,6 +268,7 @@ public final class RewardService {
                 default -> delivered = false;
             }
             if (!delivered) {
+                state.states().put(actionStateKey, RewardStatus.DELIVERY_FAILED.name());
                 state.states().put("reward-delivery:" + rewardId, RewardStatus.DELIVERY_FAILED.name());
                 state.setDirty(true);
                 storage.releaseIpClaimAsync(player.getUniqueId(), rewardId, getPlayerIpAddress(player));
@@ -269,13 +277,16 @@ public final class RewardService {
                     + " name=" + player.getName() + " reward=" + rewardId + " action=" + action.getType());
                 return RewardClaimResult.DELIVERY_FAILED;
             }
+            state.states().put(actionStateKey, RewardStatus.CLAIMED.name());
+            state.setDirty(true);
+            flushPlayerBlocking(player.getUniqueId());
         }
 
         state.claimedRewards().add(rewardId);
         state.states().put("reward-delivery:" + rewardId, RewardStatus.CLAIMED.name());
         state.setDirty(true);
         invalidateProgress(player.getUniqueId());
-        flushPlayerAsync(player.getUniqueId(), state);
+        flushPlayerBlocking(player.getUniqueId());
         return RewardClaimResult.SUCCESS;
         } finally {
             inFlightClaims.remove(claimKey);
@@ -450,8 +461,7 @@ public final class RewardService {
     public String formatAction(RewardAction action) {
         if (action.getType() == RewardActionType.TAG) {
             TagDefinition tag = tagService.getRegistry().get(action.getValue());
-            String name = tag == null ? action.getValue() : tag.getDisplayName();
-            return LegacyComponentSerializer.legacyAmpersand().deserialize(name).toString();
+            return tag == null ? action.getValue() : tag.getDisplayName();
         }
         if (action.getType() == RewardActionType.MONEY) {
             return String.valueOf(action.getAmount());
@@ -790,7 +800,7 @@ public final class RewardService {
         if (state == null || !state.isLoaded()) {
             return;
         }
-        boolean changed = false;
+        List<RewardDefinition> newlyUnlocked = new ArrayList<>();
         for (RewardDefinition reward : rewards.values()) {
             String rewardId = reward.getId().toLowerCase(Locale.ROOT);
             if (state.claimedRewards().contains(rewardId)) {
@@ -805,13 +815,26 @@ public final class RewardService {
                 continue;
             }
             state.states().put(notificationKey, "true");
-            changed = true;
-            sendUnlockNotification(player, reward);
-            performanceMonitor.increment("rewards.unlock-notified");
+            newlyUnlocked.add(reward);
         }
-        if (changed) {
+        if (!newlyUnlocked.isEmpty()) {
             state.setDirty(true);
-            flushPlayerAsync(player.getUniqueId(), state);
+            flushPlayerBlocking(player.getUniqueId());
+            int limit = Math.max(1, plugin.getConfig().getInt("rewards.unlock-notifications.individual-limit", 3));
+            for (int index = 0; index < Math.min(limit, newlyUnlocked.size()); index++) {
+                sendUnlockNotification(player, newlyUnlocked.get(index), false);
+                performanceMonitor.increment("rewards.unlock-notified");
+            }
+            if (newlyUnlocked.size() > limit) {
+                Component summary = LegacyComponentSerializer.legacyAmpersand().deserialize(
+                    messages.get("rewards-unlocked-summary")
+                        .replace("{count}", String.valueOf(newlyUnlocked.size() - limit)))
+                    .clickEvent(ClickEvent.runCommand("/rewards"))
+                    .hoverEvent(HoverEvent.showText(LegacyComponentSerializer.legacyAmpersand().deserialize(
+                        messages.get("rewards-unlocked-summary-hover"))));
+                player.sendMessage(summary);
+            }
+            playUnlockSound(player);
         }
     }
 
@@ -936,7 +959,7 @@ public final class RewardService {
         return parseNumericPlaytimeMinutes(raw, placeholder);
     }
 
-    private void sendUnlockNotification(Player player, RewardDefinition reward) {
+    private void sendUnlockNotification(Player player, RewardDefinition reward, boolean playSound) {
         String description = reward.getDescription().isEmpty() ? "" : reward.getDescription().get(0);
         String labels = reward.getActions().stream().map(action -> {
             String formatted = formatAction(action);
@@ -953,6 +976,10 @@ public final class RewardService {
             .hoverEvent(HoverEvent.showText(LegacyComponentSerializer.legacyAmpersand().deserialize(
                 messages.get("rewards-unlocked-hover"))));
         player.sendMessage(body.append(Component.newline()).append(button));
+        if (playSound) playUnlockSound(player);
+    }
+
+    private void playUnlockSound(Player player) {
         if (!plugin.getConfig().getBoolean("rewards.unlock-sound.enabled", true)) return;
         String configured = plugin.getConfig().getString("rewards.unlock-sound.sound", "BLOCK_AMETHYST_BLOCK_CHIME");
         Sound sound;
@@ -1422,18 +1449,6 @@ public final class RewardService {
         File file = new File(plugin.getDataFolder(), REWARDS_FILE);
         if (!file.exists()) {
             plugin.saveResource(REWARDS_FILE, false);
-        }
-        var configFile = org.bukkit.configuration.file.YamlConfiguration.loadConfiguration(file);
-        try (var stream = plugin.getResource(REWARDS_FILE)) {
-            if (stream == null) {
-                return;
-            }
-            var defaults = org.bukkit.configuration.file.YamlConfiguration.loadConfiguration(
-                new InputStreamReader(stream, StandardCharsets.UTF_8));
-            configFile.setDefaults(defaults);
-            configFile.options().copyDefaults(true);
-            configFile.save(file);
-        } catch (Exception ignored) {
         }
     }
 

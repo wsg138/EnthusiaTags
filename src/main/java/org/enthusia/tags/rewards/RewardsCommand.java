@@ -48,7 +48,7 @@ public final class RewardsCommand implements CommandExecutor, TabCompleter {
                 player.sendMessage(Component.text("Unknown reward."));
                 return true;
             }
-            player.openInventory(rewardMenu.createCategory(player, reward.getCategory()));
+            player.openInventory(rewardMenu.createFocused(player, reward));
             return true;
         }
         player.openInventory(rewardMenu.create(player));

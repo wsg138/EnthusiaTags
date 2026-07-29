@@ -47,6 +47,8 @@ global-scan:
   debug-log-repairs: false
 
 rewards:
+  unlock-notifications:
+    individual-limit: 3
   unlock-sound:
     enabled: true
     sound: "BLOCK_AMETHYST_BLOCK_CHIME"

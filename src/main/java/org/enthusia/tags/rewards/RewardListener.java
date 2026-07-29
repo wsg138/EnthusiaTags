@@ -86,6 +86,10 @@ public final class RewardListener implements Listener {
                 .deserialize(rewardService.getMessage("rewards-not-ready")));
             case IP_ALREADY_CLAIMED -> player.sendMessage(LegacyComponentSerializer.legacyAmpersand()
                 .deserialize(rewardService.getMessage("rewards-ip-already-claimed")));
+            case DELIVERY_FAILED -> player.sendMessage(LegacyComponentSerializer.legacyAmpersand()
+                .deserialize(rewardService.getMessage("rewards-delivery-failed")));
+            case CLAIM_IN_PROGRESS -> player.sendMessage(LegacyComponentSerializer.legacyAmpersand()
+                .deserialize(rewardService.getMessage("rewards-claim-in-progress")));
         }
     }
 }

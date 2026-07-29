@@ -14,9 +14,30 @@ class DailyStorageTest {
         try (DailyStorage storage = new DailyStorage(file)) {
             assertTrue(storage.reserve(player, date, 5D));
             assertFalse(storage.reserve(player, date, 5D));
+            storage.markDepositing(player, date, 100D);
+            storage.recordVaultResult(player, date, DailyStorage.TransactionStatus.DELIVERED,
+                105D, 5D, "SUCCESS", "");
             storage.complete(player, date, new DailyState(date, 1, 1, 1, 5D, false));
             assertEquals(1, storage.load(player, true).currentStreak());
             assertEquals(5D, storage.load(player, true).totalAwarded());
+            assertEquals(DailyStorage.TransactionStatus.DELIVERED, storage.transaction(player, date).status());
+            assertNotNull(storage.transaction(player, date).completedAt());
+        } finally {
+            Files.deleteIfExists(file.toPath());
+        }
+    }
+
+    @Test void failedDepositCanBePreparedForRetry() throws Exception {
+        var file = Files.createTempFile("enthusia-daily-retry-", ".db").toFile();
+        UUID player = UUID.randomUUID();
+        LocalDate date = LocalDate.of(2026, 7, 29);
+        try (DailyStorage storage = new DailyStorage(file)) {
+            assertTrue(storage.reserve(player, date, 5D));
+            storage.markDepositing(player, date, 0D);
+            storage.recordVaultResult(player, date, DailyStorage.TransactionStatus.FAILED,
+                0D, 0D, "FAILURE", "temporary");
+            assertTrue(storage.reserve(player, date, 5D));
+            assertEquals(DailyStorage.TransactionStatus.PREPARED, storage.transaction(player, date).status());
         } finally {
             Files.deleteIfExists(file.toPath());
         }

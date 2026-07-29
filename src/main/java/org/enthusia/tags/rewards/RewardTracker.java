@@ -28,7 +28,6 @@ import java.util.concurrent.ConcurrentHashMap;
 public final class RewardTracker implements Listener {
     private final RewardService rewardService;
     private final Map<UUID, Map<UUID, Long>> firstHitTimes = new ConcurrentHashMap<>();
-    private final java.util.Set<UUID> countedProjectiles = ConcurrentHashMap.newKeySet();
     private final Map<UUID, Long> activeSampleTimes = new ConcurrentHashMap<>();
     private BukkitTask playtimeTask;
 
@@ -50,7 +49,6 @@ public final class RewardTracker implements Listener {
         }
         firstHitTimes.clear();
         activeSampleTimes.clear();
-        countedProjectiles.clear();
     }
 
     @EventHandler
@@ -116,9 +114,7 @@ public final class RewardTracker implements Listener {
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onProjectileHit(ProjectileHitEvent event) {
         if (!(event.getEntity().getShooter() instanceof Player player) || event.getHitEntity() == null) return;
-        if (countedProjectiles.add(event.getEntity().getUniqueId())) {
-            rewardService.incrementCounter(player.getUniqueId(), "projectile_hits", 1);
-        }
+        rewardService.incrementCounter(player.getUniqueId(), "projectile_hits", 1);
     }
 
     @EventHandler(priority = EventPriority.MONITOR)

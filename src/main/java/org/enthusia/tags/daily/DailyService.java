@@ -142,7 +142,13 @@ public final class DailyService implements CommandExecutor, Listener {
                 return;
             }
             double amount = DailyRules.payout(streak, payouts);
-            if (!storage.reserve(id, today, amount)) return;
+            if (!storage.reserve(id, today, amount)) {
+                DailyStorage.Transaction existing = storage.transaction(id, today);
+                String status = existing == null ? "unknown" : existing.status().name();
+                player.sendMessage(Component.text("Today's daily transaction is " + status
+                    + ". Contact staff if your reward or streak is missing."));
+                return;
+            }
             double before = vault.getBalance(player);
             storage.markDepositing(id, today, before);
             VaultHook.DepositResult result = vault.depositDetailed(player, amount);

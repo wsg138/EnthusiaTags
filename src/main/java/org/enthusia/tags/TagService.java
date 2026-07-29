@@ -225,12 +225,15 @@ public final class TagService implements TagVisibilityService {
             return CompletableFuture.completedFuture(false);
         }
         PlayerTagData data = cache.computeIfAbsent(playerId, ignored -> new PlayerTagData());
+        boolean alreadyOwned = data.getOwnedTags().contains(lowered);
         data.getOwnedTags().add(lowered);
         return storage.grantTagAsync(playerId, lowered).handle((ignored, throwable) -> {
             if (throwable == null) {
                 return true;
             }
-            data.getOwnedTags().remove(lowered);
+            if (!alreadyOwned) {
+                data.getOwnedTags().remove(lowered);
+            }
             plugin.getLogger().warning("Failed to grant tag " + lowered + " to " + playerId + ": "
                 + throwable.getMessage());
             return false;

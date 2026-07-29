@@ -59,6 +59,18 @@ public final class RewardMenu {
         return createCategory(player, categoryId, 0);
     }
 
+    public Inventory createFocused(Player player, RewardDefinition target) {
+        int index = 0;
+        for (RewardDefinition reward : rewardService.getRewards().values()) {
+            if (!reward.getCategory().equalsIgnoreCase(target.getCategory())) continue;
+            if (reward.getId().equalsIgnoreCase(target.getId())) {
+                return createCategory(player, target.getCategory(), index / 45);
+            }
+            index++;
+        }
+        return create(player);
+    }
+
     public Inventory createCategory(Player player, String categoryId, int page) {
         RewardMenuHolder holder = new RewardMenuHolder(rewardService, categoryId, page);
         RewardCategory category = rewardService.getConfig().categories().get(categoryId);

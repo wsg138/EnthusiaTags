@@ -9,7 +9,7 @@ public final class DailyStorage implements AutoCloseable {
     public enum TransactionStatus { PREPARED, DEPOSITING, DELIVERED, FAILED, UNCERTAIN, RECONCILED, CANCELLED }
     public record Transaction(UUID playerId, LocalDate date, double amount, TransactionStatus status,
                               Double balanceBefore, Double balanceAfter, Double responseAmount,
-                              String responseType, String failure) { }
+                              String responseType, String failure, Long completedAt) { }
     private final Connection connection;
 
     public DailyStorage(File file) throws SQLException {
@@ -62,7 +62,18 @@ public final class DailyStorage implements AutoCloseable {
             statement.setString(2, date.toString());
             statement.setDouble(3, amount);
             statement.setLong(4, System.currentTimeMillis());
-            return statement.executeUpdate() == 1;
+            if (statement.executeUpdate() == 1) return true;
+        }
+        try (PreparedStatement retry = connection.prepareStatement("""
+            UPDATE daily_ledger SET status='PREPARED',amount=?,created_at=?,completed_at=NULL,failure=NULL,
+              balance_before=NULL,balance_after=NULL,response_amount=NULL,response_type=NULL
+            WHERE player_uuid=? AND claim_date=? AND status='FAILED'
+            """)) {
+            retry.setDouble(1, amount);
+            retry.setLong(2, System.currentTimeMillis());
+            retry.setString(3, playerId.toString());
+            retry.setString(4, date.toString());
+            return retry.executeUpdate() == 1;
         }
     }
 
@@ -78,7 +89,8 @@ public final class DailyStorage implements AutoCloseable {
             UPDATE daily_ledger SET status=?,balance_after=?,response_amount=?,response_type=?,failure=?
             WHERE player_uuid=? AND claim_date=? AND status='DEPOSITING'
             """)) {
-            statement.setString(1, status.name());
+            statement.setString(1, status == TransactionStatus.DELIVERED
+                ? TransactionStatus.DEPOSITING.name() : status.name());
             statement.setDouble(2, balanceAfter);
             statement.setDouble(3, responseAmount);
             statement.setString(4, responseType);
@@ -103,7 +115,9 @@ public final class DailyStorage implements AutoCloseable {
             ledger.setLong(1, System.currentTimeMillis());
             ledger.setString(2, playerId.toString());
             ledger.setString(3, date.toString());
-            ledger.executeUpdate();
+            if (ledger.executeUpdate() != 1) {
+                throw new SQLException("Daily transaction was not ready for completion");
+            }
             upsert.setString(1, playerId.toString());
             upsert.setString(2, date.toString());
             upsert.setInt(3, state.currentStreak());
@@ -160,7 +174,7 @@ public final class DailyStorage implements AutoCloseable {
                 return new Transaction(playerId, date, rs.getDouble("amount"),
                     TransactionStatus.valueOf(rs.getString("status")), nullableDouble(rs, "balance_before"),
                     nullableDouble(rs, "balance_after"), nullableDouble(rs, "response_amount"),
-                    rs.getString("response_type"), rs.getString("failure"));
+                    rs.getString("response_type"), rs.getString("failure"), nullableLong(rs, "completed_at"));
             }
         }
     }
@@ -181,6 +195,11 @@ public final class DailyStorage implements AutoCloseable {
 
     private Double nullableDouble(ResultSet rs, String name) throws SQLException {
         double value = rs.getDouble(name);
+        return rs.wasNull() ? null : value;
+    }
+
+    private Long nullableLong(ResultSet rs, String name) throws SQLException {
+        long value = rs.getLong(name);
         return rs.wasNull() ? null : value;
     }
 
