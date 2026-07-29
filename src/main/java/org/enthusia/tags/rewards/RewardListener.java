@@ -13,6 +13,7 @@ import org.bukkit.persistence.PersistentDataContainer;
 import org.bukkit.persistence.PersistentDataType;
 
 import java.util.Locale;
+import java.util.UUID;
 
 public final class RewardListener implements Listener {
     private final RewardService rewardService;
@@ -79,14 +80,15 @@ public final class RewardListener implements Listener {
         if (reward == null) {
             return;
         }
+        UUID playerId = player.getUniqueId();
         rewardService.claimAsync(player, reward).whenComplete((result, throwable) ->
-            org.bukkit.Bukkit.getScheduler().runTask(rewardService.getPlugin(), () -> {
+            rewardService.runForOnlinePlayer(playerId, currentPlayer -> {
                 if (throwable != null) {
-                    player.sendMessage(LegacyComponentSerializer.legacyAmpersand()
+                    currentPlayer.sendMessage(LegacyComponentSerializer.legacyAmpersand()
                         .deserialize(rewardService.getMessage("rewards-delivery-failed")));
                     return;
                 }
-                sendClaimResult(player, result);
+                sendClaimResult(currentPlayer, result);
             }));
     }
 

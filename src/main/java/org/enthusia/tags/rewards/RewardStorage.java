@@ -736,6 +736,62 @@ public final class RewardStorage {
             "Inventory capacity changed before delivery");
     }
 
+    public CompletableFuture<Long> markQueuedItemReconciliationAsync(
+        UUID playerId, QueuedItem item, String evidence) {
+        return submitMeasured("storage.rewards.item-overflow-ambiguous", () -> {
+            connection.setAutoCommit(false);
+            try {
+                ActionLedgerEntry ledger = selectActionEntry(playerId, item.rewardId(), item.actionId());
+                if (ledger == null || ledger.status() != RewardStatus.ITEM_QUEUED
+                    || !item.fingerprint().equals(ledger.fingerprint())) {
+                    throw new SQLException("Ambiguous item does not match its unresolved action ledger entry");
+                }
+                try (PreparedStatement pending = connection.prepareStatement("""
+                    SELECT 1 FROM reward_item_overflow
+                    WHERE player_uuid=? AND reward_id=? AND action_id=? AND fingerprint=?
+                      AND status='DELIVERY_PENDING'
+                    """)) {
+                    pending.setString(1, playerId.toString());
+                    pending.setString(2, item.rewardId());
+                    pending.setString(3, item.actionId());
+                    pending.setString(4, item.fingerprint());
+                    try (ResultSet rs = pending.executeQuery()) {
+                        if (!rs.next()) throw new SQLException("Item overflow entry is not DELIVERY_PENDING");
+                    }
+                }
+                try (PreparedStatement action = connection.prepareStatement("""
+                    UPDATE reward_action_ledger
+                    SET status='REQUIRES_RECONCILIATION',error_message=?,updated_at=?
+                    WHERE player_uuid=? AND reward_id=? AND action_id=? AND fingerprint=?
+                      AND status='ITEM_QUEUED'
+                    """)) {
+                    action.setString(1, evidence);
+                    action.setLong(2, System.currentTimeMillis());
+                    action.setString(3, playerId.toString());
+                    action.setString(4, item.rewardId());
+                    action.setString(5, item.actionId());
+                    action.setString(6, item.fingerprint());
+                    if (action.executeUpdate() != 1) {
+                        throw new SQLException("Ambiguous item action transition was rejected");
+                    }
+                }
+                insertItemOverflowHistory(playerId, item.rewardId(), item.actionId(),
+                    "DELIVERY_PENDING", "DELIVERY_PENDING", evidence);
+                insertActionHistory(playerId, item.rewardId(), item.actionId(), RewardStatus.ITEM_QUEUED,
+                    RewardStatus.REQUIRES_RECONCILIATION, item.fingerprint(), null, evidence);
+                writeOverallAndClaim(playerId, item.rewardId(), RewardStatus.REQUIRES_RECONCILIATION, false);
+                long revision = bumpPlayerRevision(playerId);
+                connection.commit();
+                return revision;
+            } catch (SQLException ex) {
+                connection.rollback();
+                throw ex;
+            } finally {
+                connection.setAutoCommit(true);
+            }
+        });
+    }
+
     private CompletableFuture<Void> transitionQueuedItemAsync(UUID playerId, QueuedItem item, String oldStatus,
                                                                String newStatus, String reason) {
         return submitMeasured("storage.rewards.item-overflow-transition", () -> {
@@ -1229,28 +1285,28 @@ public final class RewardStorage {
                     if (update.executeUpdate() != 1) throw new SQLException("Concurrent item reconciliation");
                 }
                 insertItemOverflowHistory(playerId, rewardId, actionId, oldItem, newItem, evidence);
-                String newAction = action.status().name();
-                if (delivered) {
-                    if (action.status() != RewardStatus.ITEM_QUEUED) {
-                        throw new SQLException("Item action is " + action.status() + ", not ITEM_QUEUED");
-                    }
-                    try (PreparedStatement update = connection.prepareStatement("""
-                        UPDATE reward_action_ledger SET status='CLAIMED',error_message=?,updated_at=?
-                        WHERE player_uuid=? AND reward_id=? AND action_id=? AND fingerprint=?
-                          AND status='ITEM_QUEUED'
-                        """)) {
-                        update.setString(1, evidence);
-                        update.setLong(2, System.currentTimeMillis());
-                        update.setString(3, playerId.toString());
-                        update.setString(4, rewardId);
-                        update.setString(5, actionId);
-                        update.setString(6, expectedFingerprint);
-                        if (update.executeUpdate() != 1) throw new SQLException("Item action reconciliation failed");
-                    }
-                    insertActionHistory(playerId, rewardId, actionId, RewardStatus.ITEM_QUEUED,
-                        RewardStatus.CLAIMED, expectedFingerprint, null, evidence);
-                    newAction = RewardStatus.CLAIMED.name();
+                if (action.status() != RewardStatus.ITEM_QUEUED
+                    && action.status() != RewardStatus.REQUIRES_RECONCILIATION) {
+                    throw new SQLException("Item action is " + action.status() + ", not unresolved");
                 }
+                RewardStatus nextAction = delivered ? RewardStatus.CLAIMED : RewardStatus.ITEM_QUEUED;
+                try (PreparedStatement update = connection.prepareStatement("""
+                    UPDATE reward_action_ledger SET status=?,error_message=?,updated_at=?
+                    WHERE player_uuid=? AND reward_id=? AND action_id=? AND fingerprint=? AND status=?
+                    """)) {
+                    update.setString(1, nextAction.name());
+                    update.setString(2, evidence);
+                    update.setLong(3, System.currentTimeMillis());
+                    update.setString(4, playerId.toString());
+                    update.setString(5, rewardId);
+                    update.setString(6, actionId);
+                    update.setString(7, expectedFingerprint);
+                    update.setString(8, action.status().name());
+                    if (update.executeUpdate() != 1) throw new SQLException("Item action reconciliation failed");
+                }
+                insertActionHistory(playerId, rewardId, actionId, action.status(),
+                    nextAction, expectedFingerprint, null, evidence);
+                String newAction = nextAction.name();
                 writeOverallAndClaim(playerId, rewardId, newOverall, finalize);
                 insertReconciliationHistory("item", administratorName, administratorId, playerId, rewardId,
                     actionId, oldItem + "/" + action.status(), newItem + "/" + newAction,

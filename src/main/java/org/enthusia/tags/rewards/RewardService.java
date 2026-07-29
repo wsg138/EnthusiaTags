@@ -118,17 +118,20 @@ public final class RewardService {
     }
 
     public void enable() {
+        ensureDefaults();
+        if (!initStorage()) {
+            lifecycle.set(ServiceLifecycle.STOPPED);
+            rewards = Map.of();
+            plugin.getLogger().severe("Reward functionality is disabled because durable reward storage is unavailable.");
+            return;
+        }
         claimExecutor = Executors.newFixedThreadPool(2, runnable -> {
             Thread thread = new Thread(runnable, "enthusia-tags-reward-claim");
             thread.setDaemon(true);
             return thread;
         });
-        ensureDefaults();
-        initStorage();
-        lifecycle.set(ServiceLifecycle.RUNNING);
+        lifecycle.set(ServiceLifecycle.RELOADING);
         reloadNow();
-        startFlushTask();
-        startGlobalScanTask();
     }
 
     public void disable() {
@@ -213,8 +216,18 @@ public final class RewardService {
         return rewards;
     }
 
-    JavaPlugin getPlugin() {
-        return plugin;
+    public boolean isAvailable() {
+        return plugin.isEnabled() && lifecycle.get() == ServiceLifecycle.RUNNING
+            && storage != null && claimExecutor != null && !claimExecutor.isShutdown();
+    }
+
+    public void runForOnlinePlayer(UUID playerId, java.util.function.Consumer<Player> action) {
+        if (!isAvailable()) return;
+        scheduleMain(() -> {
+            if (!isAvailable()) return;
+            Player player = onlinePlayer(playerId);
+            if (player != null) action.accept(player);
+        });
     }
 
     public List<String> getStaffWarnings() {
@@ -222,6 +235,7 @@ public final class RewardService {
     }
 
     public void preloadPlayer(UUID playerId) {
+        if (!isAvailable()) return;
         RewardPlayerState existing = playerStates.get(playerId);
         if (existing != null && existing.isLoaded()) {
             return;
@@ -860,6 +874,10 @@ public final class RewardService {
     }
 
     public boolean handleAdminCommand(CommandSender sender, String[] args) {
+        if (!isAvailable()) {
+            sender.sendMessage("Reward administration is unavailable because durable reward storage is not active.");
+            return true;
+        }
         if (args.length == 0) {
             sendAdminUsage(sender);
             return true;
@@ -1028,12 +1046,17 @@ public final class RewardService {
         }
         boolean unresolved = legacyUnmapped || statuses.values().stream().anyMatch(status ->
             status == RewardStatus.CLAIM_PENDING || status == RewardStatus.REQUIRES_RECONCILIATION);
+        for (RewardStorage.ItemOverflowEntry item : items) {
+            String status = item.actionId().equals(overrideActionId) && overrideItemStatus != null
+                ? overrideItemStatus : item.status();
+            unresolved |= "DELIVERY_PENDING".equals(status);
+        }
         if (unresolved) return new ReconciliationPlan(RewardStatus.REQUIRES_RECONCILIATION, false);
         boolean pendingItem = statuses.values().stream().anyMatch(status -> status == RewardStatus.ITEM_QUEUED);
         for (RewardStorage.ItemOverflowEntry item : items) {
             String status = item.actionId().equals(overrideActionId) && overrideItemStatus != null
                 ? overrideItemStatus : item.status();
-            pendingItem |= "QUEUED".equals(status) || "DELIVERY_PENDING".equals(status);
+            pendingItem |= "QUEUED".equals(status);
         }
         if (pendingItem) return new ReconciliationPlan(RewardStatus.ITEM_QUEUED, false);
         if (reward == null) {
@@ -1917,14 +1940,14 @@ public final class RewardService {
         Map<Integer, ItemStack> leftovers =
             player.getInventory().addItem(itemStacks.toArray(ItemStack[]::new));
         if (!leftovers.isEmpty()) {
-            plugin.getLogger().severe("Inventory capacity changed during queued item insertion for " + playerId
-                + "; item delivery is ambiguous and requires reconciliation.");
+            markAmbiguousItemDelivery(playerId, queued,
+                "Inventory addItem returned leftovers after DELIVERY_PENDING reservation");
             return;
         }
         storage.completeQueuedItemAsync(playerId, queued).whenComplete((ignored, throwable) -> {
             if (throwable != null) {
-                plugin.getLogger().severe("Queued reward item was inserted but delivery marker failed for "
-                    + playerId + "; item now requires reconciliation: " + throwable.getMessage());
+                markAmbiguousItemDelivery(playerId, queued,
+                    "Inventory insertion completed but delivered marker failed: " + throwable.getMessage());
                 return;
             }
             onQueuedItemDelivered(playerId, queued);
@@ -1935,6 +1958,25 @@ public final class RewardService {
                 }
                 drainItemOverflowOnMain(playerId, items, index + 1);
             });
+        });
+    }
+
+    private void markAmbiguousItemDelivery(UUID playerId, RewardStorage.QueuedItem queued, String evidence) {
+        plugin.getLogger().severe("Queued reward item delivery is uncertain for " + playerId + "/"
+            + queued.rewardId() + "/" + queued.actionId() + ": " + evidence);
+        storage.markQueuedItemReconciliationAsync(playerId, queued, evidence).whenComplete((revision, throwable) -> {
+            if (throwable != null) {
+                plugin.getLogger().severe("Failed to persist item reconciliation requirement for " + playerId
+                    + "/" + queued.rewardId() + "/" + queued.actionId() + ": " + throwable.getMessage());
+            } else {
+                RewardPlayerState state = playerStates.get(playerId);
+                if (state != null && state.isLoaded()) {
+                    state.applyReconciliation(queued.rewardId(), RewardStatus.REQUIRES_RECONCILIATION,
+                        false, Set.of(), false, revision);
+                }
+            }
+            runForOnlinePlayer(playerId, player ->
+                player.sendMessage(messages.get("rewards-reconciliation-required")));
         });
     }
 
@@ -2075,16 +2117,21 @@ public final class RewardService {
             .anyMatch(criterion -> criterion.getType() == RewardCriterionType.BALTOP_TOP3);
     }
 
-    private void initStorage() {
+    private boolean initStorage() {
         File dataFolder = plugin.getDataFolder();
         if (!dataFolder.exists() && !dataFolder.mkdirs()) {
-            plugin.getLogger().warning("Failed to create data folder for rewards.");
+            plugin.getLogger().severe("Failed to create data folder for rewards.");
+            return false;
         }
         storage = new RewardStorage(new File(dataFolder, "rewards.db"), performanceMonitor);
         try {
             storage.init();
+            return true;
         } catch (SQLException ex) {
             plugin.getLogger().severe("Failed to initialize rewards database: " + ex.getMessage());
+            storage.close();
+            storage = null;
+            return false;
         }
     }
 

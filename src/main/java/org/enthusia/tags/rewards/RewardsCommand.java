@@ -29,6 +29,10 @@ public final class RewardsCommand implements CommandExecutor, TabCompleter {
 
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
+        if (!rewardService.isAvailable()) {
+            sender.sendMessage(message("rewards-service-unavailable"));
+            return true;
+        }
         if (args.length == 1 && args[0].equalsIgnoreCase("reload")) {
             if (!sender.hasPermission("enthusia.tags.admin")) {
                 sender.sendMessage(message("no-permission"));
