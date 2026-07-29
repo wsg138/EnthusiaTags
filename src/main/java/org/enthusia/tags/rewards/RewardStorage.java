@@ -22,6 +22,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import org.enthusia.tags.PerformanceMonitor;
 
 public final class RewardStorage {
+    public record ActionLedgerEntry(String actionId, String actionType, String fingerprint, RewardStatus status) {
+    }
     public record StoredRewardData(Set<String> claims, Map<String, Long> counters, Map<String, String> states) {
         public StoredRewardData {
             claims = claims == null ? Set.of() : Set.copyOf(claims);
@@ -87,6 +89,24 @@ public final class RewardStorage {
                     state_key TEXT NOT NULL,
                     state_value TEXT NOT NULL,
                     PRIMARY KEY (player_uuid, state_key)
+                )
+                """);
+            statement.executeUpdate("""
+                CREATE TABLE IF NOT EXISTS reward_action_ledger (
+                    player_uuid TEXT NOT NULL,
+                    reward_id TEXT NOT NULL,
+                    action_id TEXT NOT NULL,
+                    action_type TEXT NOT NULL,
+                    fingerprint TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    requested_amount REAL,
+                    response_amount REAL,
+                    response_type TEXT,
+                    balance_before REAL,
+                    balance_after REAL,
+                    error_message TEXT,
+                    updated_at INTEGER NOT NULL,
+                    PRIMARY KEY (player_uuid, reward_id, action_id)
                 )
                 """);
         }
@@ -170,6 +190,67 @@ public final class RewardStorage {
         } catch (ExecutionException ex) {
             throw new SQLException("Failed to persist reward transition", ex.getCause());
         }
+    }
+
+    public Map<String, ActionLedgerEntry> loadActionLedgerNow(UUID playerId, String rewardId) throws SQLException {
+        return executeBlockingMeasured("storage.rewards.action-ledger-load", () -> {
+            Map<String, ActionLedgerEntry> entries = new HashMap<>();
+            try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT action_id,action_type,fingerprint,status FROM reward_action_ledger"
+                    + " WHERE player_uuid=? AND reward_id=?")) {
+                statement.setString(1, playerId.toString());
+                statement.setString(2, rewardId);
+                try (ResultSet rs = statement.executeQuery()) {
+                    while (rs.next()) {
+                        entries.put(rs.getString("action_id"), new ActionLedgerEntry(
+                            rs.getString("action_id"), rs.getString("action_type"), rs.getString("fingerprint"),
+                            RewardStatus.valueOf(rs.getString("status"))));
+                    }
+                }
+            }
+            return entries;
+        });
+    }
+
+    public void saveActionLedgerNow(UUID playerId, String rewardId, RewardAction action, String fingerprint,
+                                    RewardStatus status, VaultHook.DepositResult result, String error)
+        throws SQLException {
+        executeBlockingMeasured("storage.rewards.action-ledger-save", () -> {
+            try (PreparedStatement statement = connection.prepareStatement("""
+                INSERT INTO reward_action_ledger(player_uuid,reward_id,action_id,action_type,fingerprint,status,
+                  requested_amount,response_amount,response_type,balance_before,balance_after,error_message,updated_at)
+                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
+                ON CONFLICT(player_uuid,reward_id,action_id) DO UPDATE SET
+                  action_type=excluded.action_type,fingerprint=excluded.fingerprint,status=excluded.status,
+                  requested_amount=excluded.requested_amount,response_amount=excluded.response_amount,
+                  response_type=excluded.response_type,balance_before=excluded.balance_before,
+                  balance_after=excluded.balance_after,error_message=excluded.error_message,updated_at=excluded.updated_at
+                """)) {
+                statement.setString(1, playerId.toString());
+                statement.setString(2, rewardId);
+                statement.setString(3, action.getActionId());
+                statement.setString(4, action.getType().name());
+                statement.setString(5, fingerprint);
+                statement.setString(6, status.name());
+                if (result == null) {
+                    statement.setNull(7, java.sql.Types.REAL);
+                    statement.setNull(8, java.sql.Types.REAL);
+                    statement.setNull(9, java.sql.Types.VARCHAR);
+                    statement.setNull(10, java.sql.Types.REAL);
+                    statement.setNull(11, java.sql.Types.REAL);
+                } else {
+                    statement.setDouble(7, result.requestedAmount());
+                    statement.setDouble(8, result.responseAmount());
+                    statement.setString(9, result.responseType());
+                    statement.setDouble(10, result.balanceBefore());
+                    statement.setDouble(11, result.balanceAfter());
+                }
+                statement.setString(12, error);
+                statement.setLong(13, System.currentTimeMillis());
+                statement.executeUpdate();
+            }
+            return null;
+        });
     }
 
     public boolean reserveIpClaimNow(UUID playerId, String rewardId, String ipAddress) throws SQLException {

@@ -236,6 +236,19 @@ public final class RewardService {
         if (!evaluation.claimable()) {
             return RewardClaimResult.NOT_READY;
         }
+        String legacyPrefix = "reward-action:" + rewardId + ":";
+        boolean unresolvedLegacy = state.states().keySet().stream()
+            .anyMatch(key -> key.startsWith(legacyPrefix));
+        if (unresolvedLegacy) {
+            state.states().put("reward-delivery:" + rewardId, RewardStatus.REQUIRES_RECONCILIATION.name());
+            state.setDirty(true);
+            persistStateBarrier(player.getUniqueId(), state);
+            plugin.getLogger().warning("Reward " + rewardId + " for " + player.getUniqueId()
+                + " has unresolved pre-ledger action state; automatic migration was refused.");
+            return RewardClaimResult.DELIVERY_FAILED;
+        }
+        Map<String, RewardStorage.ActionLedgerEntry> ledger =
+            storage.loadActionLedgerNow(player.getUniqueId(), rewardId);
         if (!reserveIpClaim(player, rewardId)) {
             return RewardClaimResult.IP_ALREADY_CLAIMED;
         }
@@ -243,43 +256,51 @@ public final class RewardService {
         state.states().put("reward-delivery:" + rewardId, RewardStatus.CLAIM_PENDING.name());
         state.setDirty(true);
         if (!persistStateBarrier(player.getUniqueId(), state)) return RewardClaimResult.DELIVERY_FAILED;
-        boolean anyActionDelivered = false;
-        for (int actionIndex = 0; actionIndex < reward.getActions().size(); actionIndex++) {
-            RewardAction action = reward.getActions().get(actionIndex);
-            String actionStateKey = "reward-action:" + rewardId + ":" + action.getActionId();
-            String legacyActionStateKey = "reward-action:" + rewardId + ":" + actionIndex;
-            if (RewardStatus.CLAIMED.name().equals(state.states().get(legacyActionStateKey))) {
-                state.states().put(actionStateKey, RewardStatus.CLAIMED.name());
-                state.states().remove(legacyActionStateKey);
-                state.setDirty(true);
-                if (!persistStateBarrier(player.getUniqueId(), state)) return RewardClaimResult.DELIVERY_FAILED;
-            }
-            if (RewardStatus.CLAIMED.name().equals(state.states().get(actionStateKey))) {
+        boolean anyActionDelivered = ledger.values().stream()
+            .anyMatch(entry -> entry.status() == RewardStatus.CLAIMED
+                || entry.status() == RewardStatus.REQUIRES_RECONCILIATION);
+        for (RewardAction action : reward.getActions()) {
+            String fingerprint = actionFingerprint(action);
+            RewardStorage.ActionLedgerEntry existing = ledger.get(action.getActionId());
+            if (existing != null && existing.status() == RewardStatus.CLAIMED
+                && existing.fingerprint().equals(fingerprint)) {
                 anyActionDelivered = true;
                 continue;
             }
-            state.states().put(actionStateKey, RewardStatus.CLAIM_PENDING.name());
-            state.setDirty(true);
-            if (!persistStateBarrier(player.getUniqueId(), state)) return RewardClaimResult.DELIVERY_FAILED;
+            if (existing != null && (existing.status() == RewardStatus.CLAIM_PENDING
+                || existing.status() == RewardStatus.REQUIRES_RECONCILIATION
+                || (existing.status() == RewardStatus.CLAIMED && !existing.fingerprint().equals(fingerprint)))) {
+                state.states().put("reward-delivery:" + rewardId, RewardStatus.REQUIRES_RECONCILIATION.name());
+                state.setDirty(true);
+                persistStateBarrier(player.getUniqueId(), state);
+                return RewardClaimResult.DELIVERY_FAILED;
+            }
+            storage.saveActionLedgerNow(player.getUniqueId(), rewardId, action, fingerprint,
+                RewardStatus.CLAIM_PENDING, null, null);
             boolean delivered;
             boolean ambiguous = false;
+            VaultHook.DepositResult vaultResult = null;
+            String evidence = null;
             switch (action.getType()) {
                 case TAG -> {
                     delivered = tagService.grantTagPersisted(player.getUniqueId(), action.getValue()).join();
                 }
                 case MONEY -> {
-                    VaultHook.DepositResult result = vaultHook.depositDetailed(player, action.getAmount());
-                    delivered = result.success()
-                        && Double.compare(result.responseAmount(), action.getAmount()) == 0;
-                    ambiguous = !delivered && (!"UNAVAILABLE".equals(result.responseType())
-                        && (!"FAILURE".equals(result.responseType())
-                            || result.balanceAfter() > result.balanceBefore()));
+                    vaultResult = vaultHook.depositDetailed(player, action.getAmount());
+                    delivered = vaultResult.success()
+                        && Double.compare(vaultResult.responseAmount(), action.getAmount()) == 0;
+                    ambiguous = !delivered && (!"UNAVAILABLE".equals(vaultResult.responseType())
+                        && (!"FAILURE".equals(vaultResult.responseType())
+                            || vaultResult.balanceAfter() > vaultResult.balanceBefore()));
                 }
                 case COMMAND -> {
                     String command = action.getValue()
                         .replace("{player}", player.getName())
                         .replace("%player%", player.getName());
                     delivered = Bukkit.dispatchCommand(Bukkit.getConsoleSender(), command);
+                    evidence = delivered ? "dispatchCommand returned true"
+                        : "dispatchCommand returned false after invocation";
+                    ambiguous = !delivered;
                 }
                 case ITEM -> delivered = deliverItem(player, action);
                 default -> delivered = false;
@@ -287,7 +308,8 @@ public final class RewardService {
             if (!delivered) {
                 RewardStatus failureStatus = ambiguous
                     ? RewardStatus.REQUIRES_RECONCILIATION : RewardStatus.DELIVERY_FAILED;
-                state.states().put(actionStateKey, failureStatus.name());
+                storage.saveActionLedgerNow(player.getUniqueId(), rewardId, action, fingerprint,
+                    failureStatus, vaultResult, evidence);
                 state.states().put("reward-delivery:" + rewardId, failureStatus.name());
                 state.setDirty(true);
                 if (!anyActionDelivered && !ambiguous) {
@@ -299,9 +321,8 @@ public final class RewardService {
                 return RewardClaimResult.DELIVERY_FAILED;
             }
             anyActionDelivered = true;
-            state.states().put(actionStateKey, RewardStatus.CLAIMED.name());
-            state.setDirty(true);
-            if (!persistStateBarrier(player.getUniqueId(), state)) return RewardClaimResult.DELIVERY_FAILED;
+            storage.saveActionLedgerNow(player.getUniqueId(), rewardId, action, fingerprint,
+                RewardStatus.CLAIMED, vaultResult, evidence);
         }
 
         state.claimedRewards().add(rewardId);
@@ -310,9 +331,18 @@ public final class RewardService {
         invalidateProgress(player.getUniqueId());
         if (!persistStateBarrier(player.getUniqueId(), state)) return RewardClaimResult.DELIVERY_FAILED;
         return RewardClaimResult.SUCCESS;
+        } catch (SQLException ex) {
+            plugin.getLogger().severe("Reward claim ledger failed for " + player.getUniqueId() + ": " + ex.getMessage());
+            return RewardClaimResult.DELIVERY_FAILED;
         } finally {
             inFlightClaims.remove(claimKey);
         }
+    }
+
+    private String actionFingerprint(RewardAction action) {
+        return action.getType() + "|" + action.getValue() + "|" + action.getAmount() + "|"
+            + action.getMaterial() + "|" + action.getItemAmount() + "|" + action.getDisplayName()
+            + "|" + String.join("\\n", action.getLore());
     }
 
     private boolean persistStateBarrier(UUID playerId, RewardPlayerState state) {
@@ -1115,6 +1145,9 @@ public final class RewardService {
     }
 
     private boolean areActionsAvailable(RewardDefinition reward) {
+        if (reward.getActions().stream().anyMatch(action -> !action.isValid())) {
+            return false;
+        }
         if (!vaultHook.isAvailable()) {
             return reward.getActions().stream().noneMatch(action -> action.getType() == RewardActionType.MONEY);
         }
@@ -1507,7 +1540,7 @@ public final class RewardService {
             List<String> description = section.getStringList(id + ".description");
             Material icon = parseMaterial(section.getString(id + ".icon", "NAME_TAG"), "rewards." + id + ".icon", true);
             List<RewardCriterion> criteria = loadCriteria(section.getConfigurationSection(id + ".criteria"));
-            List<RewardAction> actions = loadActions(section.getConfigurationSection(id + ".rewards"));
+            List<RewardAction> actions = loadActions(section.getConfigurationSection(id + ".rewards"), id);
             String category = section.getString(id + ".category", inferCategory(criteria));
             RewardCompletionMode completionMode;
             try {
@@ -1588,8 +1621,9 @@ public final class RewardService {
         );
     }
 
-    private List<RewardAction> loadActions(ConfigurationSection section) {
+    private List<RewardAction> loadActions(ConfigurationSection section, String rewardId) {
         List<RewardAction> actions = new ArrayList<>();
+        Set<String> actionIds = new java.util.HashSet<>();
         if (section == null) {
             return actions;
         }
@@ -1613,8 +1647,13 @@ public final class RewardService {
             String displayName = entry.getString("display-name", "");
             List<String> lore = entry.getStringList("lore");
             String actionId = entry.getString("action-id", key).toLowerCase(Locale.ROOT);
+            boolean valid = actionId.matches("[a-z0-9][a-z0-9._-]{0,63}") && actionIds.add(actionId);
+            if (!valid) {
+                plugin.getLogger().warning("Invalid or duplicate action-id '" + actionId
+                    + "' for reward " + rewardId + "; reward will be unavailable.");
+            }
             actions.add(new RewardAction(actionId, type, value, amount, label,
-                itemMaterial, itemAmount, displayName, lore));
+                itemMaterial, itemAmount, displayName, lore, valid));
         }
         return actions;
     }

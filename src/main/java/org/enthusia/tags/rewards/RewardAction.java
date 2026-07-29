@@ -13,13 +13,14 @@ public final class RewardAction {
     private final int itemAmount;
     private final String displayName;
     private final List<String> lore;
+    private final boolean valid;
 
     public RewardAction(RewardActionType type, String value, double amount, String label) {
-        this("", type, value, amount, label, null, 0, null, List.of());
+        this("", type, value, amount, label, null, 0, null, List.of(), true);
     }
 
     public RewardAction(String actionId, RewardActionType type, String value, double amount, String label,
-                        Material material, int itemAmount, String displayName, List<String> lore) {
+                        Material material, int itemAmount, String displayName, List<String> lore, boolean valid) {
         this.actionId = actionId;
         this.type = type;
         this.value = value;
@@ -29,6 +30,7 @@ public final class RewardAction {
         this.itemAmount = itemAmount;
         this.displayName = displayName;
         this.lore = lore == null ? List.of() : List.copyOf(lore);
+        this.valid = valid;
     }
 
     public String getActionId() { return actionId; }
@@ -52,4 +54,5 @@ public final class RewardAction {
     public int getItemAmount() { return itemAmount; }
     public String getDisplayName() { return displayName; }
     public List<String> getLore() { return lore; }
+    public boolean isValid() { return valid; }
 }
