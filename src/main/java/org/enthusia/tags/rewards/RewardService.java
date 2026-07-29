@@ -242,22 +242,39 @@ public final class RewardService {
 
         state.states().put("reward-delivery:" + rewardId, RewardStatus.CLAIM_PENDING.name());
         state.setDirty(true);
-        flushPlayerBlocking(player.getUniqueId());
+        if (!persistStateBarrier(player.getUniqueId(), state)) return RewardClaimResult.DELIVERY_FAILED;
+        boolean anyActionDelivered = false;
         for (int actionIndex = 0; actionIndex < reward.getActions().size(); actionIndex++) {
             RewardAction action = reward.getActions().get(actionIndex);
-            String actionStateKey = "reward-action:" + rewardId + ":" + actionIndex;
+            String actionStateKey = "reward-action:" + rewardId + ":" + action.getActionId();
+            String legacyActionStateKey = "reward-action:" + rewardId + ":" + actionIndex;
+            if (RewardStatus.CLAIMED.name().equals(state.states().get(legacyActionStateKey))) {
+                state.states().put(actionStateKey, RewardStatus.CLAIMED.name());
+                state.states().remove(legacyActionStateKey);
+                state.setDirty(true);
+                if (!persistStateBarrier(player.getUniqueId(), state)) return RewardClaimResult.DELIVERY_FAILED;
+            }
             if (RewardStatus.CLAIMED.name().equals(state.states().get(actionStateKey))) {
+                anyActionDelivered = true;
                 continue;
             }
             state.states().put(actionStateKey, RewardStatus.CLAIM_PENDING.name());
             state.setDirty(true);
-            flushPlayerBlocking(player.getUniqueId());
+            if (!persistStateBarrier(player.getUniqueId(), state)) return RewardClaimResult.DELIVERY_FAILED;
             boolean delivered;
+            boolean ambiguous = false;
             switch (action.getType()) {
                 case TAG -> {
                     delivered = tagService.grantTagPersisted(player.getUniqueId(), action.getValue()).join();
                 }
-                case MONEY -> delivered = vaultHook.deposit(player, action.getAmount());
+                case MONEY -> {
+                    VaultHook.DepositResult result = vaultHook.depositDetailed(player, action.getAmount());
+                    delivered = result.success()
+                        && Double.compare(result.responseAmount(), action.getAmount()) == 0;
+                    ambiguous = !delivered && (!"UNAVAILABLE".equals(result.responseType())
+                        && (!"FAILURE".equals(result.responseType())
+                            || result.balanceAfter() > result.balanceBefore()));
+                }
                 case COMMAND -> {
                     String command = action.getValue()
                         .replace("{player}", player.getName())
@@ -268,28 +285,45 @@ public final class RewardService {
                 default -> delivered = false;
             }
             if (!delivered) {
-                state.states().put(actionStateKey, RewardStatus.DELIVERY_FAILED.name());
-                state.states().put("reward-delivery:" + rewardId, RewardStatus.DELIVERY_FAILED.name());
+                RewardStatus failureStatus = ambiguous
+                    ? RewardStatus.REQUIRES_RECONCILIATION : RewardStatus.DELIVERY_FAILED;
+                state.states().put(actionStateKey, failureStatus.name());
+                state.states().put("reward-delivery:" + rewardId, failureStatus.name());
                 state.setDirty(true);
-                storage.releaseIpClaimAsync(player.getUniqueId(), rewardId, getPlayerIpAddress(player));
-                flushPlayerAsync(player.getUniqueId(), state);
+                if (!anyActionDelivered && !ambiguous) {
+                    storage.releaseIpClaimAsync(player.getUniqueId(), rewardId, getPlayerIpAddress(player));
+                }
+                persistStateBarrier(player.getUniqueId(), state);
                 plugin.getLogger().warning("Reward delivery failed player=" + player.getUniqueId()
                     + " name=" + player.getName() + " reward=" + rewardId + " action=" + action.getType());
                 return RewardClaimResult.DELIVERY_FAILED;
             }
+            anyActionDelivered = true;
             state.states().put(actionStateKey, RewardStatus.CLAIMED.name());
             state.setDirty(true);
-            flushPlayerBlocking(player.getUniqueId());
+            if (!persistStateBarrier(player.getUniqueId(), state)) return RewardClaimResult.DELIVERY_FAILED;
         }
 
         state.claimedRewards().add(rewardId);
         state.states().put("reward-delivery:" + rewardId, RewardStatus.CLAIMED.name());
         state.setDirty(true);
         invalidateProgress(player.getUniqueId());
-        flushPlayerBlocking(player.getUniqueId());
+        if (!persistStateBarrier(player.getUniqueId(), state)) return RewardClaimResult.DELIVERY_FAILED;
         return RewardClaimResult.SUCCESS;
         } finally {
             inFlightClaims.remove(claimKey);
+        }
+    }
+
+    private boolean persistStateBarrier(UUID playerId, RewardPlayerState state) {
+        try {
+            storage.saveNow(playerId, snapshotState(state));
+            state.setDirty(false);
+            return true;
+        } catch (SQLException ex) {
+            state.setDirty(true);
+            plugin.getLogger().severe("Reward transition was not persisted for " + playerId + ": " + ex.getMessage());
+            return false;
         }
     }
 
@@ -312,7 +346,8 @@ public final class RewardService {
             return new RewardEvaluation(RewardStatus.CLAIMED, progress, true, false, "Already delivered");
         }
         String delivery = state.states().get("reward-delivery:" + rewardId);
-        if (RewardStatus.CLAIM_PENDING.name().equals(delivery)) {
+        if (RewardStatus.CLAIM_PENDING.name().equals(delivery)
+            || RewardStatus.REQUIRES_RECONCILIATION.name().equals(delivery)) {
             return new RewardEvaluation(RewardStatus.REQUIRES_RECONCILIATION, progress, true, false,
                 "A previous delivery may have been interrupted");
         }
@@ -819,7 +854,14 @@ public final class RewardService {
         }
         if (!newlyUnlocked.isEmpty()) {
             state.setDirty(true);
-            flushPlayerBlocking(player.getUniqueId());
+            if (!persistStateBarrier(player.getUniqueId(), state)) {
+                for (RewardDefinition reward : newlyUnlocked) {
+                    state.states().remove(REWARD_UNLOCK_NOTIFIED_PREFIX
+                        + reward.getId().toLowerCase(Locale.ROOT));
+                }
+                state.setDirty(true);
+                return;
+            }
             int limit = Math.max(1, plugin.getConfig().getInt("rewards.unlock-notifications.individual-limit", 3));
             for (int index = 0; index < Math.min(limit, newlyUnlocked.size()); index++) {
                 sendUnlockNotification(player, newlyUnlocked.get(index), false);
@@ -1570,7 +1612,9 @@ public final class RewardService {
             int itemAmount = type == RewardActionType.ITEM ? entry.getInt("amount", 1) : 0;
             String displayName = entry.getString("display-name", "");
             List<String> lore = entry.getStringList("lore");
-            actions.add(new RewardAction(type, value, amount, label, itemMaterial, itemAmount, displayName, lore));
+            String actionId = entry.getString("action-id", key).toLowerCase(Locale.ROOT);
+            actions.add(new RewardAction(actionId, type, value, amount, label,
+                itemMaterial, itemAmount, displayName, lore));
         }
         return actions;
     }

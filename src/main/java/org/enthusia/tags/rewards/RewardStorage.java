@@ -161,6 +161,17 @@ public final class RewardStorage {
         });
     }
 
+    public void saveNow(UUID playerId, StoredRewardData data) throws SQLException {
+        try {
+            saveAsync(playerId, data).get();
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            throw new SQLException("Interrupted while persisting reward transition", ex);
+        } catch (ExecutionException ex) {
+            throw new SQLException("Failed to persist reward transition", ex.getCause());
+        }
+    }
+
     public boolean reserveIpClaimNow(UUID playerId, String rewardId, String ipAddress) throws SQLException {
         if (rewardId == null || rewardId.isBlank() || ipAddress == null || ipAddress.isBlank()) {
             return true;

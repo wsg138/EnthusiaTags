@@ -152,11 +152,14 @@ public final class DailyService implements CommandExecutor, Listener {
             double before = vault.getBalance(player);
             storage.markDepositing(id, today, before);
             VaultHook.DepositResult result = vault.depositDetailed(player, amount);
-            storage.recordVaultResult(id, today,
-                result.success() ? DailyStorage.TransactionStatus.DELIVERED : DailyStorage.TransactionStatus.FAILED,
+            DailyStorage.TransactionStatus resultStatus = classifyVaultResult(result);
+            storage.recordVaultResult(id, today, resultStatus,
                 result.balanceAfter(), result.responseAmount(), result.responseType(), result.errorMessage());
-            if (!result.success()) {
-                player.sendMessage(Component.text("The economy rejected the deposit; your streak was not advanced."));
+            if (resultStatus != DailyStorage.TransactionStatus.DELIVERED) {
+                String message = resultStatus == DailyStorage.TransactionStatus.UNCERTAIN
+                    ? "The economy result was uncertain. Do not retry; contact staff for reconciliation."
+                    : "The economy rejected the deposit; your streak was not advanced and may be retried.";
+                player.sendMessage(Component.text(message));
                 return;
             }
             DailyState next = new DailyState(today, streak, Math.max(old.highestStreak(), streak),
@@ -169,6 +172,19 @@ public final class DailyService implements CommandExecutor, Listener {
         } finally {
             claims.remove(id);
         }
+    }
+
+    private DailyStorage.TransactionStatus classifyVaultResult(VaultHook.DepositResult result) {
+        if (result.success() && Double.compare(result.responseAmount(), result.requestedAmount()) == 0) {
+            return DailyStorage.TransactionStatus.DELIVERED;
+        }
+        boolean balanceIncreased = result.balanceAfter() > result.balanceBefore();
+        boolean explicitRetryable = "UNAVAILABLE".equals(result.responseType())
+            || ("FAILURE".equals(result.responseType()) && !balanceIncreased);
+        if (!result.success() && explicitRetryable) {
+            return DailyStorage.TransactionStatus.FAILED;
+        }
+        return DailyStorage.TransactionStatus.UNCERTAIN;
     }
 
     private void cancelAnimation(UUID id) {

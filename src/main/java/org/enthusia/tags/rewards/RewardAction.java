@@ -4,6 +4,7 @@ import org.bukkit.Material;
 import java.util.List;
 
 public final class RewardAction {
+    private final String actionId;
     private final RewardActionType type;
     private final String value;
     private final double amount;
@@ -14,11 +15,12 @@ public final class RewardAction {
     private final List<String> lore;
 
     public RewardAction(RewardActionType type, String value, double amount, String label) {
-        this(type, value, amount, label, null, 0, null, List.of());
+        this("", type, value, amount, label, null, 0, null, List.of());
     }
 
-    public RewardAction(RewardActionType type, String value, double amount, String label,
+    public RewardAction(String actionId, RewardActionType type, String value, double amount, String label,
                         Material material, int itemAmount, String displayName, List<String> lore) {
+        this.actionId = actionId;
         this.type = type;
         this.value = value;
         this.amount = amount;
@@ -29,6 +31,7 @@ public final class RewardAction {
         this.lore = lore == null ? List.of() : List.copyOf(lore);
     }
 
+    public String getActionId() { return actionId; }
     public RewardActionType getType() {
         return type;
     }
