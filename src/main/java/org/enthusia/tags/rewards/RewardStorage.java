@@ -24,11 +24,13 @@ import org.enthusia.tags.PerformanceMonitor;
 public final class RewardStorage {
     public record ActionLedgerEntry(String actionId, String actionType, String fingerprint, RewardStatus status) {
     }
-    public record StoredRewardData(Set<String> claims, Map<String, Long> counters, Map<String, String> states) {
+    public record StoredRewardData(Set<String> claims, Map<String, Long> counters, Map<String, String> states,
+                                   long revision) {
         public StoredRewardData {
             claims = claims == null ? Set.of() : Set.copyOf(claims);
             counters = counters == null ? Map.of() : Map.copyOf(counters);
             states = states == null ? Map.of() : Map.copyOf(states);
+            revision = Math.max(0L, revision);
         }
     }
 
@@ -92,6 +94,20 @@ public final class RewardStorage {
                 )
                 """);
             statement.executeUpdate("""
+                CREATE TABLE IF NOT EXISTS reward_unlocks (
+                    player_uuid TEXT NOT NULL,
+                    reward_id TEXT NOT NULL,
+                    unlocked_at INTEGER NOT NULL,
+                    PRIMARY KEY (player_uuid, reward_id)
+                )
+                """);
+            statement.executeUpdate("""
+                CREATE TABLE IF NOT EXISTS reward_player_versions (
+                    player_uuid TEXT PRIMARY KEY,
+                    revision INTEGER NOT NULL
+                )
+                """);
+            statement.executeUpdate("""
                 CREATE TABLE IF NOT EXISTS reward_action_ledger (
                     player_uuid TEXT NOT NULL,
                     reward_id TEXT NOT NULL,
@@ -109,6 +125,24 @@ public final class RewardStorage {
                     PRIMARY KEY (player_uuid, reward_id, action_id)
                 )
                 """);
+            statement.executeUpdate("""
+                CREATE TABLE IF NOT EXISTS reward_action_history (
+                    history_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    player_uuid TEXT NOT NULL,
+                    reward_id TEXT NOT NULL,
+                    action_id TEXT NOT NULL,
+                    old_status TEXT,
+                    new_status TEXT NOT NULL,
+                    fingerprint TEXT NOT NULL,
+                    requested_amount REAL,
+                    response_amount REAL,
+                    response_type TEXT,
+                    balance_before REAL,
+                    balance_after REAL,
+                    error_message TEXT,
+                    created_at INTEGER NOT NULL
+                )
+                """);
         }
     }
 
@@ -124,23 +158,23 @@ public final class RewardStorage {
         return submitMeasured("storage.rewards.save", () -> {
             connection.setAutoCommit(false);
             try {
-                try (PreparedStatement deleteClaims = connection.prepareStatement(
-                    "DELETE FROM reward_claims WHERE player_uuid = ?");
-                     PreparedStatement deleteCounters = connection.prepareStatement(
+                if (data.revision() <= loadStoredRevision(playerId)) {
+                    connection.rollback();
+                    return null;
+                }
+                try (PreparedStatement deleteCounters = connection.prepareStatement(
                          "DELETE FROM reward_counters WHERE player_uuid = ?");
                      PreparedStatement deleteStates = connection.prepareStatement(
                          "DELETE FROM reward_states WHERE player_uuid = ?")) {
                     String uuid = playerId.toString();
-                    deleteClaims.setString(1, uuid);
                     deleteCounters.setString(1, uuid);
                     deleteStates.setString(1, uuid);
-                    deleteClaims.executeUpdate();
                     deleteCounters.executeUpdate();
                     deleteStates.executeUpdate();
                 }
 
                 try (PreparedStatement insertClaim = connection.prepareStatement(
-                    "INSERT INTO reward_claims (player_uuid, reward_id, claimed_at) VALUES (?, ?, ?)");
+                    "INSERT OR IGNORE INTO reward_claims (player_uuid, reward_id, claimed_at) VALUES (?, ?, ?)");
                      PreparedStatement insertCounter = connection.prepareStatement(
                          "INSERT INTO reward_counters (player_uuid, counter_key, counter_value) VALUES (?, ?, ?)");
                      PreparedStatement insertState = connection.prepareStatement(
@@ -169,6 +203,14 @@ public final class RewardStorage {
                     insertCounter.executeBatch();
                     insertState.executeBatch();
                 }
+                try (PreparedStatement version = connection.prepareStatement("""
+                    INSERT INTO reward_player_versions(player_uuid,revision) VALUES(?,?)
+                    ON CONFLICT(player_uuid) DO UPDATE SET revision=excluded.revision
+                    """)) {
+                    version.setString(1, playerId.toString());
+                    version.setLong(2, data.revision());
+                    version.executeUpdate();
+                }
 
                 connection.commit();
             } catch (SQLException ex) {
@@ -181,6 +223,16 @@ public final class RewardStorage {
         });
     }
 
+    private long loadStoredRevision(UUID playerId) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+            "SELECT revision FROM reward_player_versions WHERE player_uuid=?")) {
+            statement.setString(1, playerId.toString());
+            try (ResultSet rs = statement.executeQuery()) {
+                return rs.next() ? rs.getLong("revision") : 0L;
+            }
+        }
+    }
+
     public void saveNow(UUID playerId, StoredRewardData data) throws SQLException {
         try {
             saveAsync(playerId, data).get();
@@ -190,6 +242,32 @@ public final class RewardStorage {
         } catch (ExecutionException ex) {
             throw new SQLException("Failed to persist reward transition", ex.getCause());
         }
+    }
+
+    public void markClaimedNow(UUID playerId, String rewardId) throws SQLException {
+        executeBlockingMeasured("storage.rewards.claim-marker", () -> {
+            try (PreparedStatement statement = connection.prepareStatement(
+                "INSERT OR IGNORE INTO reward_claims(player_uuid,reward_id,claimed_at) VALUES(?,?,?)")) {
+                statement.setString(1, playerId.toString());
+                statement.setString(2, rewardId);
+                statement.setLong(3, System.currentTimeMillis());
+                statement.executeUpdate();
+            }
+            return null;
+        });
+    }
+
+    public void markUnlockedNow(UUID playerId, String rewardId) throws SQLException {
+        executeBlockingMeasured("storage.rewards.unlock-marker", () -> {
+            try (PreparedStatement statement = connection.prepareStatement(
+                "INSERT OR IGNORE INTO reward_unlocks(player_uuid,reward_id,unlocked_at) VALUES(?,?,?)")) {
+                statement.setString(1, playerId.toString());
+                statement.setString(2, rewardId);
+                statement.setLong(3, System.currentTimeMillis());
+                statement.executeUpdate();
+            }
+            return null;
+        });
     }
 
     public Map<String, ActionLedgerEntry> loadActionLedgerNow(UUID playerId, String rewardId) throws SQLException {
@@ -216,7 +294,13 @@ public final class RewardStorage {
                                     RewardStatus status, VaultHook.DepositResult result, String error)
         throws SQLException {
         executeBlockingMeasured("storage.rewards.action-ledger-save", () -> {
-            try (PreparedStatement statement = connection.prepareStatement("""
+            connection.setAutoCommit(false);
+            try {
+                RewardStatus oldStatus = selectActionStatus(playerId, rewardId, action.getActionId());
+                if (!allowedTransition(oldStatus, status)) {
+                    throw new SQLException("Invalid reward action transition " + oldStatus + " -> " + status);
+                }
+                try (PreparedStatement statement = connection.prepareStatement("""
                 INSERT INTO reward_action_ledger(player_uuid,reward_id,action_id,action_type,fingerprint,status,
                   requested_amount,response_amount,response_type,balance_before,balance_after,error_message,updated_at)
                 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
@@ -225,32 +309,139 @@ public final class RewardStorage {
                   requested_amount=excluded.requested_amount,response_amount=excluded.response_amount,
                   response_type=excluded.response_type,balance_before=excluded.balance_before,
                   balance_after=excluded.balance_after,error_message=excluded.error_message,updated_at=excluded.updated_at
-                """)) {
-                statement.setString(1, playerId.toString());
-                statement.setString(2, rewardId);
-                statement.setString(3, action.getActionId());
-                statement.setString(4, action.getType().name());
-                statement.setString(5, fingerprint);
-                statement.setString(6, status.name());
-                if (result == null) {
-                    statement.setNull(7, java.sql.Types.REAL);
-                    statement.setNull(8, java.sql.Types.REAL);
-                    statement.setNull(9, java.sql.Types.VARCHAR);
-                    statement.setNull(10, java.sql.Types.REAL);
-                    statement.setNull(11, java.sql.Types.REAL);
-                } else {
-                    statement.setDouble(7, result.requestedAmount());
-                    statement.setDouble(8, result.responseAmount());
-                    statement.setString(9, result.responseType());
-                    statement.setDouble(10, result.balanceBefore());
-                    statement.setDouble(11, result.balanceAfter());
+                    """)) {
+                    bindActionEvidence(statement, playerId, rewardId, action, fingerprint, status, result, error);
+                    statement.executeUpdate();
                 }
-                statement.setString(12, error);
-                statement.setLong(13, System.currentTimeMillis());
-                statement.executeUpdate();
+                insertActionHistory(playerId, rewardId, action.getActionId(), oldStatus, status,
+                    fingerprint, result, error);
+                connection.commit();
+            } catch (SQLException ex) {
+                connection.rollback();
+                throw ex;
+            } finally {
+                connection.setAutoCommit(true);
             }
             return null;
         });
+    }
+
+    public RewardStatus reconcileActionNow(UUID playerId, String rewardId, String actionId,
+                                           RewardStatus newStatus, String auditReason) throws SQLException {
+        return executeBlockingMeasured("storage.rewards.action-reconcile", () -> {
+            connection.setAutoCommit(false);
+            try {
+                RewardStatus oldStatus = selectActionStatus(playerId, rewardId, actionId);
+                if ((oldStatus != RewardStatus.CLAIM_PENDING
+                    && oldStatus != RewardStatus.REQUIRES_RECONCILIATION)
+                    || (newStatus != RewardStatus.CLAIMED && newStatus != RewardStatus.DELIVERY_FAILED)) {
+                    throw new SQLException("Invalid reconciliation transition " + oldStatus + " -> " + newStatus);
+                }
+                String fingerprint;
+                try (PreparedStatement select = connection.prepareStatement(
+                    "SELECT fingerprint FROM reward_action_ledger WHERE player_uuid=? AND reward_id=? AND action_id=?")) {
+                    select.setString(1, playerId.toString());
+                    select.setString(2, rewardId);
+                    select.setString(3, actionId);
+                    try (ResultSet rs = select.executeQuery()) {
+                        if (!rs.next()) throw new SQLException("Action ledger entry not found");
+                        fingerprint = rs.getString("fingerprint");
+                    }
+                }
+                try (PreparedStatement update = connection.prepareStatement(
+                    "UPDATE reward_action_ledger SET status=?,error_message=?,updated_at=?"
+                        + " WHERE player_uuid=? AND reward_id=? AND action_id=? AND status=?")) {
+                    update.setString(1, newStatus.name());
+                    update.setString(2, auditReason);
+                    update.setLong(3, System.currentTimeMillis());
+                    update.setString(4, playerId.toString());
+                    update.setString(5, rewardId);
+                    update.setString(6, actionId);
+                    update.setString(7, oldStatus.name());
+                    if (update.executeUpdate() != 1) throw new SQLException("Concurrent reconciliation change");
+                }
+                insertActionHistory(playerId, rewardId, actionId, oldStatus, newStatus,
+                    fingerprint, null, auditReason);
+                connection.commit();
+                return oldStatus;
+            } catch (SQLException ex) {
+                connection.rollback();
+                throw ex;
+            } finally {
+                connection.setAutoCommit(true);
+            }
+        });
+    }
+
+    private RewardStatus selectActionStatus(UUID playerId, String rewardId, String actionId) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+            "SELECT status FROM reward_action_ledger WHERE player_uuid=? AND reward_id=? AND action_id=?")) {
+            statement.setString(1, playerId.toString());
+            statement.setString(2, rewardId);
+            statement.setString(3, actionId);
+            try (ResultSet rs = statement.executeQuery()) {
+                return rs.next() ? RewardStatus.valueOf(rs.getString("status")) : null;
+            }
+        }
+    }
+
+    private boolean allowedTransition(RewardStatus oldStatus, RewardStatus next) {
+        if (next == RewardStatus.CLAIM_PENDING) {
+            return oldStatus == null || oldStatus == RewardStatus.DELIVERY_FAILED;
+        }
+        if (next == RewardStatus.CLAIMED || next == RewardStatus.DELIVERY_FAILED
+            || next == RewardStatus.REQUIRES_RECONCILIATION) {
+            return oldStatus == RewardStatus.CLAIM_PENDING;
+        }
+        return false;
+    }
+
+    private void bindActionEvidence(PreparedStatement statement, UUID playerId, String rewardId,
+                                    RewardAction action, String fingerprint, RewardStatus status,
+                                    VaultHook.DepositResult result, String error) throws SQLException {
+        statement.setString(1, playerId.toString());
+        statement.setString(2, rewardId);
+        statement.setString(3, action.getActionId());
+        statement.setString(4, action.getType().name());
+        statement.setString(5, fingerprint);
+        statement.setString(6, status.name());
+        bindEvidence(statement, 7, result);
+        statement.setString(12, error);
+        statement.setLong(13, System.currentTimeMillis());
+    }
+
+    private void bindEvidence(PreparedStatement statement, int start, VaultHook.DepositResult result)
+        throws SQLException {
+        if (result == null) {
+            for (int index = start; index < start + 5; index++) statement.setNull(index, java.sql.Types.REAL);
+        } else {
+            statement.setDouble(start, result.requestedAmount());
+            statement.setDouble(start + 1, result.responseAmount());
+            statement.setString(start + 2, result.responseType());
+            statement.setDouble(start + 3, result.balanceBefore());
+            statement.setDouble(start + 4, result.balanceAfter());
+        }
+    }
+
+    private void insertActionHistory(UUID playerId, String rewardId, String actionId,
+                                     RewardStatus oldStatus, RewardStatus newStatus, String fingerprint,
+                                     VaultHook.DepositResult result, String error) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+            INSERT INTO reward_action_history(player_uuid,reward_id,action_id,old_status,new_status,fingerprint,
+              requested_amount,response_amount,response_type,balance_before,balance_after,error_message,created_at)
+            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """)) {
+            statement.setString(1, playerId.toString());
+            statement.setString(2, rewardId);
+            statement.setString(3, actionId);
+            statement.setString(4, oldStatus == null ? null : oldStatus.name());
+            statement.setString(5, newStatus.name());
+            statement.setString(6, fingerprint);
+            bindEvidence(statement, 7, result);
+            statement.setString(12, error);
+            statement.setLong(13, System.currentTimeMillis());
+            statement.executeUpdate();
+        }
     }
 
     public boolean reserveIpClaimNow(UUID playerId, String rewardId, String ipAddress) throws SQLException {
@@ -412,7 +603,17 @@ public final class RewardStorage {
             }
         }
 
-        return new StoredRewardData(claims, counters, states);
+        try (PreparedStatement statement = connection.prepareStatement(
+            "SELECT reward_id FROM reward_unlocks WHERE player_uuid = ?")) {
+            statement.setString(1, playerId.toString());
+            try (ResultSet rs = statement.executeQuery()) {
+                while (rs.next()) {
+                    states.put("reward-unlocked:" + rs.getString("reward_id"), "true");
+                }
+            }
+        }
+
+        return new StoredRewardData(claims, counters, states, loadStoredRevision(playerId));
     }
 
     private boolean reserveIpClaimDirect(UUID playerId, String rewardId, String ipAddress) throws SQLException {

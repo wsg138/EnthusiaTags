@@ -249,6 +249,15 @@ public final class RewardService {
         }
         Map<String, RewardStorage.ActionLedgerEntry> ledger =
             storage.loadActionLedgerNow(player.getUniqueId(), rewardId);
+        boolean unresolvedHistoricalAction = ledger.values().stream().anyMatch(entry ->
+            entry.status() == RewardStatus.CLAIM_PENDING
+                || entry.status() == RewardStatus.REQUIRES_RECONCILIATION);
+        if (unresolvedHistoricalAction) {
+            state.states().put("reward-delivery:" + rewardId, RewardStatus.REQUIRES_RECONCILIATION.name());
+            state.setDirty(true);
+            persistStateBarrier(player.getUniqueId(), state);
+            return RewardClaimResult.DELIVERY_FAILED;
+        }
         if (!reserveIpClaim(player, rewardId)) {
             return RewardClaimResult.IP_ALREADY_CLAIMED;
         }
@@ -292,6 +301,8 @@ public final class RewardService {
                     ambiguous = !delivered && (!"UNAVAILABLE".equals(vaultResult.responseType())
                         && (!"FAILURE".equals(vaultResult.responseType())
                             || vaultResult.balanceAfter() > vaultResult.balanceBefore()));
+                    evidence = (vaultResult.errorMessage() == null ? "" : vaultResult.errorMessage())
+                        + (ambiguous ? " [classified uncertain]" : " [classified definite]");
                 }
                 case COMMAND -> {
                     String command = action.getValue()
@@ -325,6 +336,7 @@ public final class RewardService {
                 RewardStatus.CLAIMED, vaultResult, evidence);
         }
 
+        storage.markClaimedNow(player.getUniqueId(), rewardId);
         state.claimedRewards().add(rewardId);
         state.states().put("reward-delivery:" + rewardId, RewardStatus.CLAIMED.name());
         state.setDirty(true);
@@ -614,7 +626,62 @@ public final class RewardService {
         if (COMMAND_IP_BYPASS.equals(subcommand) || COMMAND_IP_BYPASS_ALIAS.equals(subcommand)) {
             return handleIpBypassCommand(sender, args);
         }
+        if ("reconcile".equals(subcommand)) {
+            return handleReconcileCommand(sender, args);
+        }
         sendAdminUsage(sender);
+        return true;
+    }
+
+    private boolean handleReconcileCommand(CommandSender sender, String[] args) {
+        if (args.length < 6) {
+            sender.sendMessage("Usage: /enthusiatags rewards reconcile <player> <reward> <action-id|legacy>"
+                + " <delivered|retry> <reason>");
+            return true;
+        }
+        OfflinePlayer target = findOfflineCommandTarget(sender, args, 1);
+        if (target == null) return true;
+        String rewardId = args[2].toLowerCase(Locale.ROOT);
+        String actionId = args[3].toLowerCase(Locale.ROOT);
+        String outcome = args[4].toLowerCase(Locale.ROOT);
+        String reason = String.join(" ", java.util.Arrays.copyOfRange(args, 5, args.length)).trim();
+        if (reason.isBlank() || (!"delivered".equals(outcome) && !"retry".equals(outcome))) {
+            sender.sendMessage("A nonblank reason and delivered|retry outcome are required.");
+            return true;
+        }
+        UUID playerId = target.getUniqueId();
+        String actor = sender instanceof Player player
+            ? player.getName() + "/" + player.getUniqueId() : "console";
+        String audit = "admin=" + actor + " reason=" + reason;
+        try {
+            if ("legacy".equals(actionId)) {
+                preloadPlayerBlocking(playerId);
+                RewardPlayerState state = getLoadedState(playerId);
+                if (state == null) throw new SQLException("Player reward state is unavailable");
+                String prefix = "reward-action:" + rewardId + ":";
+                boolean removed = state.states().keySet().removeIf(key -> key.startsWith(prefix));
+                if (!removed) throw new SQLException("No legacy action state found");
+                if ("delivered".equals(outcome)) {
+                    storage.markClaimedNow(playerId, rewardId);
+                    state.claimedRewards().add(rewardId);
+                    state.states().put("reward-delivery:" + rewardId, RewardStatus.CLAIMED.name());
+                } else {
+                    state.states().put("reward-delivery:" + rewardId, RewardStatus.DELIVERY_FAILED.name());
+                }
+                state.setDirty(true);
+                if (!persistStateBarrier(playerId, state)) throw new SQLException("Failed to persist player state");
+            } else {
+                RewardStatus next = "delivered".equals(outcome)
+                    ? RewardStatus.CLAIMED : RewardStatus.DELIVERY_FAILED;
+                RewardStatus old = storage.reconcileActionNow(playerId, rewardId, actionId, next, audit);
+                sender.sendMessage("Reconciled " + rewardId + "/" + actionId + " " + old + " -> " + next + ".");
+            }
+            plugin.getLogger().warning("Reward reconciliation " + audit + " target=" + playerId
+                + " reward=" + rewardId + " action=" + actionId + " outcome=" + outcome);
+            sender.sendMessage("Reconciliation recorded for " + displayName(target) + ".");
+        } catch (SQLException ex) {
+            sender.sendMessage("Reconciliation failed: " + ex.getMessage());
+        }
         return true;
     }
 
@@ -745,6 +812,8 @@ public final class RewardService {
         sender.sendMessage("       /enthusiatags rewards ipbypass add <player1> <player2>");
         sender.sendMessage("       /enthusiatags rewards ipbypass remove <player1> <player2>");
         sender.sendMessage("       /enthusiatags rewards ipbypass list <player>");
+        sender.sendMessage("       /enthusiatags rewards reconcile <player> <reward> <action-id|legacy>"
+            + " <delivered|retry> <reason>");
     }
 
     private void sendIpBypassUsage(CommandSender sender) {
@@ -879,28 +948,33 @@ public final class RewardService {
             if (!evaluation.claimable()) {
                 continue;
             }
-            state.states().put(notificationKey, "true");
             newlyUnlocked.add(reward);
         }
         if (!newlyUnlocked.isEmpty()) {
-            state.setDirty(true);
-            if (!persistStateBarrier(player.getUniqueId(), state)) {
-                for (RewardDefinition reward : newlyUnlocked) {
-                    state.states().remove(REWARD_UNLOCK_NOTIFIED_PREFIX
-                        + reward.getId().toLowerCase(Locale.ROOT));
+            List<RewardDefinition> persistedUnlocks = new ArrayList<>();
+            for (RewardDefinition reward : newlyUnlocked) {
+                String rewardId = reward.getId().toLowerCase(Locale.ROOT);
+                try {
+                    storage.markUnlockedNow(player.getUniqueId(), rewardId);
+                    state.states().put(REWARD_UNLOCK_NOTIFIED_PREFIX + rewardId, "true");
+                    persistedUnlocks.add(reward);
+                } catch (SQLException ex) {
+                    plugin.getLogger().warning("Failed to persist unlock marker for " + player.getUniqueId()
+                        + " reward=" + rewardId + ": " + ex.getMessage());
                 }
-                state.setDirty(true);
+            }
+            if (persistedUnlocks.isEmpty()) {
                 return;
             }
             int limit = Math.max(1, plugin.getConfig().getInt("rewards.unlock-notifications.individual-limit", 3));
-            for (int index = 0; index < Math.min(limit, newlyUnlocked.size()); index++) {
-                sendUnlockNotification(player, newlyUnlocked.get(index), false);
+            for (int index = 0; index < Math.min(limit, persistedUnlocks.size()); index++) {
+                sendUnlockNotification(player, persistedUnlocks.get(index), false);
                 performanceMonitor.increment("rewards.unlock-notified");
             }
-            if (newlyUnlocked.size() > limit) {
+            if (persistedUnlocks.size() > limit) {
                 Component summary = LegacyComponentSerializer.legacyAmpersand().deserialize(
                     messages.get("rewards-unlocked-summary")
-                        .replace("{count}", String.valueOf(newlyUnlocked.size() - limit)))
+                        .replace("{count}", String.valueOf(persistedUnlocks.size() - limit)))
                     .clickEvent(ClickEvent.runCommand("/rewards"))
                     .hoverEvent(HoverEvent.showText(LegacyComponentSerializer.legacyAmpersand().deserialize(
                         messages.get("rewards-unlocked-summary-hover"))));
@@ -917,6 +991,7 @@ public final class RewardService {
         state.counters().putAll(data.counters());
         state.states().clear();
         state.states().putAll(data.states());
+        state.setRevision(data.revision());
         Long oldPvpDeaths = state.counters().remove("PVP_DEATHS");
         if (oldPvpDeaths != null) {
             state.counters().merge("pvp_deaths", oldPvpDeaths, Math::max);
@@ -947,7 +1022,8 @@ public final class RewardService {
         return new RewardStorage.StoredRewardData(
             new java.util.HashSet<>(state.claimedRewards()),
             new java.util.HashMap<>(state.counters()),
-            new java.util.HashMap<>(state.states()));
+            new java.util.HashMap<>(state.states()),
+            state.nextRevision());
     }
 
     private long getBlockStat(Player player, Statistic stat, Material material) {
@@ -1632,9 +1708,12 @@ public final class RewardService {
             if (entry == null) {
                 continue;
             }
+            String actionId = entry.getString("action-id", key).toLowerCase(Locale.ROOT);
             RewardActionType type = parseEnum(RewardActionType.class, entry.getString("type", "TAG"),
                 section.getCurrentPath() + "." + key + ".type");
             if (type == null) {
+                actions.add(new RewardAction(actionId, RewardActionType.TAG, "", 0D,
+                    "Invalid action type", null, 0, "", List.of(), false));
                 continue;
             }
             String value = entry.getString("id", "");
@@ -1646,7 +1725,6 @@ public final class RewardService {
             int itemAmount = type == RewardActionType.ITEM ? entry.getInt("amount", 1) : 0;
             String displayName = entry.getString("display-name", "");
             List<String> lore = entry.getStringList("lore");
-            String actionId = entry.getString("action-id", key).toLowerCase(Locale.ROOT);
             boolean valid = actionId.matches("[a-z0-9][a-z0-9._-]{0,63}") && actionIds.add(actionId);
             if (!valid) {
                 plugin.getLogger().warning("Invalid or duplicate action-id '" + actionId
