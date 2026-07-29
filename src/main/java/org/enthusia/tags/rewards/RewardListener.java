@@ -71,7 +71,18 @@ public final class RewardListener implements Listener {
         if (reward == null) {
             return;
         }
-        RewardClaimResult result = rewardService.claim(player, reward);
+        rewardService.claimAsync(player, reward).whenComplete((result, throwable) ->
+            org.bukkit.Bukkit.getScheduler().runTask(rewardService.getPlugin(), () -> {
+                if (throwable != null) {
+                    player.sendMessage(LegacyComponentSerializer.legacyAmpersand()
+                        .deserialize(rewardService.getMessage("rewards-delivery-failed")));
+                    return;
+                }
+                sendClaimResult(player, result);
+            }));
+    }
+
+    private void sendClaimResult(Player player, RewardClaimResult result) {
         switch (result) {
             case SUCCESS -> {
                 player.sendMessage(LegacyComponentSerializer.legacyAmpersand()

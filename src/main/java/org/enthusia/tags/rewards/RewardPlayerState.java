@@ -39,8 +39,18 @@ final class RewardPlayerState {
 
     void setDirty(boolean dirty) {
         this.dirty = dirty;
+        if (dirty) {
+            revision.incrementAndGet();
+        }
     }
 
-    long nextRevision() { return revision.incrementAndGet(); }
+    long revision() { return revision.get(); }
     void setRevision(long value) { revision.set(Math.max(0L, value)); }
+    void advanceRevision() { revision.incrementAndGet(); }
+
+    void markClean(long savedRevision) {
+        if (revision.get() == savedRevision) {
+            dirty = false;
+        }
+    }
 }

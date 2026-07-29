@@ -9,7 +9,9 @@ public final class DailyStorage implements AutoCloseable {
     public enum TransactionStatus { PREPARED, DEPOSITING, DELIVERED, FAILED, UNCERTAIN, RECONCILED, CANCELLED }
     public record Transaction(UUID playerId, LocalDate date, double amount, TransactionStatus status,
                               Double balanceBefore, Double balanceAfter, Double responseAmount,
-                              String responseType, String failure, Long completedAt) { }
+                              String responseType, String failure, long createdAt, Long completedAt) { }
+    public record Reconciliation(long historyId, String administrator, String decision, String reason,
+                                 String oldStatus, String newStatus, long createdAt) { }
     private final Connection connection;
 
     public DailyStorage(File file) throws SQLException {
@@ -28,6 +30,13 @@ public final class DailyStorage implements AutoCloseable {
                   player_uuid TEXT NOT NULL, claim_date TEXT NOT NULL, amount REAL NOT NULL,
                   status TEXT NOT NULL, created_at INTEGER NOT NULL, completed_at INTEGER, failure TEXT,
                   PRIMARY KEY(player_uuid, claim_date))
+                """);
+            statement.executeUpdate("""
+                CREATE TABLE IF NOT EXISTS daily_reconciliation_history (
+                  history_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  administrator TEXT NOT NULL, player_uuid TEXT NOT NULL, claim_date TEXT NOT NULL,
+                  old_status TEXT NOT NULL, new_status TEXT NOT NULL, decision TEXT NOT NULL,
+                  reason TEXT NOT NULL, created_at INTEGER NOT NULL)
                 """);
         }
         ensureColumn("daily_ledger", "balance_before", "REAL");
@@ -135,6 +144,20 @@ public final class DailyStorage implements AutoCloseable {
         }
     }
 
+    public synchronized void completeReconciledWithoutStateChange(UUID playerId, LocalDate date)
+        throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+            "UPDATE daily_ledger SET status='DELIVERED',completed_at=?"
+                + " WHERE player_uuid=? AND claim_date=? AND status='RECONCILED'")) {
+            statement.setLong(1, System.currentTimeMillis());
+            statement.setString(2, playerId.toString());
+            statement.setString(3, date.toString());
+            if (statement.executeUpdate() != 1) {
+                throw new SQLException("Daily transaction was not RECONCILED");
+            }
+        }
+    }
+
     public synchronized void fail(UUID playerId, LocalDate date, String reason) throws SQLException {
         try (PreparedStatement statement = connection.prepareStatement(
             "UPDATE daily_ledger SET status='FAILED',failure=? WHERE player_uuid=? AND claim_date=?")) {
@@ -174,9 +197,79 @@ public final class DailyStorage implements AutoCloseable {
                 return new Transaction(playerId, date, rs.getDouble("amount"),
                     TransactionStatus.valueOf(rs.getString("status")), nullableDouble(rs, "balance_before"),
                     nullableDouble(rs, "balance_after"), nullableDouble(rs, "response_amount"),
-                    rs.getString("response_type"), rs.getString("failure"), nullableLong(rs, "completed_at"));
+                    rs.getString("response_type"), rs.getString("failure"), rs.getLong("created_at"),
+                    nullableLong(rs, "completed_at"));
             }
         }
+    }
+
+    public synchronized Transaction reconcile(UUID playerId, LocalDate date, String administrator,
+                                               boolean delivered, String reason) throws SQLException {
+        connection.setAutoCommit(false);
+        try {
+            Transaction current = transaction(playerId, date);
+            if (current == null) throw new SQLException("Daily transaction not found");
+            if (current.status() != TransactionStatus.UNCERTAIN
+                && !(delivered && current.status() == TransactionStatus.RECONCILED)) {
+                throw new SQLException("Daily transaction is " + current.status() + ", not UNCERTAIN");
+            }
+            TransactionStatus next = delivered ? TransactionStatus.RECONCILED : TransactionStatus.FAILED;
+            if (current.status() != next) {
+                try (PreparedStatement update = connection.prepareStatement(
+                    "UPDATE daily_ledger SET status=?,failure=? WHERE player_uuid=? AND claim_date=? AND status=?")) {
+                    update.setString(1, next.name());
+                    update.setString(2, "Reconciled by " + administrator + ": " + reason);
+                    update.setString(3, playerId.toString());
+                    update.setString(4, date.toString());
+                    update.setString(5, current.status().name());
+                    if (update.executeUpdate() != 1) throw new SQLException("Concurrent daily reconciliation");
+                }
+                try (PreparedStatement history = connection.prepareStatement("""
+                    INSERT INTO daily_reconciliation_history(
+                      administrator,player_uuid,claim_date,old_status,new_status,decision,reason,created_at)
+                    VALUES(?,?,?,?,?,?,?,?)
+                    """)) {
+                    history.setString(1, administrator);
+                    history.setString(2, playerId.toString());
+                    history.setString(3, date.toString());
+                    history.setString(4, current.status().name());
+                    history.setString(5, next.name());
+                    history.setString(6, delivered ? "delivered" : "retry");
+                    history.setString(7, reason);
+                    history.setLong(8, System.currentTimeMillis());
+                    history.executeUpdate();
+                }
+            }
+            connection.commit();
+            return transaction(playerId, date);
+        } catch (SQLException ex) {
+            connection.rollback();
+            throw ex;
+        } finally {
+            connection.setAutoCommit(true);
+        }
+    }
+
+    public synchronized java.util.List<Reconciliation> reconciliationHistory(UUID playerId, LocalDate date,
+                                                                             int limit) throws SQLException {
+        java.util.List<Reconciliation> result = new java.util.ArrayList<>();
+        try (PreparedStatement statement = connection.prepareStatement("""
+            SELECT history_id,administrator,decision,reason,old_status,new_status,created_at
+            FROM daily_reconciliation_history WHERE player_uuid=? AND claim_date=?
+            ORDER BY history_id DESC LIMIT ?
+            """)) {
+            statement.setString(1, playerId.toString());
+            statement.setString(2, date.toString());
+            statement.setInt(3, Math.max(1, limit));
+            try (ResultSet rs = statement.executeQuery()) {
+                while (rs.next()) {
+                    result.add(new Reconciliation(rs.getLong("history_id"), rs.getString("administrator"),
+                        rs.getString("decision"), rs.getString("reason"), rs.getString("old_status"),
+                        rs.getString("new_status"), rs.getLong("created_at")));
+                }
+            }
+        }
+        return result;
     }
 
     private void transition(UUID playerId, LocalDate date, TransactionStatus from, TransactionStatus to,

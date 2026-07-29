@@ -59,6 +59,112 @@ public final class DailyService implements CommandExecutor, Listener {
         return true;
     }
 
+    public boolean handleAdminCommand(CommandSender sender, String[] args) {
+        if (args.length < 2 || (!args[0].equalsIgnoreCase("inspect")
+            && !args[0].equalsIgnoreCase("reconcile"))) {
+            sendAdminUsage(sender);
+            return true;
+        }
+        OfflinePlayer target = Bukkit.getOfflinePlayerIfCached(args[1]);
+        if (target == null) {
+            try {
+                target = Bukkit.getOfflinePlayer(UUID.fromString(args[1]));
+            } catch (IllegalArgumentException ex) {
+                sender.sendMessage("Player must be cached or supplied as a UUID.");
+                return true;
+            }
+        }
+        LocalDate date = today();
+        int reasonEnd = args.length;
+        if (args[0].equalsIgnoreCase("inspect") && args.length > 2) {
+            try {
+                date = LocalDate.parse(args[2]);
+            } catch (DateTimeException ex) {
+                sender.sendMessage("Date must use YYYY-MM-DD.");
+                return true;
+            }
+        } else if (args[0].equalsIgnoreCase("reconcile") && args.length > 4) {
+            try {
+                date = LocalDate.parse(args[args.length - 1]);
+                reasonEnd--;
+            } catch (DateTimeException ignored) {
+                // The final argument is part of the required free-form reason.
+            }
+        }
+        try {
+            if (args[0].equalsIgnoreCase("inspect")) {
+                inspect(sender, target, date);
+                return true;
+            }
+            if (args.length < 5) {
+                sendAdminUsage(sender);
+                return true;
+            }
+            String decision = args[2].toLowerCase(Locale.ROOT);
+            if (!decision.equals("delivered") && !decision.equals("retry")) {
+                sender.sendMessage("Decision must be delivered or retry.");
+                return true;
+            }
+            String reason = String.join(" ", Arrays.copyOfRange(args, 3, reasonEnd));
+            if (reason.isBlank()) {
+                sender.sendMessage("A reconciliation reason is required.");
+                return true;
+            }
+            String administrator = sender instanceof Player player
+                ? player.getName() + "/" + player.getUniqueId() : "console";
+            DailyState old = storage.load(target.getUniqueId(), animationDefault());
+            if (decision.equals("delivered") && old.lastClaimDate() != null
+                && date.isBefore(old.lastClaimDate())) {
+                throw new SQLException("Cannot finalize a transaction older than the current daily state");
+            }
+            DailyStorage.Transaction transaction = storage.reconcile(target.getUniqueId(), date, administrator,
+                decision.equals("delivered"), reason);
+            if (decision.equals("delivered")) {
+                int streak = DailyRules.nextStreak(old.lastClaimDate(), date, old.currentStreak());
+                if (date.equals(old.lastClaimDate())) {
+                    storage.completeReconciledWithoutStateChange(target.getUniqueId(), date);
+                } else {
+                    DailyState next = new DailyState(date, streak, Math.max(old.highestStreak(), streak),
+                        old.totalClaims() + 1, old.totalAwarded() + transaction.amount(), old.animationEnabled());
+                    storage.complete(target.getUniqueId(), date, next);
+                }
+            }
+            sender.sendMessage("Daily transaction reconciled as " + decision + " for " + date + ".");
+        } catch (SQLException ex) {
+            sender.sendMessage("Daily operation failed: " + ex.getMessage());
+        }
+        return true;
+    }
+
+    private void inspect(CommandSender sender, OfflinePlayer target, LocalDate date) throws SQLException {
+        DailyState state = storage.load(target.getUniqueId(), animationDefault());
+        DailyStorage.Transaction tx = storage.transaction(target.getUniqueId(), date);
+        sender.sendMessage("Daily inspection: " + target.getUniqueId() + " / " + date);
+        sender.sendMessage("  state last=" + state.lastClaimDate() + " streak=" + state.currentStreak()
+            + " highest=" + state.highestStreak() + " claims=" + state.totalClaims()
+            + " awarded=" + state.totalAwarded());
+        if (tx == null) {
+            sender.sendMessage("  transaction: none");
+        } else {
+            sender.sendMessage("  transaction status=" + tx.status() + " amount=" + tx.amount()
+                + " created=" + tx.createdAt() + " completed=" + tx.completedAt());
+            sender.sendMessage("  vault before=" + tx.balanceBefore() + " after=" + tx.balanceAfter()
+                + " requested=" + tx.amount() + " returned=" + tx.responseAmount()
+                + " provider=" + tx.responseType() + " failure=" + tx.failure());
+        }
+        sender.sendMessage("  reconciliation history:");
+        for (DailyStorage.Reconciliation entry : storage.reconciliationHistory(target.getUniqueId(), date, 12)) {
+            sender.sendMessage("    #" + entry.historyId() + " " + entry.oldStatus() + " -> "
+                + entry.newStatus() + " " + entry.decision() + " by " + entry.administrator()
+                + " at " + entry.createdAt() + " reason=" + entry.reason());
+        }
+    }
+
+    private void sendAdminUsage(CommandSender sender) {
+        sender.sendMessage("Usage: /enthusiatags daily inspect <player> [YYYY-MM-DD]");
+        sender.sendMessage("       /enthusiatags daily reconcile <player> <delivered|retry> <reason> [YYYY-MM-DD]");
+    }
+
     public void open(Player player) {
         try {
             DailyState state = storage.load(player.getUniqueId(), animationDefault());

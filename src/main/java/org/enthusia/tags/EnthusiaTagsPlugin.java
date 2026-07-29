@@ -173,11 +173,14 @@ public final class EnthusiaTagsPlugin extends JavaPlugin {
                 if (args.length >= 2 && args[0].equalsIgnoreCase("rewards")) {
                     return rewardService.handleAdminCommand(sender, java.util.Arrays.copyOfRange(args, 1, args.length));
                 }
+                if (args.length >= 2 && args[0].equalsIgnoreCase("daily")) {
+                    return dailyService.handleAdminCommand(sender, java.util.Arrays.copyOfRange(args, 1, args.length));
+                }
                 sender.sendMessage(net.kyori.adventure.text.Component.text("Usage: /enthusiatags reload"));
                 return true;
             });
             root.setTabCompleter((sender, command, alias, args) -> args.length == 1 && sender.hasPermission("enthusia.tags.admin")
-                ? java.util.List.of("reload", "performance", "rewards")
+                ? java.util.List.of("reload", "performance", "rewards", "daily")
                 : java.util.List.of());
         }
     }
