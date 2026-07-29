@@ -5,6 +5,7 @@ import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.inventory.InventoryClickEvent;
+import org.bukkit.event.inventory.InventoryCloseEvent;
 import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
@@ -20,6 +21,13 @@ public final class RewardListener implements Listener {
     public RewardListener(RewardService rewardService, RewardMenu rewardMenu) {
         this.rewardService = rewardService;
         this.rewardMenu = rewardMenu;
+    }
+
+    @EventHandler
+    public void onInventoryClose(InventoryCloseEvent event) {
+        if (event.getPlayer() instanceof Player player) {
+            rewardService.retryQueuedItems(player);
+        }
     }
 
     @EventHandler
@@ -99,8 +107,14 @@ public final class RewardListener implements Listener {
                 .deserialize(rewardService.getMessage("rewards-ip-already-claimed")));
             case DELIVERY_FAILED -> player.sendMessage(LegacyComponentSerializer.legacyAmpersand()
                 .deserialize(rewardService.getMessage("rewards-delivery-failed")));
+            case ITEM_QUEUED -> player.sendMessage(LegacyComponentSerializer.legacyAmpersand()
+                .deserialize(rewardService.getMessage("rewards-item-queued")));
+            case RECONCILIATION_REQUIRED -> player.sendMessage(LegacyComponentSerializer.legacyAmpersand()
+                .deserialize(rewardService.getMessage("rewards-reconciliation-required")));
             case CLAIM_IN_PROGRESS -> player.sendMessage(LegacyComponentSerializer.legacyAmpersand()
                 .deserialize(rewardService.getMessage("rewards-claim-in-progress")));
+            case SERVICE_UNAVAILABLE -> player.sendMessage(LegacyComponentSerializer.legacyAmpersand()
+                .deserialize(rewardService.getMessage("rewards-service-unavailable")));
         }
     }
 }

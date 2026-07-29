@@ -5,6 +5,8 @@ import java.sql.SQLException;
 import java.time.*;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicBoolean;
 import net.kyori.adventure.text.Component;
 import org.bukkit.*;
 import org.bukkit.command.*;
@@ -23,9 +25,13 @@ public final class DailyService implements CommandExecutor, Listener {
     private final VaultHook vault = new VaultHook();
     private final Set<UUID> claims = ConcurrentHashMap.newKeySet();
     private final Map<UUID, BukkitTask> animations = new ConcurrentHashMap<>();
+    private final Set<CompletableFuture<?>> activeWork = ConcurrentHashMap.newKeySet();
+    private final AtomicBoolean accepting = new AtomicBoolean(false);
+    private final AtomicBoolean acceptingClaims = new AtomicBoolean(false);
     private DailyStorage storage;
-    private ZoneId zone;
-    private List<Double> payouts;
+    private ExecutorService executor;
+    private volatile ZoneId zone;
+    private volatile List<Double> payouts;
 
     public DailyService(JavaPlugin plugin) { this.plugin = plugin; }
 
@@ -35,15 +41,53 @@ public final class DailyService implements CommandExecutor, Listener {
         if (payouts.isEmpty()) payouts = List.of(5D, 10D, 15D, 20D, 30D, 40D, 50D);
         storage = new DailyStorage(new File(plugin.getDataFolder(), "daily.db"));
         vault.setup();
+        executor = Executors.newSingleThreadExecutor(runnable -> {
+            Thread thread = new Thread(runnable, "enthusia-tags-daily");
+            thread.setDaemon(true);
+            return thread;
+        });
+        accepting.set(true);
+        acceptingClaims.set(true);
     }
 
     public void disable() {
+        accepting.set(false);
+        acceptingClaims.set(false);
         animations.values().forEach(BukkitTask::cancel);
         animations.clear();
+        boolean workersStopped = true;
+        if (executor != null) {
+            executor.shutdownNow();
+            try {
+                workersStopped = executor.awaitTermination(5, TimeUnit.SECONDS);
+            } catch (InterruptedException ex) {
+                Thread.currentThread().interrupt();
+                workersStopped = false;
+            }
+        }
+        activeWork.clear();
         claims.clear();
+        if (!workersStopped) {
+            plugin.getLogger().severe("Daily workers did not stop; daily storage will remain open.");
+            return;
+        }
         if (storage != null) try { storage.close(); } catch (SQLException ex) {
             plugin.getLogger().warning("Failed to close daily storage: " + ex.getMessage());
         }
+    }
+
+    public void reload() {
+        acceptingClaims.set(false);
+        if (!claims.isEmpty()) {
+            Bukkit.getScheduler().runTaskLater(plugin, this::reload, 1L);
+            return;
+        }
+        zone = parseZone(plugin.getConfig().getString("daily.timezone", "America/Indiana/Indianapolis"));
+        List<Double> configured = plugin.getConfig().getDoubleList("daily.payouts");
+        payouts = configured.isEmpty() ? List.of(5D, 10D, 15D, 20D, 30D, 40D, 50D)
+            : List.copyOf(configured);
+        vault.setup();
+        acceptingClaims.set(true);
     }
 
     @Override public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
@@ -91,73 +135,85 @@ public final class DailyService implements CommandExecutor, Listener {
                 // The final argument is part of the required free-form reason.
             }
         }
-        try {
-            if (args[0].equalsIgnoreCase("inspect")) {
-                inspect(sender, target, date);
-                return true;
-            }
-            if (args.length < 5) {
-                sendAdminUsage(sender);
-                return true;
-            }
-            String decision = args[2].toLowerCase(Locale.ROOT);
-            if (!decision.equals("delivered") && !decision.equals("retry")) {
-                sender.sendMessage("Decision must be delivered or retry.");
-                return true;
-            }
-            String reason = String.join(" ", Arrays.copyOfRange(args, 3, reasonEnd));
-            if (reason.isBlank()) {
-                sender.sendMessage("A reconciliation reason is required.");
-                return true;
-            }
-            String administrator = sender instanceof Player player
-                ? player.getName() + "/" + player.getUniqueId() : "console";
-            DailyState old = storage.load(target.getUniqueId(), animationDefault());
-            if (decision.equals("delivered") && old.lastClaimDate() != null
-                && date.isBefore(old.lastClaimDate())) {
-                throw new SQLException("Cannot finalize a transaction older than the current daily state");
-            }
-            DailyStorage.Transaction transaction = storage.reconcile(target.getUniqueId(), date, administrator,
-                decision.equals("delivered"), reason);
-            if (decision.equals("delivered")) {
-                int streak = DailyRules.nextStreak(old.lastClaimDate(), date, old.currentStreak());
-                if (date.equals(old.lastClaimDate())) {
-                    storage.completeReconciledWithoutStateChange(target.getUniqueId(), date);
-                } else {
-                    DailyState next = new DailyState(date, streak, Math.max(old.highestStreak(), streak),
-                        old.totalClaims() + 1, old.totalAwarded() + transaction.amount(), old.animationEnabled());
-                    storage.complete(target.getUniqueId(), date, next);
-                }
-            }
-            sender.sendMessage("Daily transaction reconciled as " + decision + " for " + date + ".");
-        } catch (SQLException ex) {
-            sender.sendMessage("Daily operation failed: " + ex.getMessage());
+        UUID playerId = target.getUniqueId();
+        LocalDate selectedDate = date;
+        if (args[0].equalsIgnoreCase("inspect")) {
+            completeToSender(sender, submit(() -> inspect(playerId, selectedDate)));
+            return true;
         }
+        if (args.length < 5) {
+            sendAdminUsage(sender);
+            return true;
+        }
+        String decision = args[2].toLowerCase(Locale.ROOT);
+        if (!decision.equals("delivered") && !decision.equals("retry")) {
+            sender.sendMessage("Decision must be delivered or retry.");
+            return true;
+        }
+        String reason = String.join(" ", Arrays.copyOfRange(args, 3, reasonEnd));
+        if (reason.isBlank()) {
+            sender.sendMessage("A reconciliation reason is required.");
+            return true;
+        }
+        String administrator = sender instanceof Player player
+            ? player.getName() + "/" + player.getUniqueId() : "console";
+        completeToSender(sender, submit(() -> reconcileDaily(playerId, selectedDate,
+            decision, administrator, reason)));
         return true;
     }
 
-    private void inspect(CommandSender sender, OfflinePlayer target, LocalDate date) throws SQLException {
-        DailyState state = storage.load(target.getUniqueId(), animationDefault());
-        DailyStorage.Transaction tx = storage.transaction(target.getUniqueId(), date);
-        sender.sendMessage("Daily inspection: " + target.getUniqueId() + " / " + date);
-        sender.sendMessage("  state last=" + state.lastClaimDate() + " streak=" + state.currentStreak()
+    private List<String> reconcileDaily(UUID playerId, LocalDate date, String decision,
+                                        String administrator, String reason) throws SQLException {
+        DailyState old = storage.load(playerId, animationDefault());
+        DailyStorage.Transaction transaction = storage.transaction(playerId, date);
+        if (transaction == null) throw new SQLException("Daily transaction not found");
+        boolean delivered = decision.equals("delivered");
+        if (delivered && old.lastClaimDate() != null && date.isBefore(old.lastClaimDate())) {
+            throw new SQLException("Cannot finalize a transaction older than the current daily state");
+        }
+        boolean stateAlreadyApplied = delivered && date.equals(old.lastClaimDate());
+        DailyState next = null;
+        if (delivered && !stateAlreadyApplied) {
+            int streak = DailyRules.nextStreak(old.lastClaimDate(), date, old.currentStreak());
+            if (streak <= 0) throw new SQLException("Daily date ordering cannot be applied safely");
+            next = new DailyState(date, streak, Math.max(old.highestStreak(), streak),
+                old.totalClaims() + 1, old.totalAwarded() + transaction.amount(), old.animationEnabled());
+        }
+        DailyStorage.Transaction result = storage.reconcileAtomic(playerId, date, administrator,
+            delivered, reason, next, stateAlreadyApplied);
+        return List.of("Daily transaction reconciled atomically as " + decision + " for " + date
+            + "; final status=" + result.status() + ".");
+    }
+
+    private List<String> inspect(UUID playerId, LocalDate date) throws SQLException {
+        List<String> lines = new ArrayList<>();
+        DailyState state = storage.load(playerId, animationDefault());
+        DailyStorage.Transaction tx = storage.transaction(playerId, date);
+        lines.add("Daily inspection: " + playerId + " / " + date);
+        lines.add("  state last=" + state.lastClaimDate() + " streak=" + state.currentStreak()
             + " highest=" + state.highestStreak() + " claims=" + state.totalClaims()
             + " awarded=" + state.totalAwarded());
         if (tx == null) {
-            sender.sendMessage("  transaction: none");
+            lines.add("  transaction: none");
         } else {
-            sender.sendMessage("  transaction status=" + tx.status() + " amount=" + tx.amount()
+            lines.add("  transaction status=" + tx.status() + " amount=" + tx.amount()
                 + " created=" + tx.createdAt() + " completed=" + tx.completedAt());
-            sender.sendMessage("  vault before=" + tx.balanceBefore() + " after=" + tx.balanceAfter()
+            lines.add("  vault before=" + tx.balanceBefore() + " after=" + tx.balanceAfter()
                 + " requested=" + tx.amount() + " returned=" + tx.responseAmount()
                 + " provider=" + tx.responseType() + " failure=" + tx.failure());
         }
-        sender.sendMessage("  reconciliation history:");
-        for (DailyStorage.Reconciliation entry : storage.reconciliationHistory(target.getUniqueId(), date, 12)) {
-            sender.sendMessage("    #" + entry.historyId() + " " + entry.oldStatus() + " -> "
+        lines.add("  ordinary transition history:");
+        for (DailyStorage.Transition entry : storage.transitionHistory(playerId, date, 20)) {
+            lines.add("    #" + entry.historyId() + " " + entry.oldStatus() + " -> "
+                + entry.newStatus() + " at " + entry.createdAt() + " evidence=" + entry.evidence());
+        }
+        lines.add("  administrator reconciliation history:");
+        for (DailyStorage.Reconciliation entry : storage.reconciliationHistory(playerId, date, 20)) {
+            lines.add("    #" + entry.historyId() + " " + entry.oldStatus() + " -> "
                 + entry.newStatus() + " " + entry.decision() + " by " + entry.administrator()
                 + " at " + entry.createdAt() + " reason=" + entry.reason());
         }
+        return lines;
     }
 
     private void sendAdminUsage(CommandSender sender) {
@@ -166,17 +222,26 @@ public final class DailyService implements CommandExecutor, Listener {
     }
 
     public void open(Player player) {
-        try {
-            DailyState state = storage.load(player.getUniqueId(), animationDefault());
-            if (plugin.getConfig().getBoolean("daily.animation.enabled", true) && state.animationEnabled()
-                && DailyRules.nextStreak(state.lastClaimDate(), today(), state.currentStreak()) > 0) {
-                openAnimation(player);
-            } else {
-                player.openInventory(menu(player, state));
-            }
-        } catch (SQLException ex) {
-            player.sendMessage(Component.text("Daily rewards are temporarily unavailable."));
-        }
+        openLoaded(player.getUniqueId(), true);
+    }
+
+    private void openLoaded(UUID playerId, boolean allowAnimation) {
+        submit(() -> new DailyView(storage.load(playerId, animationDefault()),
+            storage.transaction(playerId, today()))).whenComplete((view, throwable) ->
+            runMain(() -> {
+                Player live = onlinePlayer(playerId);
+                if (live == null) return;
+                if (throwable != null) {
+                    live.sendMessage(Component.text("Daily rewards are temporarily unavailable."));
+                } else if (allowAnimation && plugin.getConfig().getBoolean("daily.animation.enabled", true)
+                    && view.state().animationEnabled()
+                    && DailyRules.nextStreak(view.state().lastClaimDate(), today(),
+                        view.state().currentStreak()) > 0) {
+                    openAnimation(live);
+                } else {
+                    live.openInventory(menu(live, view.state(), view.transaction()));
+                }
+            }));
     }
 
     private void openAnimation(Player player) {
@@ -189,21 +254,38 @@ public final class DailyService implements CommandExecutor, Listener {
         long duration = Math.max(12L, Math.min(18L, plugin.getConfig().getLong("daily.animation.duration-ticks", 15L)));
         animations.put(player.getUniqueId(), Bukkit.getScheduler().runTaskLater(plugin, () -> {
             animations.remove(player.getUniqueId());
-            if (player.isOnline()) try {
-                player.openInventory(menu(player, storage.load(player.getUniqueId(), animationDefault())));
-            } catch (SQLException ignored) { }
+            Player live = onlinePlayer(player.getUniqueId());
+            if (live != null) openLoaded(live.getUniqueId(), false);
         }, duration));
     }
 
     private Inventory menu(Player player, DailyState state) {
+        return menu(player, state, null);
+    }
+
+    private Inventory menu(Player player, DailyState state, DailyStorage.Transaction transaction) {
         Inventory inventory = Bukkit.createInventory(new Holder(false), 27, Component.text("Daily Reward"));
         LocalDate today = today();
         int next = DailyRules.nextStreak(state.lastClaimDate(), today, state.currentStreak());
         int payoutDay = next == 0 ? state.currentStreak() : next;
         inventory.setItem(11, named(Material.CLOCK, "Streak: " + state.currentStreak()
             + " | Best: " + state.highestStreak() + " | Claims: " + state.totalClaims()));
-        inventory.setItem(13, named(next == 0 ? Material.GRAY_DYE : Material.EMERALD,
-            next == 0 ? "Already claimed today" : "Claim $" + DailyRules.payout(payoutDay, payouts)));
+        Material claimMaterial = next == 0 ? Material.GRAY_DYE : Material.EMERALD;
+        String claimText = next == 0 ? "Already claimed today"
+            : "Claim $" + DailyRules.payout(payoutDay, payouts);
+        if (transaction != null && transaction.status() == DailyStorage.TransactionStatus.UNCERTAIN) {
+            claimMaterial = Material.REDSTONE;
+            claimText = "Daily deposit uncertain - contact staff";
+        } else if (transaction != null && transaction.status() == DailyStorage.TransactionStatus.FAILED) {
+            claimMaterial = Material.YELLOW_DYE;
+            claimText = "Previous deposit failed safely - click to retry";
+        } else if (transaction != null && (transaction.status() == DailyStorage.TransactionStatus.PREPARED
+            || transaction.status() == DailyStorage.TransactionStatus.DEPOSITING
+            || transaction.status() == DailyStorage.TransactionStatus.RECONCILED)) {
+            claimMaterial = Material.CLOCK;
+            claimText = "Daily claim is still being processed";
+        }
+        inventory.setItem(13, named(claimMaterial, claimText));
         inventory.setItem(15, named(state.animationEnabled() ? Material.LIME_DYE : Material.RED_DYE,
             "Animation: " + (state.animationEnabled() ? "ON" : "OFF")));
         return inventory;
@@ -215,14 +297,18 @@ public final class DailyService implements CommandExecutor, Listener {
         if (!(event.getWhoClicked() instanceof Player player) || holder.animation()) return;
         if (event.getRawSlot() == 13) claim(player);
         if (event.getRawSlot() == 15) {
-            try {
-                DailyState state = storage.load(player.getUniqueId(), animationDefault());
-                storage.saveAnimationPreference(player.getUniqueId(), !state.animationEnabled(), animationDefault());
-                player.openInventory(menu(player, new DailyState(state.lastClaimDate(), state.currentStreak(),
-                    state.highestStreak(), state.totalClaims(), state.totalAwarded(), !state.animationEnabled())));
-            } catch (SQLException ex) {
-                player.sendMessage(Component.text("Could not save the animation preference."));
-            }
+            UUID playerId = player.getUniqueId();
+            submit(() -> {
+                DailyState state = storage.load(playerId, animationDefault());
+                storage.saveAnimationPreference(playerId, !state.animationEnabled(), animationDefault());
+                return new DailyState(state.lastClaimDate(), state.currentStreak(),
+                    state.highestStreak(), state.totalClaims(), state.totalAwarded(), !state.animationEnabled());
+            }).whenComplete((state, throwable) -> runMain(() -> {
+                Player live = onlinePlayer(playerId);
+                if (live == null) return;
+                if (throwable != null) live.sendMessage(Component.text("Could not save the animation preference."));
+                else live.openInventory(menu(live, state));
+            }));
         }
     }
 
@@ -238,26 +324,64 @@ public final class DailyService implements CommandExecutor, Listener {
 
     private void claim(Player player) {
         UUID id = player.getUniqueId();
-        if (!claims.add(id)) return;
+        if (!accepting.get() || !acceptingClaims.get()) {
+            player.sendMessage(Component.text("Daily rewards are temporarily unavailable."));
+            return;
+        }
+        if (!claims.add(id)) {
+            player.sendMessage(Component.text("Your daily claim is already being processed."));
+            return;
+        }
+        CompletableFuture<DailyClaimOutcome> work = submit(() -> claimOffThread(id));
+        work.whenComplete((outcome, throwable) -> {
+            claims.remove(id);
+            runMain(() -> {
+                Player live = onlinePlayer(id);
+                if (live == null) return;
+                if (throwable != null) {
+                    plugin.getLogger().warning("Daily claim failed for " + id + ": " + throwable.getMessage());
+                    live.sendMessage(Component.text("Daily rewards are temporarily unavailable."));
+                    return;
+                }
+                live.sendMessage(Component.text(outcome.message()));
+                if (outcome.state() != null) live.openInventory(menu(live, outcome.state()));
+            });
+        });
+    }
+
+    private DailyClaimOutcome claimOffThread(UUID id) throws SQLException {
         try {
             LocalDate today = today();
             DailyState old = storage.load(id, animationDefault());
             int streak = DailyRules.nextStreak(old.lastClaimDate(), today, old.currentStreak());
             if (streak == 0) {
-                player.sendMessage(Component.text("You already claimed today's reward."));
-                return;
+                return new DailyClaimOutcome("You already claimed today's reward.", null);
             }
             double amount = DailyRules.payout(streak, payouts);
             if (!storage.reserve(id, today, amount)) {
                 DailyStorage.Transaction existing = storage.transaction(id, today);
                 String status = existing == null ? "unknown" : existing.status().name();
-                player.sendMessage(Component.text("Today's daily transaction is " + status
-                    + ". Contact staff if your reward or streak is missing."));
-                return;
+                return new DailyClaimOutcome("Today's daily transaction is " + status
+                    + ". Contact staff if your reward or streak is missing.", null);
             }
-            double before = vault.getBalance(player);
+            Player live = callOnMain(() -> onlinePlayer(id));
+            if (live == null) {
+                storage.fail(id, today, "Player disconnected before Vault invocation");
+                return new DailyClaimOutcome("Daily claim stopped before the economy was invoked; it may be retried.",
+                    null);
+            }
+            double before = callOnMain(() -> vault.getBalance(live));
             storage.markDepositing(id, today, before);
-            VaultHook.DepositResult result = vault.depositDetailed(player, amount);
+            VaultHook.DepositResult result = callOnMain(() -> {
+                Player current = onlinePlayer(id);
+                if (current == null) return null;
+                return vault.depositDetailed(current, amount);
+            });
+            if (result == null) {
+                storage.fail(id, today, "Player disconnected before Vault invocation");
+                return new DailyClaimOutcome("Daily claim stopped before the economy was invoked; it may be retried.",
+                    null);
+            }
             DailyStorage.TransactionStatus resultStatus = classifyVaultResult(result);
             storage.recordVaultResult(id, today, resultStatus,
                 result.balanceAfter(), result.responseAmount(), result.responseType(), result.errorMessage());
@@ -265,18 +389,14 @@ public final class DailyService implements CommandExecutor, Listener {
                 String message = resultStatus == DailyStorage.TransactionStatus.UNCERTAIN
                     ? "The economy result was uncertain. Do not retry; contact staff for reconciliation."
                     : "The economy rejected the deposit; your streak was not advanced and may be retried.";
-                player.sendMessage(Component.text(message));
-                return;
+                return new DailyClaimOutcome(message, null);
             }
             DailyState next = new DailyState(today, streak, Math.max(old.highestStreak(), streak),
                 old.totalClaims() + 1, old.totalAwarded() + amount, old.animationEnabled());
             storage.complete(id, today, next);
-            player.sendMessage(Component.text("Daily reward claimed: $" + amount));
-            player.openInventory(menu(player, next));
+            return new DailyClaimOutcome("Daily reward claimed: $" + amount, next);
         } catch (SQLException ex) {
-            plugin.getLogger().warning("Daily claim failed for " + id + ": " + ex.getMessage());
-        } finally {
-            claims.remove(id);
+            throw ex;
         }
     }
 
@@ -291,6 +411,73 @@ public final class DailyService implements CommandExecutor, Listener {
             return DailyStorage.TransactionStatus.FAILED;
         }
         return DailyStorage.TransactionStatus.UNCERTAIN;
+    }
+
+    private <T> CompletableFuture<T> submit(SqlTask<T> task) {
+        if (!accepting.get() || executor == null || executor.isShutdown()) {
+            return CompletableFuture.failedFuture(new IllegalStateException("Daily service is unavailable"));
+        }
+        CompletableFuture<T> future = new CompletableFuture<>();
+        activeWork.add(future);
+        try {
+            executor.execute(() -> {
+                try {
+                    future.complete(task.run());
+                } catch (Throwable throwable) {
+                    future.completeExceptionally(throwable);
+                }
+            });
+        } catch (RuntimeException ex) {
+            future.completeExceptionally(ex);
+        }
+        future.whenComplete((ignored, throwable) -> activeWork.remove(future));
+        return future;
+    }
+
+    private <T> T callOnMain(Callable<T> callable) throws SQLException {
+        if (!accepting.get()) throw new SQLException("Daily service is stopping");
+        CompletableFuture<T> result = new CompletableFuture<>();
+        runMain(() -> {
+            try {
+                result.complete(callable.call());
+            } catch (Exception ex) {
+                result.completeExceptionally(ex);
+            }
+        });
+        try {
+            return result.get(5, TimeUnit.SECONDS);
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            throw new SQLException("Interrupted waiting for daily main-thread work", ex);
+        } catch (ExecutionException | TimeoutException ex) {
+            throw new SQLException("Daily main-thread work did not complete safely", ex);
+        }
+    }
+
+    private void runMain(Runnable runnable) {
+        if (!accepting.get()) return;
+        try {
+            Bukkit.getScheduler().runTask(plugin, runnable);
+        } catch (RuntimeException ex) {
+            plugin.getLogger().warning("Could not schedule daily callback: " + ex.getMessage());
+        }
+    }
+
+    private Player onlinePlayer(UUID playerId) {
+        Player player = Bukkit.getPlayer(playerId);
+        return player != null && player.isOnline() ? player : null;
+    }
+
+    private void completeToSender(CommandSender sender, CompletableFuture<List<String>> future) {
+        future.whenComplete((lines, throwable) -> runMain(() -> {
+            if (throwable != null) {
+                Throwable cause = throwable instanceof CompletionException ? throwable.getCause() : throwable;
+                sender.sendMessage("Daily operation failed: "
+                    + (cause == null ? throwable.getMessage() : cause.getMessage()));
+            } else {
+                lines.forEach(sender::sendMessage);
+            }
+        }));
     }
 
     private void cancelAnimation(UUID id) {
@@ -316,5 +503,16 @@ public final class DailyService implements CommandExecutor, Listener {
     }
     private record Holder(boolean animation) implements InventoryHolder {
         @Override public Inventory getInventory() { return null; }
+    }
+
+    private record DailyClaimOutcome(String message, DailyState state) {
+    }
+
+    private record DailyView(DailyState state, DailyStorage.Transaction transaction) {
+    }
+
+    @FunctionalInterface
+    private interface SqlTask<T> {
+        T run() throws Exception;
     }
 }

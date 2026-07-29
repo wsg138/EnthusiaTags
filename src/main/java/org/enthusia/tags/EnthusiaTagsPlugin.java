@@ -106,6 +106,9 @@ public final class EnthusiaTagsPlugin extends JavaPlugin {
         messages.reload();
         tagService.reloadAll();
         rewardService.reload();
+        if (dailyService != null) {
+            dailyService.reload();
+        }
         cosmeticsService.reload();
         migrationReport.summaryLines().forEach(line -> getLogger().info("Reload summary: " + line));
     }
@@ -174,6 +177,11 @@ public final class EnthusiaTagsPlugin extends JavaPlugin {
                     return rewardService.handleAdminCommand(sender, java.util.Arrays.copyOfRange(args, 1, args.length));
                 }
                 if (args.length >= 2 && args[0].equalsIgnoreCase("daily")) {
+                    if (dailyService == null) {
+                        sender.sendMessage(net.kyori.adventure.text.Component.text(
+                            "Daily rewards are unavailable because storage did not initialize."));
+                        return true;
+                    }
                     return dailyService.handleAdminCommand(sender, java.util.Arrays.copyOfRange(args, 1, args.length));
                 }
                 sender.sendMessage(net.kyori.adventure.text.Component.text("Usage: /enthusiatags reload"));

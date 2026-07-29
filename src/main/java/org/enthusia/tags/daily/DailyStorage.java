@@ -12,6 +12,7 @@ public final class DailyStorage implements AutoCloseable {
                               String responseType, String failure, long createdAt, Long completedAt) { }
     public record Reconciliation(long historyId, String administrator, String decision, String reason,
                                  String oldStatus, String newStatus, long createdAt) { }
+    public record Transition(long historyId, String oldStatus, String newStatus, String evidence, long createdAt) { }
     private final Connection connection;
 
     public DailyStorage(File file) throws SQLException {
@@ -38,6 +39,13 @@ public final class DailyStorage implements AutoCloseable {
                   old_status TEXT NOT NULL, new_status TEXT NOT NULL, decision TEXT NOT NULL,
                   reason TEXT NOT NULL, created_at INTEGER NOT NULL)
                 """);
+            statement.executeUpdate("""
+                CREATE TABLE IF NOT EXISTS daily_transition_history (
+                  history_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  player_uuid TEXT NOT NULL, claim_date TEXT NOT NULL,
+                  old_status TEXT, new_status TEXT NOT NULL, evidence TEXT NOT NULL,
+                  created_at INTEGER NOT NULL)
+                """);
         }
         ensureColumn("daily_ledger", "balance_before", "REAL");
         ensureColumn("daily_ledger", "balance_after", "REAL");
@@ -45,8 +53,35 @@ public final class DailyStorage implements AutoCloseable {
         ensureColumn("daily_ledger", "response_type", "TEXT");
         try (Statement statement = connection.createStatement()) {
             statement.executeUpdate("UPDATE daily_ledger SET status='PREPARED' WHERE status='PENDING'");
-            statement.executeUpdate("UPDATE daily_ledger SET status='UNCERTAIN',failure="
-                + "'Server restarted while Vault result was unknown' WHERE status='DEPOSITING'");
+        }
+        java.util.List<java.util.Map.Entry<UUID, LocalDate>> interrupted = new java.util.ArrayList<>();
+        try (PreparedStatement select = connection.prepareStatement(
+            "SELECT player_uuid,claim_date FROM daily_ledger WHERE status='DEPOSITING'");
+             ResultSet rs = select.executeQuery()) {
+            while (rs.next()) {
+                interrupted.add(java.util.Map.entry(UUID.fromString(rs.getString("player_uuid")),
+                    LocalDate.parse(rs.getString("claim_date"))));
+            }
+        }
+        connection.setAutoCommit(false);
+        try (PreparedStatement update = connection.prepareStatement(
+            "UPDATE daily_ledger SET status='UNCERTAIN',failure=?"
+                + " WHERE player_uuid=? AND claim_date=? AND status='DEPOSITING'")) {
+            for (java.util.Map.Entry<UUID, LocalDate> entry : interrupted) {
+                update.setString(1, "Server restarted while Vault result was unknown");
+                update.setString(2, entry.getKey().toString());
+                update.setString(3, entry.getValue().toString());
+                if (update.executeUpdate() == 1) {
+                    insertTransition(entry.getKey(), entry.getValue(), TransactionStatus.DEPOSITING,
+                        TransactionStatus.UNCERTAIN, "Server restarted while Vault result was unknown");
+                }
+            }
+            connection.commit();
+        } catch (SQLException ex) {
+            connection.rollback();
+            throw ex;
+        } finally {
+            connection.setAutoCommit(true);
         }
     }
 
@@ -64,36 +99,68 @@ public final class DailyStorage implements AutoCloseable {
     }
 
     public synchronized boolean reserve(UUID playerId, LocalDate date, double amount) throws SQLException {
-        try (PreparedStatement statement = connection.prepareStatement(
-            "INSERT OR IGNORE INTO daily_ledger(player_uuid,claim_date,amount,status,created_at)"
-                + " VALUES(?,?,?,'PREPARED',?)")) {
-            statement.setString(1, playerId.toString());
-            statement.setString(2, date.toString());
-            statement.setDouble(3, amount);
-            statement.setLong(4, System.currentTimeMillis());
-            if (statement.executeUpdate() == 1) return true;
-        }
-        try (PreparedStatement retry = connection.prepareStatement("""
-            UPDATE daily_ledger SET status='PREPARED',amount=?,created_at=?,completed_at=NULL,failure=NULL,
-              balance_before=NULL,balance_after=NULL,response_amount=NULL,response_type=NULL
-            WHERE player_uuid=? AND claim_date=? AND status='FAILED'
-            """)) {
-            retry.setDouble(1, amount);
-            retry.setLong(2, System.currentTimeMillis());
-            retry.setString(3, playerId.toString());
-            retry.setString(4, date.toString());
-            return retry.executeUpdate() == 1;
+        connection.setAutoCommit(false);
+        try {
+            try (PreparedStatement statement = connection.prepareStatement(
+                "INSERT OR IGNORE INTO daily_ledger(player_uuid,claim_date,amount,status,created_at)"
+                    + " VALUES(?,?,?,'PREPARED',?)")) {
+                statement.setString(1, playerId.toString());
+                statement.setString(2, date.toString());
+                statement.setDouble(3, amount);
+                statement.setLong(4, System.currentTimeMillis());
+                if (statement.executeUpdate() == 1) {
+                    insertTransition(playerId, date, null, TransactionStatus.PREPARED,
+                        "Daily claim reserved for amount=" + amount);
+                    connection.commit();
+                    return true;
+                }
+            }
+            try (PreparedStatement retry = connection.prepareStatement("""
+                UPDATE daily_ledger SET status='PREPARED',amount=?,created_at=?,completed_at=NULL,failure=NULL,
+                  balance_before=NULL,balance_after=NULL,response_amount=NULL,response_type=NULL
+                WHERE player_uuid=? AND claim_date=? AND status='FAILED'
+                """)) {
+                retry.setDouble(1, amount);
+                retry.setLong(2, System.currentTimeMillis());
+                retry.setString(3, playerId.toString());
+                retry.setString(4, date.toString());
+                if (retry.executeUpdate() == 1) {
+                    insertTransition(playerId, date, TransactionStatus.FAILED, TransactionStatus.PREPARED,
+                        "Definite failure retried for amount=" + amount);
+                    connection.commit();
+                    return true;
+                }
+            }
+            connection.rollback();
+            return false;
+        } catch (SQLException ex) {
+            connection.rollback();
+            throw ex;
+        } finally {
+            connection.setAutoCommit(true);
         }
     }
 
     public synchronized void markDepositing(UUID playerId, LocalDate date, double balanceBefore) throws SQLException {
-        transition(playerId, date, TransactionStatus.PREPARED, TransactionStatus.DEPOSITING,
-            "balance_before", balanceBefore, null);
+        connection.setAutoCommit(false);
+        try {
+            transition(playerId, date, TransactionStatus.PREPARED, TransactionStatus.DEPOSITING,
+                "balance_before", balanceBefore, null);
+            insertTransition(playerId, date, TransactionStatus.PREPARED, TransactionStatus.DEPOSITING,
+                "Vault invocation reserved; balance-before=" + balanceBefore);
+            connection.commit();
+        } catch (SQLException ex) {
+            connection.rollback();
+            throw ex;
+        } finally {
+            connection.setAutoCommit(true);
+        }
     }
 
     public synchronized void recordVaultResult(UUID playerId, LocalDate date, TransactionStatus status,
                                                double balanceAfter, double responseAmount,
                                                String responseType, String failure) throws SQLException {
+        connection.setAutoCommit(false);
         try (PreparedStatement statement = connection.prepareStatement("""
             UPDATE daily_ledger SET status=?,balance_after=?,response_amount=?,response_type=?,failure=?
             WHERE player_uuid=? AND claim_date=? AND status='DEPOSITING'
@@ -107,6 +174,17 @@ public final class DailyStorage implements AutoCloseable {
             statement.setString(6, playerId.toString());
             statement.setString(7, date.toString());
             if (statement.executeUpdate() != 1) throw new SQLException("Daily transaction was not DEPOSITING");
+            TransactionStatus stored = status == TransactionStatus.DELIVERED
+                ? TransactionStatus.DEPOSITING : status;
+            insertTransition(playerId, date, TransactionStatus.DEPOSITING, stored,
+                "Vault response=" + responseType + " returned=" + responseAmount
+                    + " balance-after=" + balanceAfter + " failure=" + failure);
+            connection.commit();
+        } catch (SQLException ex) {
+            connection.rollback();
+            throw ex;
+        } finally {
+            connection.setAutoCommit(true);
         }
     }
 
@@ -135,6 +213,8 @@ public final class DailyStorage implements AutoCloseable {
             upsert.setDouble(6, state.totalAwarded());
             upsert.setInt(7, state.animationEnabled() ? 1 : 0);
             upsert.executeUpdate();
+            insertTransition(playerId, date, TransactionStatus.DEPOSITING, TransactionStatus.DELIVERED,
+                "Daily state advanced atomically");
             connection.commit();
         } catch (SQLException ex) {
             connection.rollback();
@@ -159,12 +239,29 @@ public final class DailyStorage implements AutoCloseable {
     }
 
     public synchronized void fail(UUID playerId, LocalDate date, String reason) throws SQLException {
-        try (PreparedStatement statement = connection.prepareStatement(
-            "UPDATE daily_ledger SET status='FAILED',failure=? WHERE player_uuid=? AND claim_date=?")) {
-            statement.setString(1, reason);
-            statement.setString(2, playerId.toString());
-            statement.setString(3, date.toString());
-            statement.executeUpdate();
+        connection.setAutoCommit(false);
+        try {
+            Transaction current = transaction(playerId, date);
+            if (current == null || (current.status() != TransactionStatus.PREPARED
+                && current.status() != TransactionStatus.DEPOSITING)) {
+                throw new SQLException("Daily transaction is not safely fail-able");
+            }
+            try (PreparedStatement statement = connection.prepareStatement(
+                "UPDATE daily_ledger SET status='FAILED',failure=?"
+                    + " WHERE player_uuid=? AND claim_date=? AND status=?")) {
+                statement.setString(1, reason);
+                statement.setString(2, playerId.toString());
+                statement.setString(3, date.toString());
+                statement.setString(4, current.status().name());
+                if (statement.executeUpdate() != 1) throw new SQLException("Daily failure transition changed");
+            }
+            insertTransition(playerId, date, current.status(), TransactionStatus.FAILED, reason);
+            connection.commit();
+        } catch (SQLException ex) {
+            connection.rollback();
+            throw ex;
+        } finally {
+            connection.setAutoCommit(true);
         }
     }
 
@@ -270,6 +367,137 @@ public final class DailyStorage implements AutoCloseable {
             }
         }
         return result;
+    }
+
+    public synchronized java.util.List<Transition> transitionHistory(UUID playerId, LocalDate date, int limit)
+        throws SQLException {
+        java.util.List<Transition> result = new java.util.ArrayList<>();
+        try (PreparedStatement statement = connection.prepareStatement("""
+            SELECT history_id,old_status,new_status,evidence,created_at
+            FROM daily_transition_history WHERE player_uuid=? AND claim_date=?
+            ORDER BY history_id DESC LIMIT ?
+            """)) {
+            statement.setString(1, playerId.toString());
+            statement.setString(2, date.toString());
+            statement.setInt(3, Math.max(1, limit));
+            try (ResultSet rs = statement.executeQuery()) {
+                while (rs.next()) {
+                    result.add(new Transition(rs.getLong("history_id"), rs.getString("old_status"),
+                        rs.getString("new_status"), rs.getString("evidence"), rs.getLong("created_at")));
+                }
+            }
+        }
+        return result;
+    }
+
+    public synchronized Transaction reconcileAtomic(UUID playerId, LocalDate date, String administrator,
+                                                    boolean delivered, String reason, DailyState deliveredState,
+                                                    boolean stateAlreadyApplied) throws SQLException {
+        connection.setAutoCommit(false);
+        try {
+            Transaction current = transaction(playerId, date);
+            if (current == null) throw new SQLException("Daily transaction not found");
+            if (current.status() != TransactionStatus.UNCERTAIN
+                && !(delivered && current.status() == TransactionStatus.RECONCILED)) {
+                throw new SQLException("Daily transaction is " + current.status() + ", not UNCERTAIN");
+            }
+            TransactionStatus intermediate = delivered ? TransactionStatus.RECONCILED : TransactionStatus.FAILED;
+            if (current.status() != intermediate) {
+                try (PreparedStatement update = connection.prepareStatement("""
+                    UPDATE daily_ledger SET status=?,failure=? WHERE player_uuid=? AND claim_date=? AND status=?
+                    """)) {
+                    update.setString(1, intermediate.name());
+                    update.setString(2, "Reconciled by " + administrator + ": " + reason);
+                    update.setString(3, playerId.toString());
+                    update.setString(4, date.toString());
+                    update.setString(5, current.status().name());
+                    if (update.executeUpdate() != 1) throw new SQLException("Concurrent daily reconciliation");
+                }
+                insertDailyReconciliation(administrator, playerId, date, current.status(), intermediate,
+                    delivered ? "delivered" : "retry", reason);
+                insertTransition(playerId, date, current.status(), intermediate,
+                    "Administrator decision by " + administrator + ": " + reason);
+            }
+            if (delivered) {
+                try (PreparedStatement ledger = connection.prepareStatement(
+                    "UPDATE daily_ledger SET status='DELIVERED',completed_at=?"
+                        + " WHERE player_uuid=? AND claim_date=? AND status='RECONCILED'")) {
+                    ledger.setLong(1, System.currentTimeMillis());
+                    ledger.setString(2, playerId.toString());
+                    ledger.setString(3, date.toString());
+                    if (ledger.executeUpdate() != 1) throw new SQLException("Daily reconciliation was not ready");
+                }
+                if (!stateAlreadyApplied) {
+                    if (deliveredState == null) throw new SQLException("Delivered daily state is required");
+                    upsertState(playerId, date, deliveredState);
+                }
+                insertTransition(playerId, date, TransactionStatus.RECONCILED, TransactionStatus.DELIVERED,
+                    stateAlreadyApplied ? "Ledger finalized; daily state was already applied"
+                        : "Ledger and daily state finalized atomically");
+            }
+            connection.commit();
+            return transaction(playerId, date);
+        } catch (SQLException ex) {
+            connection.rollback();
+            throw ex;
+        } finally {
+            connection.setAutoCommit(true);
+        }
+    }
+
+    private void upsertState(UUID playerId, LocalDate date, DailyState state) throws SQLException {
+        try (PreparedStatement upsert = connection.prepareStatement("""
+            INSERT INTO daily_state VALUES(?,?,?,?,?,?,?) ON CONFLICT(player_uuid) DO UPDATE SET
+            last_claim_date=excluded.last_claim_date,current_streak=excluded.current_streak,
+            highest_streak=excluded.highest_streak,total_claims=excluded.total_claims,
+            total_awarded=excluded.total_awarded,animation_enabled=excluded.animation_enabled
+            """)) {
+            upsert.setString(1, playerId.toString());
+            upsert.setString(2, date.toString());
+            upsert.setInt(3, state.currentStreak());
+            upsert.setInt(4, state.highestStreak());
+            upsert.setLong(5, state.totalClaims());
+            upsert.setDouble(6, state.totalAwarded());
+            upsert.setInt(7, state.animationEnabled() ? 1 : 0);
+            upsert.executeUpdate();
+        }
+    }
+
+    private void insertDailyReconciliation(String administrator, UUID playerId, LocalDate date,
+                                           TransactionStatus oldStatus, TransactionStatus newStatus,
+                                           String decision, String reason) throws SQLException {
+        try (PreparedStatement history = connection.prepareStatement("""
+            INSERT INTO daily_reconciliation_history(
+              administrator,player_uuid,claim_date,old_status,new_status,decision,reason,created_at)
+            VALUES(?,?,?,?,?,?,?,?)
+            """)) {
+            history.setString(1, administrator);
+            history.setString(2, playerId.toString());
+            history.setString(3, date.toString());
+            history.setString(4, oldStatus.name());
+            history.setString(5, newStatus.name());
+            history.setString(6, decision);
+            history.setString(7, reason);
+            history.setLong(8, System.currentTimeMillis());
+            history.executeUpdate();
+        }
+    }
+
+    private void insertTransition(UUID playerId, LocalDate date, TransactionStatus oldStatus,
+                                  TransactionStatus newStatus, String evidence) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+            INSERT INTO daily_transition_history(
+              player_uuid,claim_date,old_status,new_status,evidence,created_at) VALUES(?,?,?,?,?,?)
+            """)) {
+            statement.setString(1, playerId.toString());
+            statement.setString(2, date.toString());
+            if (oldStatus == null) statement.setNull(3, Types.VARCHAR);
+            else statement.setString(3, oldStatus.name());
+            statement.setString(4, newStatus.name());
+            statement.setString(5, evidence == null ? "" : evidence);
+            statement.setLong(6, System.currentTimeMillis());
+            statement.executeUpdate();
+        }
     }
 
     private void transition(UUID playerId, LocalDate date, TransactionStatus from, TransactionStatus to,

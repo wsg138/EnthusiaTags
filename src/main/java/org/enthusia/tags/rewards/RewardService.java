@@ -40,6 +40,13 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.lang.reflect.Method;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -71,7 +78,7 @@ public final class RewardService {
     private final PlaytimeHook playtimeHook = new PlaytimeHook();
     private final PlaceholderApiHook placeholderApiHook = new PlaceholderApiHook();
     private final PlayerLookup playerLookup;
-    private final Map<String, RewardDefinition> rewards = new LinkedHashMap<>();
+    private volatile Map<String, RewardDefinition> rewards = Map.of();
     private final Map<UUID, RewardPlayerState> playerStates = new ConcurrentHashMap<>();
     private final Map<UUID, CompletableFuture<Void>> pendingLoads = new ConcurrentHashMap<>();
     private final Map<UUID, Map<String, Long>> pendingCounterDeltas = new ConcurrentHashMap<>();
@@ -80,10 +87,15 @@ public final class RewardService {
     private final java.util.Set<UUID> queuedRewardSyncPlayers = ConcurrentHashMap.newKeySet();
     private final Set<UUID> queuedUnlockChecks = ConcurrentHashMap.newKeySet();
     private final Set<String> inFlightClaims = ConcurrentHashMap.newKeySet();
+    private final Set<CompletableFuture<?>> activeOperations = ConcurrentHashMap.newKeySet();
     private final IntegrationStatus integrationStatus = new IntegrationStatus();
+    private final AtomicReference<ServiceLifecycle> lifecycle =
+        new AtomicReference<>(ServiceLifecycle.STOPPED);
+    private final AtomicBoolean reloadQueued = new AtomicBoolean(false);
 
     private RewardStorage storage;
-    private RewardsConfig config;
+    private ExecutorService claimExecutor;
+    private volatile RewardsConfig config;
     private BukkitTask flushTask;
     private BukkitTask globalScanTask;
     private BukkitTask syncDrainTask;
@@ -106,18 +118,42 @@ public final class RewardService {
     }
 
     public void enable() {
+        claimExecutor = Executors.newFixedThreadPool(2, runnable -> {
+            Thread thread = new Thread(runnable, "enthusia-tags-reward-claim");
+            thread.setDaemon(true);
+            return thread;
+        });
         ensureDefaults();
         initStorage();
-        reload();
+        lifecycle.set(ServiceLifecycle.RUNNING);
+        reloadNow();
         startFlushTask();
         startGlobalScanTask();
     }
 
     public void disable() {
+        lifecycle.set(ServiceLifecycle.STOPPING);
         stopFlushTask();
         stopGlobalScanTask();
         stopSyncDrainTask();
         stopUnlockCheckTask();
+        if (claimExecutor != null) {
+            claimExecutor.shutdownNow();
+            try {
+                if (!claimExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
+                    plugin.getLogger().severe("Reward claim workers did not stop; storage will remain open.");
+                    inFlightClaims.clear();
+                    lifecycle.set(ServiceLifecycle.STOPPED);
+                    return;
+                }
+            } catch (InterruptedException ex) {
+                Thread.currentThread().interrupt();
+                plugin.getLogger().severe("Interrupted while stopping reward claim workers; storage will remain open.");
+                inFlightClaims.clear();
+                lifecycle.set(ServiceLifecycle.STOPPED);
+                return;
+            }
+        }
         flushAllBlocking();
         pendingLoads.clear();
         pendingCounterDeltas.clear();
@@ -129,11 +165,33 @@ public final class RewardService {
         if (storage != null) {
             storage.close();
         }
+        inFlightClaims.clear();
+        activeOperations.clear();
+        lifecycle.set(ServiceLifecycle.STOPPED);
     }
 
     public void reload() {
+        ServiceLifecycle current = lifecycle.get();
+        if (current == ServiceLifecycle.STOPPING || current == ServiceLifecycle.STOPPED) {
+            return;
+        }
+        lifecycle.set(ServiceLifecycle.RELOADING);
+        if (!activeOperations.isEmpty()) {
+            if (reloadQueued.compareAndSet(false, true)) {
+                CompletableFuture<?>[] claims = activeOperations.toArray(CompletableFuture[]::new);
+                CompletableFuture.allOf(claims).whenComplete((ignored, throwable) ->
+                    Bukkit.getScheduler().runTask(plugin, this::reloadNow));
+            }
+            return;
+        }
+        reloadNow();
+    }
+
+    private void reloadNow() {
+        if (lifecycle.get() == ServiceLifecycle.STOPPING || lifecycle.get() == ServiceLifecycle.STOPPED) {
+            return;
+        }
         ensureDefaults();
-        rewards.clear();
         loadConfig();
         refreshIntegrations();
         progressCacheTicks = Math.max(20L, plugin.getConfig().getLong("performance.reward-progress-cache-ticks", 100L));
@@ -143,6 +201,8 @@ public final class RewardService {
             preloadPlayer(player.getUniqueId());
             queueProgressRefresh(player);
         }
+        reloadQueued.set(false);
+        lifecycle.set(ServiceLifecycle.RUNNING);
     }
 
     public RewardsConfig getConfig() {
@@ -179,6 +239,7 @@ public final class RewardService {
                         Bukkit.getScheduler().runTask(plugin, () -> {
                             reserveExistingIpClaims(player, state);
                             drainItemOverflow(player);
+                            recoverPendingRewards(player.getUniqueId());
                             queueProgressRefresh(player);
                         });
                     }
@@ -206,13 +267,17 @@ public final class RewardService {
         if (state != null) {
             reserveExistingIpClaims(player, state);
             drainItemOverflow(player);
+            recoverPendingRewards(player.getUniqueId());
             queueProgressRefresh(player);
         }
     }
 
     public void unloadPlayer(Player player) {
         UUID playerId = player.getUniqueId();
-        flushPlayerBlocking(playerId);
+        RewardPlayerState state = playerStates.get(playerId);
+        if (state != null) {
+            flushPlayerAsync(playerId, state);
+        }
         pendingLoads.remove(playerId);
         pendingCounterDeltas.remove(playerId);
         progressSnapshots.remove(playerId);
@@ -221,24 +286,35 @@ public final class RewardService {
 
     public boolean isClaimed(UUID playerId, String rewardId) {
         RewardPlayerState state = getLoadedState(playerId);
-        return state != null && state.claimedRewards().contains(rewardId.toLowerCase(Locale.ROOT));
-    }
-
-    public RewardClaimResult claim(Player player, RewardDefinition reward) {
-        return claimInternal(player, reward, false, false, getPlayerIpAddress(player));
+        return state != null && state.isClaimed(rewardId.toLowerCase(Locale.ROOT));
     }
 
     public CompletableFuture<RewardClaimResult> claimAsync(Player player, RewardDefinition reward) {
+        if (lifecycle.get() != ServiceLifecycle.RUNNING || claimExecutor == null
+            || claimExecutor.isShutdown()) {
+            return CompletableFuture.completedFuture(RewardClaimResult.SERVICE_UNAVAILABLE);
+        }
         RewardPlayerState state = getLoadedState(player.getUniqueId());
         if (state == null || !state.isLoaded()) {
             performanceMonitor.increment("rewards.claim.skipped-loading");
             return CompletableFuture.completedFuture(RewardClaimResult.LOADING);
         }
         String rewardId = reward.getId().toLowerCase(Locale.ROOT);
-        if (state.claimedRewards().contains(rewardId)) {
+        if (state.isClaimed(rewardId)) {
             return CompletableFuture.completedFuture(RewardClaimResult.ALREADY_CLAIMED);
         }
-        if (!evaluate(player, reward).claimable()) {
+        RewardEvaluation evaluation = evaluate(player, reward);
+        if (evaluation.status() == RewardStatus.ITEM_QUEUED) {
+            retryQueuedItems(player);
+            return CompletableFuture.completedFuture(RewardClaimResult.ITEM_QUEUED);
+        }
+        if (evaluation.status() == RewardStatus.REQUIRES_RECONCILIATION) {
+            return CompletableFuture.completedFuture(RewardClaimResult.RECONCILIATION_REQUIRED);
+        }
+        if (evaluation.status() == RewardStatus.CLAIM_PENDING) {
+            return CompletableFuture.completedFuture(RewardClaimResult.CLAIM_IN_PROGRESS);
+        }
+        if (!evaluation.claimable()) {
             return CompletableFuture.completedFuture(RewardClaimResult.NOT_READY);
         }
         String claimKey = player.getUniqueId() + ":" + rewardId;
@@ -246,52 +322,112 @@ public final class RewardService {
             return CompletableFuture.completedFuture(RewardClaimResult.CLAIM_IN_PROGRESS);
         }
         String ipAddress = getPlayerIpAddress(player);
-        return CompletableFuture.supplyAsync(() -> claimInternal(player, reward, true, true, ipAddress));
+        UUID playerId = player.getUniqueId();
+        String playerName = player.getName();
+        CompletableFuture<RewardClaimResult> future = new CompletableFuture<>();
+        activeOperations.add(future);
+        try {
+            claimExecutor.execute(() -> {
+                try {
+                    future.complete(claimInternal(playerId, playerName, reward, ipAddress));
+                } catch (Throwable throwable) {
+                    future.completeExceptionally(throwable);
+                }
+            });
+        } catch (RuntimeException ex) {
+            activeOperations.remove(future);
+            inFlightClaims.remove(claimKey);
+            return CompletableFuture.completedFuture(RewardClaimResult.SERVICE_UNAVAILABLE);
+        }
+        future.whenComplete((ignored, throwable) -> {
+            activeOperations.remove(future);
+            if (lifecycle.get() == ServiceLifecycle.RELOADING && activeOperations.isEmpty()
+                && reloadQueued.compareAndSet(false, true)) {
+                Bukkit.getScheduler().runTask(plugin, this::reloadNow);
+            }
+        });
+        return future;
     }
 
-    private RewardClaimResult claimInternal(Player player, RewardDefinition reward, boolean evaluationComplete,
-                                            boolean claimLockHeld, String ipAddress) {
-        RewardPlayerState state = getLoadedState(player.getUniqueId());
+    private void resumeClaimAfterItem(UUID playerId, String rewardId) {
+        if (lifecycle.get() != ServiceLifecycle.RUNNING || claimExecutor == null || claimExecutor.isShutdown()) {
+            return;
+        }
+        RewardDefinition reward = rewards.get(rewardId);
+        if (reward == null) {
+            return;
+        }
+        String claimKey = playerId + ":" + rewardId;
+        if (!inFlightClaims.add(claimKey)) {
+            return;
+        }
+        CompletableFuture<RewardClaimResult> future = new CompletableFuture<>();
+        activeOperations.add(future);
+        try {
+            claimExecutor.execute(() -> {
+                try {
+                    PlayerIdentity identity = callOnMain(() -> {
+                        Player live = onlinePlayer(playerId);
+                        return live == null ? null
+                            : new PlayerIdentity(live.getName(), getPlayerIpAddress(live));
+                    });
+                    if (identity == null) {
+                        inFlightClaims.remove(claimKey);
+                        future.complete(RewardClaimResult.ITEM_QUEUED);
+                    } else {
+                        future.complete(claimInternal(playerId, identity.name(), reward, identity.ipAddress()));
+                    }
+                } catch (Throwable throwable) {
+                    inFlightClaims.remove(claimKey);
+                    future.completeExceptionally(throwable);
+                }
+            });
+        } catch (RuntimeException ex) {
+            activeOperations.remove(future);
+            inFlightClaims.remove(claimKey);
+            return;
+        }
+        future.whenComplete((result, throwable) -> activeOperations.remove(future));
+    }
+
+    private RewardClaimResult claimInternal(UUID playerId, String playerName, RewardDefinition reward,
+                                            String ipAddress) {
+        RewardPlayerState state = getLoadedState(playerId);
         if (state == null || !state.isLoaded()) return RewardClaimResult.LOADING;
         String rewardId = reward.getId().toLowerCase(Locale.ROOT);
-        String claimKey = player.getUniqueId() + ":" + rewardId;
-        if (!claimLockHeld && !inFlightClaims.add(claimKey)) return RewardClaimResult.CLAIM_IN_PROGRESS;
+        String claimKey = playerId + ":" + rewardId;
         try {
-        if (state.claimedRewards().contains(rewardId)) {
+        if (state.isClaimed(rewardId)) {
             return RewardClaimResult.ALREADY_CLAIMED;
         }
-        if (!evaluationComplete && !evaluate(player, reward).claimable()) {
-            return RewardClaimResult.NOT_READY;
-        }
         String legacyPrefix = "reward-action:" + rewardId + ":";
-        boolean unresolvedLegacy = state.states().keySet().stream()
-            .anyMatch(key -> key.startsWith(legacyPrefix));
+        boolean unresolvedLegacy = !state.stateKeysWithPrefix(legacyPrefix).isEmpty();
         if (unresolvedLegacy) {
-            state.states().put("reward-delivery:" + rewardId, RewardStatus.REQUIRES_RECONCILIATION.name());
-            state.setDirty(true);
-            persistStateBarrier(player.getUniqueId(), state);
-            plugin.getLogger().warning("Reward " + rewardId + " for " + player.getUniqueId()
+            state.setOverall(rewardId, RewardStatus.REQUIRES_RECONCILIATION);
+            persistStateBarrier(playerId, state);
+            plugin.getLogger().warning("Reward " + rewardId + " for " + playerId
                 + " has unresolved pre-ledger action state; automatic migration was refused.");
-            return RewardClaimResult.DELIVERY_FAILED;
+            return RewardClaimResult.RECONCILIATION_REQUIRED;
         }
         Map<String, RewardStorage.ActionLedgerEntry> ledger =
-            storage.loadActionLedgerNow(player.getUniqueId(), rewardId);
+            storage.loadActionLedgerNow(playerId, rewardId);
         boolean unresolvedHistoricalAction = ledger.values().stream().anyMatch(entry ->
             entry.status() == RewardStatus.CLAIM_PENDING
                 || entry.status() == RewardStatus.REQUIRES_RECONCILIATION);
         if (unresolvedHistoricalAction) {
-            state.states().put("reward-delivery:" + rewardId, RewardStatus.REQUIRES_RECONCILIATION.name());
-            state.setDirty(true);
-            persistStateBarrier(player.getUniqueId(), state);
-            return RewardClaimResult.DELIVERY_FAILED;
+            state.setOverall(rewardId, RewardStatus.REQUIRES_RECONCILIATION);
+            persistStateBarrier(playerId, state);
+            return RewardClaimResult.RECONCILIATION_REQUIRED;
         }
-        if (!reserveIpClaim(player.getUniqueId(), rewardId, ipAddress)) {
+        if (!reserveIpClaim(playerId, rewardId, ipAddress)) {
             return RewardClaimResult.IP_ALREADY_CLAIMED;
         }
 
-        state.states().put("reward-delivery:" + rewardId, RewardStatus.CLAIM_PENDING.name());
-        state.setDirty(true);
-        if (!persistStateBarrier(player.getUniqueId(), state)) return RewardClaimResult.DELIVERY_FAILED;
+        state.setOverall(rewardId, RewardStatus.CLAIM_PENDING);
+        if (!persistStateBarrier(playerId, state)) {
+            storage.releaseIpClaimAsync(playerId, rewardId, ipAddress);
+            return RewardClaimResult.DELIVERY_FAILED;
+        }
         boolean anyActionDelivered = ledger.values().stream()
             .anyMatch(entry -> entry.status() == RewardStatus.CLAIMED
                 || entry.status() == RewardStatus.REQUIRES_RECONCILIATION);
@@ -306,12 +442,11 @@ public final class RewardService {
             if (existing != null && (existing.status() == RewardStatus.CLAIM_PENDING
                 || existing.status() == RewardStatus.REQUIRES_RECONCILIATION
                 || (existing.status() == RewardStatus.CLAIMED && !existing.fingerprint().equals(fingerprint)))) {
-                state.states().put("reward-delivery:" + rewardId, RewardStatus.REQUIRES_RECONCILIATION.name());
-                state.setDirty(true);
-                persistStateBarrier(player.getUniqueId(), state);
-                return RewardClaimResult.DELIVERY_FAILED;
+                state.setOverall(rewardId, RewardStatus.REQUIRES_RECONCILIATION);
+                persistStateBarrier(playerId, state);
+                return RewardClaimResult.RECONCILIATION_REQUIRED;
             }
-            storage.saveActionLedgerNow(player.getUniqueId(), rewardId, action, fingerprint,
+            storage.saveActionLedgerNow(playerId, rewardId, action, fingerprint,
                 RewardStatus.CLAIM_PENDING, null, null);
             boolean delivered;
             boolean ambiguous = false;
@@ -319,10 +454,17 @@ public final class RewardService {
             String evidence = null;
             switch (action.getType()) {
                 case TAG -> {
-                    delivered = tagService.grantTagPersisted(player.getUniqueId(), action.getValue()).join();
+                    delivered = waitForTagPersistence(playerId, action.getValue());
                 }
                 case MONEY -> {
-                    vaultResult = callOnMain(() -> vaultHook.depositDetailed(player, action.getAmount()));
+                    Player livePlayer = callOnMain(() -> onlinePlayer(playerId));
+                    if (livePlayer == null) {
+                        delivered = false;
+                        vaultResult = null;
+                        evidence = "Player disconnected before Vault was invoked";
+                        break;
+                    }
+                    vaultResult = callOnMain(() -> vaultHook.depositDetailed(livePlayer, action.getAmount()));
                     delivered = vaultResult.success()
                         && Double.compare(vaultResult.responseAmount(), action.getAmount()) == 0;
                     ambiguous = !delivered && (!"UNAVAILABLE".equals(vaultResult.responseType())
@@ -333,48 +475,57 @@ public final class RewardService {
                 }
                 case COMMAND -> {
                     String command = action.getValue()
-                        .replace("{player}", player.getName())
-                        .replace("%player%", player.getName());
-                    delivered = callOnMain(() -> Bukkit.dispatchCommand(Bukkit.getConsoleSender(), command));
-                    evidence = delivered ? "dispatchCommand returned true"
-                        : "dispatchCommand returned false after invocation";
-                    ambiguous = !delivered;
+                        .replace("{player}", playerName)
+                        .replace("%player%", playerName);
+                    Player livePlayer = callOnMain(() -> onlinePlayer(playerId));
+                    if (livePlayer == null) {
+                        delivered = false;
+                        evidence = "Player disconnected before command invocation";
+                    } else {
+                        delivered = callOnMain(() -> Bukkit.dispatchCommand(Bukkit.getConsoleSender(), command));
+                        evidence = delivered ? "dispatchCommand returned true"
+                            : "dispatchCommand returned false after invocation";
+                        ambiguous = !delivered;
+                    }
                 }
                 case ITEM -> {
-                    delivered = deliverItem(player, rewardId, action, fingerprint);
-                    evidence = "Added to inventory or durably queued for later delivery";
+                    ItemDeliveryResult itemResult = deliverItem(playerId, rewardId, action, fingerprint);
+                    if (itemResult == ItemDeliveryResult.QUEUED) {
+                        state.setOverall(rewardId, RewardStatus.ITEM_QUEUED);
+                        persistStateBarrier(playerId, state);
+                        return RewardClaimResult.ITEM_QUEUED;
+                    }
+                    delivered = itemResult == ItemDeliveryResult.DELIVERED;
+                    evidence = itemResult == ItemDeliveryResult.DELIVERED
+                        ? "Inserted into the live player inventory" : "Item delivery failed before insertion";
                 }
                 default -> delivered = false;
             }
             if (!delivered) {
                 RewardStatus failureStatus = ambiguous
                     ? RewardStatus.REQUIRES_RECONCILIATION : RewardStatus.DELIVERY_FAILED;
-                storage.saveActionLedgerNow(player.getUniqueId(), rewardId, action, fingerprint,
+                storage.saveActionLedgerNow(playerId, rewardId, action, fingerprint,
                     failureStatus, vaultResult, evidence);
-                state.states().put("reward-delivery:" + rewardId, failureStatus.name());
-                state.setDirty(true);
+                state.setOverall(rewardId, failureStatus);
                 if (!anyActionDelivered && !ambiguous) {
-                    storage.releaseIpClaimAsync(player.getUniqueId(), rewardId, ipAddress);
+                    storage.releaseIpClaimAsync(playerId, rewardId, ipAddress);
                 }
-                persistStateBarrier(player.getUniqueId(), state);
-                plugin.getLogger().warning("Reward delivery failed player=" + player.getUniqueId()
-                    + " name=" + player.getName() + " reward=" + rewardId + " action=" + action.getType());
+                persistStateBarrier(playerId, state);
+                plugin.getLogger().warning("Reward delivery failed player=" + playerId
+                    + " name=" + playerName + " reward=" + rewardId + " action=" + action.getType());
                 return RewardClaimResult.DELIVERY_FAILED;
             }
             anyActionDelivered = true;
-            storage.saveActionLedgerNow(player.getUniqueId(), rewardId, action, fingerprint,
+            storage.saveActionLedgerNow(playerId, rewardId, action, fingerprint,
                 RewardStatus.CLAIMED, vaultResult, evidence);
         }
 
-        storage.markClaimedNow(player.getUniqueId(), rewardId);
-        state.claimedRewards().add(rewardId);
-        state.states().put("reward-delivery:" + rewardId, RewardStatus.CLAIMED.name());
-        state.setDirty(true);
-        invalidateProgress(player.getUniqueId());
-        if (!persistStateBarrier(player.getUniqueId(), state)) return RewardClaimResult.DELIVERY_FAILED;
+        long finalizedRevision = storage.finalizeRewardNow(playerId, rewardId);
+        state.applyDurableFinalization(rewardId, finalizedRevision);
+        invalidateProgress(playerId);
         return RewardClaimResult.SUCCESS;
         } catch (SQLException ex) {
-            plugin.getLogger().severe("Reward claim ledger failed for " + player.getUniqueId() + ": " + ex.getMessage());
+            plugin.getLogger().severe("Reward claim ledger failed for " + playerId + ": " + ex.getMessage());
             return RewardClaimResult.DELIVERY_FAILED;
         } finally {
             inFlightClaims.remove(claimKey);
@@ -382,6 +533,9 @@ public final class RewardService {
     }
 
     private <T> T callOnMain(java.util.concurrent.Callable<T> callable) throws SQLException {
+        if (lifecycle.get() == ServiceLifecycle.STOPPING || lifecycle.get() == ServiceLifecycle.STOPPED) {
+            throw new SQLException("Reward service is stopping");
+        }
         if (Bukkit.isPrimaryThread()) {
             try {
                 return callable.call();
@@ -390,21 +544,48 @@ public final class RewardService {
             }
         }
         CompletableFuture<T> result = new CompletableFuture<>();
-        Bukkit.getScheduler().runTask(plugin, () -> {
-            try {
-                result.complete(callable.call());
-            } catch (Exception ex) {
-                result.completeExceptionally(ex);
-            }
-        });
         try {
-            return result.get();
+            Bukkit.getScheduler().runTask(plugin, () -> {
+                if (lifecycle.get() == ServiceLifecycle.STOPPING
+                    || lifecycle.get() == ServiceLifecycle.STOPPED) {
+                    result.completeExceptionally(new IllegalStateException("Reward service stopped"));
+                    return;
+                }
+                try {
+                    result.complete(callable.call());
+                } catch (Exception ex) {
+                    result.completeExceptionally(ex);
+                }
+            });
+        } catch (RuntimeException ex) {
+            throw new SQLException("Could not schedule main-thread reward action", ex);
+        }
+        try {
+            return result.get(5, TimeUnit.SECONDS);
         } catch (InterruptedException ex) {
             Thread.currentThread().interrupt();
             throw new SQLException("Interrupted waiting for main-thread reward action", ex);
         } catch (ExecutionException ex) {
             throw new SQLException("Main-thread reward action failed", ex.getCause());
+        } catch (TimeoutException ex) {
+            throw new SQLException("Timed out waiting for main-thread reward action", ex);
         }
+    }
+
+    private boolean waitForTagPersistence(UUID playerId, String tagId) throws SQLException {
+        try {
+            return tagService.grantTagPersisted(playerId, tagId).get(5, TimeUnit.SECONDS);
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            throw new SQLException("Interrupted waiting for tag persistence", ex);
+        } catch (ExecutionException | TimeoutException ex) {
+            throw new SQLException("Tag persistence did not complete safely", ex);
+        }
+    }
+
+    private Player onlinePlayer(UUID playerId) {
+        Player player = Bukkit.getPlayer(playerId);
+        return player != null && player.isOnline() ? player : null;
     }
 
     private String actionFingerprint(RewardAction action) {
@@ -416,8 +597,7 @@ public final class RewardService {
     private boolean persistStateBarrier(UUID playerId, RewardPlayerState state) {
         synchronized (state) {
             try {
-                state.advanceRevision();
-                RewardStorage.StoredRewardData snapshot = snapshotState(state);
+                RewardStorage.StoredRewardData snapshot = state.barrierSnapshot();
                 RewardStorage.WriteResult result = storage.saveNow(playerId, snapshot);
                 if (result != RewardStorage.WriteResult.WRITTEN) {
                     plugin.getLogger().severe("Reward transition snapshot was rejected as stale for " + playerId
@@ -427,7 +607,6 @@ public final class RewardService {
                 state.markClean(snapshot.revision());
                 return true;
             } catch (SQLException ex) {
-                state.setDirty(true);
                 plugin.getLogger().severe("Reward transition was not persisted for " + playerId + ": "
                     + ex.getMessage());
                 return false;
@@ -450,16 +629,27 @@ public final class RewardService {
         if (state == null || !state.isLoaded()) {
             return new RewardEvaluation(RewardStatus.LOCKED, progress, false, false, "Player state is loading");
         }
-        if (state.claimedRewards().contains(rewardId)) {
+        if (state.isClaimed(rewardId)) {
             return new RewardEvaluation(RewardStatus.CLAIMED, progress, true, false, "Already delivered");
         }
-        String delivery = state.states().get("reward-delivery:" + rewardId);
-        if (RewardStatus.CLAIM_PENDING.name().equals(delivery)
-            || RewardStatus.REQUIRES_RECONCILIATION.name().equals(delivery)) {
+        String delivery = state.getState("reward-delivery:" + rewardId);
+        if (RewardStatus.REQUIRES_RECONCILIATION.name().equals(delivery)) {
             return new RewardEvaluation(RewardStatus.REQUIRES_RECONCILIATION, progress, true, false,
                 "A previous delivery may have been interrupted");
         }
-        boolean unlocked = state.states().containsKey(REWARD_UNLOCK_NOTIFIED_PREFIX + rewardId);
+        if (RewardStatus.ITEM_QUEUED.name().equals(delivery)) {
+            return new RewardEvaluation(RewardStatus.ITEM_QUEUED, progress, true, false,
+                "A required item is safely queued");
+        }
+        if (RewardStatus.CLAIM_PENDING.name().equals(delivery)) {
+            return new RewardEvaluation(RewardStatus.CLAIM_PENDING, progress, true, false,
+                "Partial reward delivery is pending");
+        }
+        if (RewardStatus.DELIVERY_FAILED.name().equals(delivery)) {
+            return new RewardEvaluation(RewardStatus.DELIVERY_FAILED, progress, true, true,
+                "A definite failure may be retried safely");
+        }
+        boolean unlocked = state.hasState(REWARD_UNLOCK_NOTIFIED_PREFIX + rewardId);
         boolean currentlyComplete = true;
         for (RewardCriterion criterion : reward.getCriteria()) {
             long value = getProgress(player, criterion, snapshot);
@@ -636,9 +826,7 @@ public final class RewardService {
             queueCounterDelta(playerId, key, delta);
             return 0L;
         }
-        long next = state.counters().getOrDefault(key, 0L) + delta;
-        state.counters().put(key, next);
-        state.setDirty(true);
+        long next = state.incrementCounter(key, delta);
         invalidateProgress(playerId);
         queueUnlockCheck(playerId);
         return next;
@@ -650,8 +838,7 @@ public final class RewardService {
             performanceMonitor.increment("rewards.state.skipped-unloaded");
             return;
         }
-        state.counters().put(key, value);
-        state.setDirty(true);
+        state.setCounter(key, value);
         invalidateProgress(playerId);
         queueUnlockCheck(playerId);
     }
@@ -661,7 +848,7 @@ public final class RewardService {
         if (state == null) {
             return 0L;
         }
-        return state.counters().getOrDefault(key, 0L);
+        return state.getCounter(key);
     }
 
     public String getState(UUID playerId, String key) {
@@ -669,7 +856,7 @@ public final class RewardService {
         if (state == null) {
             return null;
         }
-        return state.states().get(key);
+        return state.getState(key);
     }
 
     public boolean handleAdminCommand(CommandSender sender, String[] args) {
@@ -698,6 +885,12 @@ public final class RewardService {
         if ("inspect".equals(subcommand)) {
             return handleInspectCommand(sender, args);
         }
+        if ("items".equals(subcommand)) {
+            return handleQueuedItemsCommand(sender, args);
+        }
+        if ("ip".equals(subcommand)) {
+            return handleIpReservationCommand(sender, args);
+        }
         sendAdminUsage(sender);
         return true;
     }
@@ -706,7 +899,7 @@ public final class RewardService {
         if (args.length < 6) {
             sender.sendMessage("Usage: /enthusiatags rewards reconcile <player> <reward>"
                 + " <action-id|item:action-id|legacy|whole>"
-                + " <delivered|retry> <reason>");
+                + " <delivered|retry|force-delivered|force-retry> <reason>");
             return true;
         }
         OfflinePlayer target = findOfflineCommandTarget(sender, args, 1);
@@ -715,210 +908,371 @@ public final class RewardService {
         String actionId = args[3].toLowerCase(Locale.ROOT);
         String outcome = args[4].toLowerCase(Locale.ROOT);
         String reason = String.join(" ", java.util.Arrays.copyOfRange(args, 5, args.length)).trim();
-        if (reason.isBlank() || (!"delivered".equals(outcome) && !"retry".equals(outcome))) {
-            sender.sendMessage("A nonblank reason and delivered|retry outcome are required.");
+        if (reason.isBlank()) {
+            sender.sendMessage("A nonblank reconciliation reason is required.");
             return true;
         }
         UUID playerId = target.getUniqueId();
-        String actor = sender instanceof Player player
-            ? player.getName() + "/" + player.getUniqueId() : "console";
-        String audit = "admin=" + actor + " reason=" + reason;
-        try {
-            if ("legacy".equals(actionId)) {
-                preloadPlayerBlocking(playerId);
-                RewardPlayerState state = getLoadedState(playerId);
-                if (state == null) throw new SQLException("Player reward state is unavailable");
-                String prefix = "reward-action:" + rewardId + ":";
-                List<String> removedKeys = state.states().keySet().stream()
-                    .filter(key -> key.startsWith(prefix)).sorted().toList();
-                if (removedKeys.isEmpty()) throw new SQLException("No legacy action state found");
-                String previousOverall = state.states().get("reward-delivery:" + rewardId);
-                removedKeys.forEach(state.states()::remove);
-                if ("delivered".equals(outcome)) {
-                    state.states().put("reward-legacy-unmapped:" + rewardId, "requires-whole-finalization");
-                    state.states().put("reward-delivery:" + rewardId,
-                        RewardStatus.REQUIRES_RECONCILIATION.name());
-                } else {
-                    state.states().remove("reward-legacy-unmapped:" + rewardId);
-                    state.states().put("reward-delivery:" + rewardId, RewardStatus.DELIVERY_FAILED.name());
-                }
-                state.setDirty(true);
-                if (!persistStateBarrier(playerId, state)) throw new SQLException("Failed to persist player state");
-                storage.recordLegacyReconciliationNow(actor, playerId, rewardId, removedKeys, previousOverall,
-                    outcome, reason);
-                sender.sendMessage("Legacy state resolved. " + ("delivered".equals(outcome)
-                    ? "Whole-reward finalization is still required because legacy action identity is unknown."
-                    : "The normal claim path may retry current actions."));
-            } else if ("whole".equals(actionId)) {
-                if (!"delivered".equals(outcome)) {
-                    throw new SQLException("Whole-reward reconciliation only accepts delivered");
-                }
-                preloadPlayerBlocking(playerId);
-                RewardPlayerState state = getLoadedState(playerId);
-                if (state == null) throw new SQLException("Player reward state is unavailable");
-                String previousOverall = state.states().get("reward-delivery:" + rewardId);
-                storage.markClaimedNow(playerId, rewardId);
-                state.claimedRewards().add(rewardId);
-                state.states().remove("reward-legacy-unmapped:" + rewardId);
-                state.states().put("reward-delivery:" + rewardId, RewardStatus.CLAIMED.name());
-                state.setDirty(true);
-                if (!persistStateBarrier(playerId, state)) throw new SQLException("Failed to persist player state");
-                storage.recordLegacyReconciliationNow(actor, playerId, rewardId, List.of(), previousOverall,
-                    "whole-delivered", reason);
-            } else if (actionId.startsWith("item:")) {
-                String itemActionId = actionId.substring("item:".length());
-                String next = storage.reconcileItemOverflowNow(playerId, rewardId, itemActionId,
-                    "delivered".equals(outcome), audit);
-                sender.sendMessage("Item overflow " + rewardId + "/" + itemActionId + " -> " + next + ".");
-                Player online = Bukkit.getPlayer(playerId);
-                if (online != null && "QUEUED".equals(next)) drainItemOverflow(online);
-            } else {
-                RewardStatus next = "delivered".equals(outcome)
-                    ? RewardStatus.CLAIMED : RewardStatus.DELIVERY_FAILED;
-                if (next == RewardStatus.DELIVERY_FAILED
-                    && storage.loadItemOverflowNow(playerId, rewardId).stream().anyMatch(item ->
-                        item.actionId().equals(actionId)
-                            && ("QUEUED".equals(item.status()) || "DELIVERY_PENDING".equals(item.status())))) {
-                    throw new SQLException("Item action has a durable overflow entitlement; reconcile item:"
-                        + actionId + " before permitting an action retry");
-                }
-                RewardStatus old = storage.reconcileActionNow(playerId, rewardId, actionId, next, audit);
-                RewardStatus overall = refreshOverallAfterReconciliation(playerId, rewardId);
-                sender.sendMessage("Reconciled " + rewardId + "/" + actionId + " " + old + " -> " + next
-                    + "; overall=" + (overall == null ? "CONTINUE" : overall) + ".");
-            }
-            plugin.getLogger().warning("Reward reconciliation " + audit + " target=" + playerId
-                + " reward=" + rewardId + " action=" + actionId + " outcome=" + outcome);
-            sender.sendMessage("Reconciliation recorded for " + displayName(target) + ".");
-        } catch (SQLException ex) {
-            sender.sendMessage("Reconciliation failed: " + ex.getMessage());
-        }
+        Administrator actor = administrator(sender);
+        submitAdmin(sender, () -> reconcileReward(playerId, rewardId, actionId, outcome, reason, actor));
         return true;
     }
 
-    private RewardStatus refreshOverallAfterReconciliation(UUID playerId, String rewardId) throws SQLException {
-        preloadPlayerBlocking(playerId);
-        RewardPlayerState state = getLoadedState(playerId);
-        if (state == null) throw new SQLException("Player reward state is unavailable");
-        RewardDefinition reward = rewards.get(rewardId);
-        if (reward == null) throw new SQLException("Reward is not currently configured");
-        Map<String, RewardStorage.ActionLedgerEntry> ledger = storage.loadActionLedgerNow(playerId, rewardId);
-        Set<String> currentActionIds = reward.getActions().stream()
-            .map(RewardAction::getActionId).collect(java.util.stream.Collectors.toSet());
-        RewardStatus overall;
-        if (state.states().containsKey("reward-legacy-unmapped:" + rewardId)
-            || ledger.values().stream().anyMatch(entry -> entry.status() == RewardStatus.CLAIM_PENDING
-                || entry.status() == RewardStatus.REQUIRES_RECONCILIATION)) {
-            overall = RewardStatus.REQUIRES_RECONCILIATION;
-        } else if (ledger.values().stream().anyMatch(entry -> currentActionIds.contains(entry.actionId())
-            && entry.status() == RewardStatus.DELIVERY_FAILED)) {
-            overall = RewardStatus.DELIVERY_FAILED;
-        } else {
-            boolean allCurrentDelivered = reward.getActions().stream().allMatch(action -> {
-                RewardStorage.ActionLedgerEntry entry = ledger.get(action.getActionId());
-                return entry != null && entry.status() == RewardStatus.CLAIMED
-                    && actionFingerprint(action).equals(entry.fingerprint());
-            });
-            if (allCurrentDelivered) {
-                storage.markClaimedNow(playerId, rewardId);
-                state.claimedRewards().add(rewardId);
-                overall = RewardStatus.CLAIMED;
-            } else {
-                state.states().remove("reward-delivery:" + rewardId);
-                state.setDirty(true);
-                if (!persistStateBarrier(playerId, state)) {
-                    throw new SQLException("Failed to persist cleared reconciliation state");
-                }
-                return null;
-            }
+    private List<String> reconcileReward(UUID playerId, String rewardId, String actionId, String outcome,
+                                         String reason, Administrator actor) throws SQLException {
+        if (inFlightClaims.contains(playerId + ":" + rewardId)) {
+            throw new SQLException("A claim is active for this player and reward");
         }
-        state.states().put("reward-delivery:" + rewardId, overall.name());
-        state.setDirty(true);
-        if (!persistStateBarrier(playerId, state)) throw new SQLException("Failed to persist overall reward state");
+        RewardStorage.StoredRewardData stored = storage.loadNow(playerId);
+        Map<String, RewardStorage.ActionLedgerEntry> ledger = storage.loadActionLedgerNow(playerId, rewardId);
+        List<RewardStorage.ItemOverflowEntry> items = storage.loadItemOverflowNow(playerId, rewardId);
+        RewardDefinition reward = rewards.get(rewardId);
+        RewardStorage.AtomicReconcileResult result;
+        Set<String> removedKeys = Set.of();
+        String forceEvidence = null;
+        boolean legacyUnmapped = stored.states().containsKey("reward-legacy-unmapped:" + rewardId);
+        if ("legacy".equals(actionId)) {
+            if (!"delivered".equals(outcome) && !"retry".equals(outcome)) {
+                throw new SQLException("Legacy outcome must be delivered or retry");
+            }
+            removedKeys = stored.states().keySet().stream()
+                .filter(key -> key.startsWith("reward-action:" + rewardId + ":"))
+                .collect(java.util.stream.Collectors.toCollection(java.util.TreeSet::new));
+            result = storage.reconcileLegacyAtomicNow(playerId, rewardId, removedKeys,
+                "delivered".equals(outcome), actor.name(), actor.uuid(), reason);
+            legacyUnmapped = "delivered".equals(outcome);
+        } else if ("whole".equals(actionId)) {
+            if (!"force-delivered".equals(outcome) && !"force-retry".equals(outcome)) {
+                throw new SQLException("Whole resolution requires force-delivered or force-retry");
+            }
+            String unresolved = unresolvedEvidence(ledger, items);
+            forceEvidence = unresolved;
+            result = storage.forceWholeAtomicNow(playerId, rewardId, "force-delivered".equals(outcome),
+                actor.name(), actor.uuid(), reason, unresolved);
+            legacyUnmapped = false;
+        } else if (actionId.startsWith("item:")) {
+            if (!"delivered".equals(outcome) && !"retry".equals(outcome)) {
+                throw new SQLException("Item outcome must be delivered or retry");
+            }
+            String itemActionId = actionId.substring("item:".length());
+            RewardStorage.ActionLedgerEntry entry = ledger.get(itemActionId);
+            if (entry == null) throw new SQLException("Item action ledger entry not found");
+            ReconciliationPlan plan = planOverall(reward, ledger, items, itemActionId,
+                "delivered".equals(outcome) ? RewardStatus.CLAIMED : RewardStatus.ITEM_QUEUED,
+                "delivered".equals(outcome) ? "DELIVERED" : "QUEUED", legacyUnmapped);
+            result = storage.reconcileItemAtomicNow(playerId, rewardId, itemActionId, entry.fingerprint(),
+                "delivered".equals(outcome), plan.overall(), plan.finalizeReward(),
+                actor.name(), actor.uuid(), reason, "Explicit staff item decision");
+        } else {
+            if (!"delivered".equals(outcome) && !"retry".equals(outcome)) {
+                throw new SQLException("Action outcome must be delivered or retry");
+            }
+            RewardStorage.ActionLedgerEntry entry = ledger.get(actionId);
+            if (entry == null) throw new SQLException("Action ledger entry not found");
+            RewardStatus next = "delivered".equals(outcome)
+                ? RewardStatus.CLAIMED : RewardStatus.DELIVERY_FAILED;
+            ReconciliationPlan plan = planOverall(reward, ledger, items, actionId, next, null, legacyUnmapped);
+            result = storage.reconcileActionAtomicNow(playerId, rewardId, actionId, entry.fingerprint(),
+                next, plan.overall(), plan.finalizeReward(), actor.name(), actor.uuid(), outcome, reason,
+                "Explicit staff action decision");
+        }
+        RewardPlayerState state = getLoadedState(playerId);
+        if (state != null) {
+            state.applyReconciliation(rewardId, RewardStatus.valueOf(result.newOverallStatus()),
+                result.claimed(), removedKeys, legacyUnmapped, result.revision());
+        }
         invalidateProgress(playerId);
-        return overall;
+        if (actionId.startsWith("item:") && "retry".equals(outcome)) {
+            drainItemOverflow(playerId);
+        }
+        List<String> messages = new ArrayList<>(List.of(
+            "Reconciliation committed for " + playerId + " reward=" + rewardId + " subject=" + actionId + ".",
+            "Subject: " + result.oldSubjectStatus() + " -> " + result.newSubjectStatus()
+                + "; overall: " + result.oldOverallStatus() + " -> " + result.newOverallStatus() + ".",
+            "Decision=" + outcome + " reason=" + reason));
+        if (forceEvidence != null) {
+            messages.add("FORCE RESOLUTION recorded: target=" + playerId + " reward=" + rewardId
+                + " unresolved=[" + forceEvidence + "] reason=" + reason);
+        }
+        return messages;
+    }
+
+    private RewardStatus refreshOverallAfterReconciliation(UUID playerId, String rewardId) throws SQLException {
+        RewardDefinition reward = rewards.get(rewardId);
+        Map<String, RewardStorage.ActionLedgerEntry> ledger = storage.loadActionLedgerNow(playerId, rewardId);
+        List<RewardStorage.ItemOverflowEntry> items = storage.loadItemOverflowNow(playerId, rewardId);
+        RewardStorage.StoredRewardData stored = storage.loadNow(playerId);
+        ReconciliationPlan plan = planOverall(reward, ledger, items, null, null, null,
+            stored.states().containsKey("reward-legacy-unmapped:" + rewardId));
+        RewardPlayerState state = getLoadedState(playerId);
+        if (plan.finalizeReward()) {
+            long revision = storage.finalizeRewardNow(playerId, rewardId);
+            if (state != null) state.applyDurableFinalization(rewardId, revision);
+        } else if (state != null) {
+            state.setOverall(rewardId, plan.overall());
+        }
+        if (state != null && !persistStateBarrier(playerId, state)) {
+            throw new SQLException("Failed to persist refreshed overall reward state");
+        }
+        return plan.overall() == RewardStatus.CLAIM_PENDING ? null : plan.overall();
+    }
+
+    private ReconciliationPlan planOverall(
+        RewardDefinition reward, Map<String, RewardStorage.ActionLedgerEntry> ledger,
+        List<RewardStorage.ItemOverflowEntry> items, String overrideActionId,
+        RewardStatus overrideActionStatus, String overrideItemStatus, boolean legacyUnmapped) {
+        Map<String, RewardStatus> statuses = new java.util.HashMap<>();
+        ledger.forEach((id, entry) -> statuses.put(id, entry.status()));
+        if (overrideActionId != null && overrideActionStatus != null) {
+            statuses.put(overrideActionId, overrideActionStatus);
+        }
+        boolean unresolved = legacyUnmapped || statuses.values().stream().anyMatch(status ->
+            status == RewardStatus.CLAIM_PENDING || status == RewardStatus.REQUIRES_RECONCILIATION);
+        if (unresolved) return new ReconciliationPlan(RewardStatus.REQUIRES_RECONCILIATION, false);
+        boolean pendingItem = statuses.values().stream().anyMatch(status -> status == RewardStatus.ITEM_QUEUED);
+        for (RewardStorage.ItemOverflowEntry item : items) {
+            String status = item.actionId().equals(overrideActionId) && overrideItemStatus != null
+                ? overrideItemStatus : item.status();
+            pendingItem |= "QUEUED".equals(status) || "DELIVERY_PENDING".equals(status);
+        }
+        if (pendingItem) return new ReconciliationPlan(RewardStatus.ITEM_QUEUED, false);
+        if (reward == null) {
+            if (statuses.values().stream().anyMatch(status -> status == RewardStatus.DELIVERY_FAILED)) {
+                return new ReconciliationPlan(RewardStatus.DELIVERY_FAILED, false);
+            }
+            boolean allHistoricalDelivered = !statuses.isEmpty()
+                && statuses.values().stream().allMatch(status -> status == RewardStatus.CLAIMED);
+            return new ReconciliationPlan(allHistoricalDelivered ? RewardStatus.CLAIMED
+                : RewardStatus.CLAIM_PENDING, allHistoricalDelivered);
+        }
+        Set<String> currentIds = reward.getActions().stream().map(RewardAction::getActionId)
+            .collect(java.util.stream.Collectors.toSet());
+        if (statuses.entrySet().stream().anyMatch(entry -> currentIds.contains(entry.getKey())
+            && entry.getValue() == RewardStatus.DELIVERY_FAILED)) {
+            return new ReconciliationPlan(RewardStatus.DELIVERY_FAILED, false);
+        }
+        boolean allCurrentDelivered = reward.getActions().stream().allMatch(action -> {
+            RewardStorage.ActionLedgerEntry entry = ledger.get(action.getActionId());
+            RewardStatus status = action.getActionId().equals(overrideActionId) && overrideActionStatus != null
+                ? overrideActionStatus : entry == null ? null : entry.status();
+            return status == RewardStatus.CLAIMED && entry != null
+                && actionFingerprint(action).equals(entry.fingerprint());
+        });
+        return new ReconciliationPlan(allCurrentDelivered ? RewardStatus.CLAIMED : RewardStatus.CLAIM_PENDING,
+            allCurrentDelivered);
+    }
+
+    private String unresolvedEvidence(Map<String, RewardStorage.ActionLedgerEntry> ledger,
+                                      List<RewardStorage.ItemOverflowEntry> items) {
+        List<String> unresolved = new ArrayList<>();
+        ledger.values().stream().filter(entry -> entry.status() != RewardStatus.CLAIMED)
+            .forEach(entry -> unresolved.add("action " + entry.actionId() + "=" + entry.status()));
+        items.stream().filter(item -> !"DELIVERED".equals(item.status()))
+            .forEach(item -> unresolved.add("item " + item.actionId() + "=" + item.status()));
+        return unresolved.isEmpty() ? "No unresolved ledger rows" : String.join("; ", unresolved);
+    }
+
+    private Administrator administrator(CommandSender sender) {
+        return sender instanceof Player player
+            ? new Administrator(player.getName(), player.getUniqueId())
+            : new Administrator("console", null);
+    }
+
+    private void submitAdmin(CommandSender sender, java.util.concurrent.Callable<List<String>> operation) {
+        if (claimExecutor == null || claimExecutor.isShutdown()
+            || lifecycle.get() == ServiceLifecycle.STOPPING || lifecycle.get() == ServiceLifecycle.STOPPED) {
+            sender.sendMessage("Reward administration is unavailable while the service is stopping.");
+            return;
+        }
+        CompletableFuture<List<String>> future = CompletableFuture.supplyAsync(() -> {
+            try {
+                return operation.call();
+            } catch (Exception ex) {
+                throw new java.util.concurrent.CompletionException(ex);
+            }
+        }, claimExecutor);
+        activeOperations.add(future);
+        future.whenComplete((lines, throwable) -> {
+            activeOperations.remove(future);
+            scheduleMain(() -> {
+            if (throwable != null) {
+                Throwable cause = throwable instanceof java.util.concurrent.CompletionException
+                    ? throwable.getCause() : throwable;
+                sender.sendMessage("Operation failed: " + (cause == null ? throwable.getMessage() : cause.getMessage()));
+                return;
+            }
+            lines.forEach(sender::sendMessage);
+            });
+        });
     }
 
     private boolean handleInspectCommand(CommandSender sender, String[] args) {
         if (args.length < 3) {
-            sender.sendMessage("Usage: /enthusiatags rewards inspect <player> <reward>");
+            sender.sendMessage("Usage: /enthusiatags rewards inspect <player> <reward|unresolved>");
             return true;
         }
         OfflinePlayer target = findOfflineCommandTarget(sender, args, 1);
         if (target == null) return true;
         String rewardId = args[2].toLowerCase(Locale.ROOT);
-        RewardDefinition reward = rewards.get(rewardId);
-        if (reward == null) {
-            sender.sendMessage("Reward is not currently configured: " + rewardId);
-            return true;
-        }
-        try {
-            UUID playerId = target.getUniqueId();
-            preloadPlayerBlocking(playerId);
-            RewardPlayerState state = getLoadedState(playerId);
-            if (state == null) throw new SQLException("Player reward state is unavailable");
-            Map<String, RewardStorage.ActionLedgerEntry> ledger =
-                storage.loadActionLedgerNow(playerId, rewardId);
-            sender.sendMessage("Reward inspection: " + displayName(target) + " / " + rewardId);
-            sender.sendMessage("  overall: " + state.states().getOrDefault(
-                "reward-delivery:" + rewardId, "none"));
-            sender.sendMessage("  claimed marker: " + state.claimedRewards().contains(rewardId));
-            List<String> legacy = state.states().keySet().stream()
-                .filter(key -> key.startsWith("reward-action:" + rewardId + ":")).sorted().toList();
-            sender.sendMessage("  legacy keys: " + (legacy.isEmpty() ? "none" : legacy));
-            sender.sendMessage("  legacy unmapped: " + state.states().getOrDefault(
-                "reward-legacy-unmapped:" + rewardId, "none"));
-            Set<String> currentIds = reward.getActions().stream()
-                .map(RewardAction::getActionId).collect(java.util.stream.Collectors.toSet());
-            for (RewardAction action : reward.getActions()) {
-                sendActionInspection(sender, "current", action.getActionId(), action.getType().name(),
-                    actionFingerprint(action), ledger.get(action.getActionId()));
-            }
-            ledger.values().stream().filter(entry -> !currentIds.contains(entry.actionId()))
-                .sorted(java.util.Comparator.comparing(RewardStorage.ActionLedgerEntry::actionId))
-                .forEach(entry -> sendActionInspection(sender, "removed", entry.actionId(),
-                    entry.actionType(), "-", entry));
-            sender.sendMessage("  IP reservations: " + storage.listIpClaimsNow(playerId, rewardId));
-            sender.sendMessage("  item overflow:");
-            for (RewardStorage.ItemOverflowEntry entry : storage.loadItemOverflowNow(playerId, rewardId)) {
-                sender.sendMessage("    action=" + entry.actionId() + " status=" + entry.status()
-                    + " item=" + entry.material() + "x" + entry.amount() + " fingerprint=" + entry.fingerprint()
-                    + " queued=" + entry.queuedAt() + " delivered=" + entry.deliveredAt());
-            }
-            sender.sendMessage("  recent action history:");
-            for (RewardStorage.ActionHistoryEntry entry : storage.loadActionHistoryNow(playerId, rewardId, 12)) {
-                sender.sendMessage("    #" + entry.historyId() + " " + entry.actionId() + " "
-                    + entry.oldStatus() + " -> " + entry.newStatus() + " at " + entry.createdAt()
-                    + (entry.errorMessage() == null ? "" : " evidence=" + entry.errorMessage()));
-            }
-            sender.sendMessage("  recent reconciliation/item history:");
-            for (RewardStorage.ReconciliationHistoryEntry entry
-                : storage.loadReconciliationHistoryNow(playerId, rewardId, 12)) {
-                sender.sendMessage("    " + entry.category() + " " + entry.subject() + " "
-                    + entry.oldStatus() + " -> " + entry.newStatus() + " at " + entry.createdAt()
-                    + (entry.administrator() == null ? "" : " by=" + entry.administrator())
-                    + " reason=" + entry.reason());
-            }
-        } catch (SQLException ex) {
-            sender.sendMessage("Inspection failed: " + ex.getMessage());
+        UUID playerId = target.getUniqueId();
+        Administrator actor = administrator(sender);
+        if ("unresolved".equals(rewardId)) {
+            submitAdmin(sender, () -> inspectUnresolvedRewards(playerId));
+        } else {
+            submitAdmin(sender, () -> inspectReward(playerId, rewardId, actor));
         }
         return true;
     }
 
-    private void sendActionInspection(CommandSender sender, String kind, String actionId, String actionType,
+    private List<String> inspectUnresolvedRewards(UUID playerId) throws SQLException {
+        List<String> lines = new ArrayList<>();
+        lines.add("Unresolved rewards for " + playerId + ":");
+        RewardStorage.StoredRewardData stored = storage.loadNow(playerId);
+        for (String rewardId : storage.listKnownRewardIdsNow(playerId)) {
+            String overall = stored.states().get("reward-delivery:" + rewardId);
+            boolean claimed = stored.claims().contains(rewardId);
+            boolean pendingItems = storage.loadItemOverflowNow(playerId, rewardId).stream()
+                .anyMatch(item -> !"DELIVERED".equals(item.status()));
+            if (!claimed || pendingItems || RewardStatus.REQUIRES_RECONCILIATION.name().equals(overall)
+                || RewardStatus.ITEM_QUEUED.name().equals(overall)
+                || RewardStatus.DELIVERY_FAILED.name().equals(overall)) {
+                lines.add("- " + rewardId + " overall=" + overall + " claimed=" + claimed
+                    + " pending-items=" + pendingItems + " configured=" + rewards.containsKey(rewardId));
+            }
+        }
+        if (lines.size() == 1) lines.add("- none");
+        return lines;
+    }
+
+    private List<String> inspectReward(UUID playerId, String rewardId, Administrator actor) throws SQLException {
+        storage.recordInspectionNow(playerId, rewardId, actor.name(), actor.uuid());
+        RewardDefinition reward = rewards.get(rewardId);
+        RewardStorage.StoredRewardData stored = storage.loadNow(playerId);
+        Map<String, RewardStorage.ActionLedgerEntry> ledger = storage.loadActionLedgerNow(playerId, rewardId);
+        List<String> lines = new ArrayList<>();
+        lines.add("Reward inspection: " + playerId + " / " + rewardId
+            + (reward == null ? " [REMOVED/HISTORICAL]" : " [CURRENT]"));
+        lines.add("  overall: " + stored.states().getOrDefault("reward-delivery:" + rewardId, "none"));
+        lines.add("  claimed marker: " + stored.claims().contains(rewardId));
+        lines.add("  unlock marker: " + storage.isUnlockedNow(playerId, rewardId));
+        List<String> legacy = stored.states().keySet().stream()
+            .filter(key -> key.startsWith("reward-action:" + rewardId + ":")).sorted().toList();
+        lines.add("  legacy keys: " + (legacy.isEmpty() ? "none" : legacy));
+        lines.add("  legacy unmapped: "
+            + stored.states().getOrDefault("reward-legacy-unmapped:" + rewardId, "none"));
+        Set<String> currentIds = reward == null ? Set.of() : reward.getActions().stream()
+            .map(RewardAction::getActionId).collect(java.util.stream.Collectors.toSet());
+        if (reward != null) {
+            for (RewardAction action : reward.getActions()) {
+                addActionInspection(lines, "current", action.getActionId(), action.getType().name(),
+                    actionFingerprint(action), ledger.get(action.getActionId()));
+            }
+        }
+        ledger.values().stream().filter(entry -> !currentIds.contains(entry.actionId()))
+            .sorted(java.util.Comparator.comparing(RewardStorage.ActionLedgerEntry::actionId))
+            .forEach(entry -> addActionInspection(lines, "historical/removed", entry.actionId(),
+                entry.actionType(), "-", entry));
+        lines.add("  IP reservations: " + storage.listIpClaimsNow(playerId, rewardId));
+        lines.add("  recent IP reconciliation history:");
+        for (String entry : storage.loadIpHistoryNow(playerId, rewardId, 12)) {
+            lines.add("    " + entry);
+        }
+        lines.add("  item overflow:");
+        for (RewardStorage.ItemOverflowEntry entry : storage.loadItemOverflowNow(playerId, rewardId)) {
+            lines.add("    action=" + entry.actionId() + " status=" + entry.status()
+                + " item=" + entry.material() + "x" + entry.amount() + " fingerprint=" + entry.fingerprint()
+                + " queued=" + entry.queuedAt() + " delivered=" + entry.deliveredAt());
+        }
+        lines.add("  recent action history:");
+        for (RewardStorage.ActionHistoryEntry entry : storage.loadActionHistoryNow(playerId, rewardId, 20)) {
+            lines.add("    #" + entry.historyId() + " " + entry.actionId() + " "
+                + entry.oldStatus() + " -> " + entry.newStatus() + " at " + entry.createdAt()
+                + (entry.errorMessage() == null ? "" : " evidence=" + entry.errorMessage()));
+        }
+        lines.add("  recent item and legacy transition history:");
+        for (RewardStorage.ReconciliationHistoryEntry entry
+            : storage.loadReconciliationHistoryNow(playerId, rewardId, 20)) {
+            lines.add("    " + entry.category() + "/" + entry.subject() + " "
+                + entry.oldStatus() + " -> " + entry.newStatus() + " at=" + entry.createdAt()
+                + (entry.administrator() == null ? "" : " by=" + entry.administrator())
+                + " reason=" + entry.reason());
+        }
+        lines.add("  recent immutable staff reconciliation history:");
+        for (RewardStorage.AdminHistoryEntry entry : storage.loadAdminHistoryNow(playerId, rewardId, 20)) {
+            lines.add("    #" + entry.historyId() + " " + entry.category() + "/" + entry.subjectId()
+                + " " + entry.oldSubjectStatus() + " -> " + entry.newSubjectStatus()
+                + " overall " + entry.oldOverallStatus() + " -> " + entry.newOverallStatus()
+                + " decision=" + entry.decision() + " by=" + entry.administratorName()
+                + (entry.administratorUuid() == null ? "" : "/" + entry.administratorUuid())
+                + " at=" + entry.createdAt() + " reason=" + entry.reason()
+                + " evidence=" + entry.evidence());
+        }
+        return lines;
+    }
+
+    private void addActionInspection(List<String> lines, String kind, String actionId, String actionType,
                                       String configuredFingerprint,
                                       RewardStorage.ActionLedgerEntry entry) {
-        sender.sendMessage("  [" + kind + "] id=" + actionId + " type=" + actionType);
-        sender.sendMessage("    configured-fingerprint=" + configuredFingerprint);
+        lines.add("  [" + kind + "] id=" + actionId + " type=" + actionType);
+        lines.add("    configured-fingerprint=" + configuredFingerprint);
         if (entry == null) {
-            sender.sendMessage("    stored=none status=not-started");
+            lines.add("    stored=none status=not-started");
             return;
         }
-        sender.sendMessage("    stored-fingerprint=" + entry.fingerprint() + " status=" + entry.status()
+        lines.add("    stored-fingerprint=" + entry.fingerprint() + " status=" + entry.status()
             + " updated=" + entry.updatedAt());
-        sender.sendMessage("    vault requested=" + entry.requestedAmount() + " returned=" + entry.responseAmount()
+        lines.add("    vault requested=" + entry.requestedAmount() + " returned=" + entry.responseAmount()
             + " before=" + entry.balanceBefore() + " after=" + entry.balanceAfter());
-        sender.sendMessage("    provider=" + entry.responseType() + " error=" + entry.errorMessage());
+        lines.add("    provider/command-evidence=" + entry.responseType() + " error=" + entry.errorMessage());
+    }
+
+    private boolean handleQueuedItemsCommand(CommandSender sender, String[] args) {
+        OfflinePlayer target = findOfflineCommandTarget(sender, args, 1);
+        if (target == null) return true;
+        UUID playerId = target.getUniqueId();
+        submitAdmin(sender, () -> {
+            List<String> lines = new ArrayList<>();
+            lines.add("Queued/ambiguous reward items for " + playerId + ":");
+            for (String rewardId : storage.listKnownRewardIdsNow(playerId)) {
+                for (RewardStorage.ItemOverflowEntry item : storage.loadItemOverflowNow(playerId, rewardId)) {
+                    if (!"DELIVERED".equals(item.status())) {
+                        lines.add("- reward=" + rewardId + " action=" + item.actionId()
+                            + " status=" + item.status() + " item=" + item.material() + "x" + item.amount()
+                            + " fingerprint=" + item.fingerprint());
+                    }
+                }
+            }
+            if (lines.size() == 1) lines.add("- none");
+            return lines;
+        });
+        return true;
+    }
+
+    private boolean handleIpReservationCommand(CommandSender sender, String[] args) {
+        if (args.length < 6) {
+            sender.sendMessage("Usage: /enthusiatags rewards ip <player> <reward> <ip>"
+                + " <retain|release|repair> <reason>");
+            return true;
+        }
+        OfflinePlayer target = findOfflineCommandTarget(sender, args, 1);
+        if (target == null) return true;
+        String rewardId = args[2].toLowerCase(Locale.ROOT);
+        String ipAddress = args[3];
+        String decision = args[4].toLowerCase(Locale.ROOT);
+        String reason = String.join(" ", java.util.Arrays.copyOfRange(args, 5, args.length)).trim();
+        if (!Set.of("retain", "release", "repair").contains(decision) || reason.isBlank()) {
+            sender.sendMessage("Decision must be retain, release, or repair and include a reason.");
+            return true;
+        }
+        Administrator actor = administrator(sender);
+        submitAdmin(sender, () -> {
+            RewardStorage.AtomicReconcileResult result = storage.reconcileIpReservationNow(
+                target.getUniqueId(), rewardId, ipAddress, decision, actor.name(), actor.uuid(), reason);
+            return List.of("IP reservation " + decision + " committed for target=" + target.getUniqueId()
+                + " reward=" + rewardId + " ip=" + ipAddress + " owner "
+                + result.oldSubjectStatus() + " -> " + result.newSubjectStatus() + ".");
+        });
+        return true;
     }
 
     private boolean handleSyncCommand(CommandSender sender, String[] args) {
@@ -967,14 +1321,11 @@ public final class RewardService {
             sender.sendMessage("Players must be two different accounts.");
             return true;
         }
-        try {
+        submitAdmin(sender, () -> {
             boolean added = storage.addIpBypassPairNow(first.getUniqueId(), second.getUniqueId());
-            sender.sendMessage((added ? "Added" : "Already exists")
+            return List.of((added ? "Added" : "Already exists")
                 + " reward IP bypass pair for " + displayName(first) + " and " + displayName(second) + ".");
-        } catch (SQLException ex) {
-            plugin.getLogger().warning("Failed to add reward IP bypass pair: " + ex.getMessage());
-            sender.sendMessage("Failed to add reward IP bypass pair. Check console for details.");
-        }
+        });
         return true;
     }
 
@@ -984,14 +1335,11 @@ public final class RewardService {
         if (first == null || second == null) {
             return true;
         }
-        try {
+        submitAdmin(sender, () -> {
             boolean removed = storage.removeIpBypassPairNow(first.getUniqueId(), second.getUniqueId());
-            sender.sendMessage((removed ? "Removed" : "No bypass pair found for")
+            return List.of((removed ? "Removed" : "No bypass pair found for")
                 + " " + displayName(first) + " and " + displayName(second) + ".");
-        } catch (SQLException ex) {
-            plugin.getLogger().warning("Failed to remove reward IP bypass pair: " + ex.getMessage());
-            sender.sendMessage("Failed to remove reward IP bypass pair. Check console for details.");
-        }
+        });
         return true;
     }
 
@@ -1000,20 +1348,18 @@ public final class RewardService {
         if (target == null) {
             return true;
         }
-        try {
+        submitAdmin(sender, () -> {
             Set<UUID> pairedPlayers = storage.listIpBypassPairsNow(target.getUniqueId());
             if (pairedPlayers.isEmpty()) {
-                sender.sendMessage("No reward IP bypass pairs found for " + displayName(target) + ".");
-                return true;
+                return List.of("No reward IP bypass pairs found for " + displayName(target) + ".");
             }
-            sender.sendMessage("Reward IP bypass pairs for " + displayName(target) + ":");
+            List<String> lines = new ArrayList<>();
+            lines.add("Reward IP bypass pairs for " + displayName(target) + ":");
             for (UUID pairedPlayerId : pairedPlayers) {
-                sender.sendMessage("- " + displayName(Bukkit.getOfflinePlayer(pairedPlayerId)));
+                lines.add("- " + displayName(Bukkit.getOfflinePlayer(pairedPlayerId)));
             }
-        } catch (SQLException ex) {
-            plugin.getLogger().warning("Failed to list reward IP bypass pairs: " + ex.getMessage());
-            sender.sendMessage("Failed to list reward IP bypass pairs. Check console for details.");
-        }
+            return lines;
+        });
         return true;
     }
 
@@ -1048,10 +1394,13 @@ public final class RewardService {
         sender.sendMessage("       /enthusiatags rewards ipbypass add <player1> <player2>");
         sender.sendMessage("       /enthusiatags rewards ipbypass remove <player1> <player2>");
         sender.sendMessage("       /enthusiatags rewards ipbypass list <player>");
-        sender.sendMessage("       /enthusiatags rewards inspect <player> <reward>");
+        sender.sendMessage("       /enthusiatags rewards inspect <player> <reward|unresolved>");
+        sender.sendMessage("       /enthusiatags rewards items <player>");
+        sender.sendMessage("       /enthusiatags rewards ip <player> <reward> <ip>"
+            + " <retain|release|repair> <reason>");
         sender.sendMessage("       /enthusiatags rewards reconcile <player> <reward>"
             + " <action-id|item:action-id|legacy|whole>"
-            + " <delivered|retry> <reason>");
+            + " <delivered|retry|force-delivered|force-retry> <reason>");
     }
 
     private void sendIpBypassUsage(CommandSender sender) {
@@ -1072,8 +1421,8 @@ public final class RewardService {
         sender.sendMessage("  loading: " + pendingLoads.containsKey(player.getUniqueId()));
         sender.sendMessage("  sync: " + syncStatus());
         if (state != null && state.isLoaded()) {
-            sender.sendMessage("  claimed: " + state.claimedRewards());
-            sender.sendMessage("  counters: " + state.counters());
+            sender.sendMessage("  claimed: " + state.claimedRewardsSnapshot());
+            sender.sendMessage("  counters: " + state.countersSnapshot());
         }
         ProgressSnapshot snapshot = getProgressSnapshot(player);
         for (RewardDefinition reward : rewards.values()) {
@@ -1091,11 +1440,10 @@ public final class RewardService {
             return;
         }
         if (value == null || value.isBlank()) {
-            state.states().remove(key);
+            state.removeState(key);
         } else {
-            state.states().put(key, value);
+            state.putState(key, value);
         }
-        state.setDirty(true);
     }
 
     private RewardPlayerState getOrCreateState(UUID playerId) {
@@ -1154,7 +1502,7 @@ public final class RewardService {
     }
 
     private void reserveExistingIpClaims(Player player, RewardPlayerState state) {
-        if (state == null || !state.isLoaded() || state.claimedRewards().isEmpty()) {
+        if (state == null || !state.isLoaded() || state.claimedRewardsSnapshot().isEmpty()) {
             return;
         }
         String ipAddress = getPlayerIpAddress(player);
@@ -1162,7 +1510,7 @@ public final class RewardService {
             return;
         }
         UUID playerId = player.getUniqueId();
-        for (String rewardId : state.claimedRewards()) {
+        for (String rewardId : state.claimedRewardsSnapshot()) {
             storage.reserveIpClaimAsync(playerId, rewardId, ipAddress).exceptionally(throwable -> {
                 plugin.getLogger().warning("Failed to backfill reward IP claim for " + playerId + ": " + throwable.getMessage());
                 return false;
@@ -1178,11 +1526,11 @@ public final class RewardService {
         List<RewardDefinition> newlyUnlocked = new ArrayList<>();
         for (RewardDefinition reward : rewards.values()) {
             String rewardId = reward.getId().toLowerCase(Locale.ROOT);
-            if (state.claimedRewards().contains(rewardId)) {
+            if (state.isClaimed(rewardId)) {
                 continue;
             }
             String notificationKey = REWARD_UNLOCK_NOTIFIED_PREFIX + rewardId;
-            if (state.states().containsKey(notificationKey)) {
+            if (state.hasState(notificationKey)) {
                 continue;
             }
             RewardEvaluation evaluation = evaluate(player, reward, snapshot);
@@ -1192,21 +1540,43 @@ public final class RewardService {
             newlyUnlocked.add(reward);
         }
         if (!newlyUnlocked.isEmpty()) {
-            List<RewardDefinition> persistedUnlocks = new ArrayList<>();
-            for (RewardDefinition reward : newlyUnlocked) {
-                String rewardId = reward.getId().toLowerCase(Locale.ROOT);
-                try {
-                    storage.markUnlockedNow(player.getUniqueId(), rewardId);
-                    state.states().put(REWARD_UNLOCK_NOTIFIED_PREFIX + rewardId, "true");
-                    persistedUnlocks.add(reward);
-                } catch (SQLException ex) {
-                    plugin.getLogger().warning("Failed to persist unlock marker for " + player.getUniqueId()
-                        + " reward=" + rewardId + ": " + ex.getMessage());
-                }
-            }
-            if (persistedUnlocks.isEmpty()) {
+            if (claimExecutor == null || claimExecutor.isShutdown()
+                || lifecycle.get() == ServiceLifecycle.STOPPING) {
                 return;
             }
+            UUID playerId = player.getUniqueId();
+            CompletableFuture<List<RewardDefinition>> future =
+                CompletableFuture.supplyAsync(() -> persistUnlocks(playerId, state, newlyUnlocked), claimExecutor);
+            activeOperations.add(future);
+            future.whenComplete((persistedUnlocks, throwable) -> {
+                activeOperations.remove(future);
+                scheduleMain(() -> {
+                    Player live = onlinePlayer(playerId);
+                    if (live == null || throwable != null || persistedUnlocks.isEmpty()) return;
+                    sendPersistedUnlocks(live, persistedUnlocks);
+                });
+            });
+        }
+    }
+
+    private List<RewardDefinition> persistUnlocks(UUID playerId, RewardPlayerState state,
+                                                   List<RewardDefinition> newlyUnlocked) {
+        List<RewardDefinition> persisted = new ArrayList<>();
+        for (RewardDefinition reward : newlyUnlocked) {
+            String rewardId = reward.getId().toLowerCase(Locale.ROOT);
+            try {
+                storage.markUnlockedNow(playerId, rewardId);
+                state.putState(REWARD_UNLOCK_NOTIFIED_PREFIX + rewardId, "true");
+                persisted.add(reward);
+            } catch (SQLException ex) {
+                plugin.getLogger().warning("Failed to persist unlock marker for " + playerId
+                    + " reward=" + rewardId + ": " + ex.getMessage());
+            }
+        }
+        return persisted;
+    }
+
+    private void sendPersistedUnlocks(Player player, List<RewardDefinition> persistedUnlocks) {
             int limit = Math.max(1, plugin.getConfig().getInt("rewards.unlock-notifications.individual-limit", 3));
             for (int index = 0; index < Math.min(limit, persistedUnlocks.size()); index++) {
                 sendUnlockNotification(player, persistedUnlocks.get(index), false);
@@ -1222,23 +1592,10 @@ public final class RewardService {
                 player.sendMessage(summary);
             }
             playUnlockSound(player);
-        }
     }
 
     private void hydrateState(RewardPlayerState state, RewardStorage.StoredRewardData data) {
-        state.claimedRewards().clear();
-        state.claimedRewards().addAll(data.claims());
-        state.counters().clear();
-        state.counters().putAll(data.counters());
-        state.states().clear();
-        state.states().putAll(data.states());
-        state.setRevision(data.revision());
-        Long oldPvpDeaths = state.counters().remove("PVP_DEATHS");
-        if (oldPvpDeaths != null) {
-            state.counters().merge("pvp_deaths", oldPvpDeaths, Math::max);
-        }
-        state.setLoaded(true);
-        state.setDirty(oldPvpDeaths != null);
+        state.hydrate(data);
     }
 
     private void queueCounterDelta(UUID playerId, String key, long delta) {
@@ -1252,26 +1609,12 @@ public final class RewardService {
         if (deltas == null || deltas.isEmpty()) {
             return;
         }
-        for (Map.Entry<String, Long> entry : deltas.entrySet()) {
-            state.counters().merge(entry.getKey(), entry.getValue(), Long::sum);
-        }
-        state.setDirty(true);
+        state.mergeCounters(deltas);
         performanceMonitor.add("rewards.counter.deferred-applied", deltas.size());
     }
 
     private RewardStorage.StoredRewardData snapshotState(RewardPlayerState state) {
-        synchronized (state) {
-            while (true) {
-                long before = state.revision();
-                Set<String> claims = new java.util.HashSet<>(state.claimedRewards());
-                Map<String, Long> counters = new java.util.HashMap<>(state.counters());
-                Map<String, String> states = new java.util.HashMap<>(state.states());
-                long after = state.revision();
-                if (before == after) {
-                    return new RewardStorage.StoredRewardData(claims, counters, states, after);
-                }
-            }
-        }
+        return state.snapshot();
     }
 
     private long getBlockStat(Player player, Statistic stat, Material material) {
@@ -1479,90 +1822,169 @@ public final class RewardService {
             || (action.getMaterial() != null && action.getItemAmount() > 0));
     }
 
-    private boolean deliverItem(Player player, String rewardId, RewardAction action, String fingerprint)
+    private ItemDeliveryResult deliverItem(UUID playerId, String rewardId, RewardAction action, String fingerprint)
         throws SQLException {
-        if (action.getMaterial() == null || action.getItemAmount() <= 0) return false;
+        if (action.getMaterial() == null || action.getItemAmount() <= 0) return ItemDeliveryResult.FAILED;
         boolean inserted = callOnMain(() -> {
-            ItemStack item = createRewardItem(action);
-            return hasInventoryCapacity(player, item) && player.getInventory().addItem(item).isEmpty();
+            Player player = onlinePlayer(playerId);
+            if (player == null) {
+                return false;
+            }
+            List<ItemStack> items = createRewardItems(action.getMaterial(), action.getItemAmount(),
+                action.getDisplayName(), action.getLore());
+            return hasInventoryCapacity(player, items.get(0), action.getItemAmount())
+                && player.getInventory().addItem(items.toArray(ItemStack[]::new)).isEmpty();
         });
         if (!inserted) {
-            storage.queueItemNow(player.getUniqueId(), rewardId, action, fingerprint);
+            storage.queueItemNow(playerId, rewardId, action, fingerprint);
+            return ItemDeliveryResult.QUEUED;
         }
-        return true;
+        return ItemDeliveryResult.DELIVERED;
     }
 
-    private ItemStack createRewardItem(RewardAction action) {
-        ItemStack item = new ItemStack(action.getMaterial(), action.getItemAmount());
-        ItemMeta meta = item.getItemMeta();
-        if (action.getDisplayName() != null && !action.getDisplayName().isBlank()) {
-            meta.displayName(LegacyComponentSerializer.legacyAmpersand().deserialize(action.getDisplayName()));
+    private List<ItemStack> createRewardItems(Material material, int amount, String displayName, List<String> lore) {
+        ItemStack template = new ItemStack(material, 1);
+        ItemMeta meta = template.getItemMeta();
+        if (displayName != null && !displayName.isBlank()) {
+            meta.displayName(LegacyComponentSerializer.legacyAmpersand().deserialize(displayName));
         }
-        if (!action.getLore().isEmpty()) {
-            meta.lore(action.getLore().stream().map(LegacyComponentSerializer.legacyAmpersand()::deserialize).toList());
+        if (!lore.isEmpty()) {
+            meta.lore(lore.stream().map(LegacyComponentSerializer.legacyAmpersand()::deserialize).toList());
         }
-        item.setItemMeta(meta);
-        return item;
+        template.setItemMeta(meta);
+        List<ItemStack> items = new ArrayList<>();
+        int remaining = amount;
+        while (remaining > 0) {
+            ItemStack item = template.clone();
+            item.setAmount(Math.min(template.getMaxStackSize(), remaining));
+            remaining -= item.getAmount();
+            items.add(item);
+        }
+        return items;
     }
 
     private void drainItemOverflow(Player player) {
-        storage.loadQueuedItemsAsync(player.getUniqueId()).whenComplete((items, throwable) -> {
+        drainItemOverflow(player.getUniqueId());
+    }
+
+    public void retryQueuedItems(Player player) {
+        drainItemOverflow(player.getUniqueId());
+    }
+
+    private void drainItemOverflow(UUID playerId) {
+        if (lifecycle.get() == ServiceLifecycle.STOPPING || lifecycle.get() == ServiceLifecycle.STOPPED) {
+            return;
+        }
+        storage.loadQueuedItemsAsync(playerId).whenComplete((items, throwable) -> {
             if (throwable != null) {
-                plugin.getLogger().warning("Failed to load queued reward items for " + player.getUniqueId()
+                plugin.getLogger().warning("Failed to load queued reward items for " + playerId
                     + ": " + throwable.getMessage());
                 return;
             }
-            Bukkit.getScheduler().runTask(plugin, () -> drainItemOverflowOnMain(player, items, 0));
+            scheduleMain(() -> drainItemOverflowOnMain(playerId, items, 0));
         });
     }
 
-    private void drainItemOverflowOnMain(Player player, List<RewardStorage.QueuedItem> items, int index) {
-        if (!player.isOnline() || index >= items.size()) return;
+    private void drainItemOverflowOnMain(UUID playerId, List<RewardStorage.QueuedItem> items, int index) {
+        Player player = onlinePlayer(playerId);
+        if (player == null || index >= items.size()) return;
         RewardStorage.QueuedItem queued = items.get(index);
         Material material = Material.matchMaterial(queued.material());
         if (material == null) {
             plugin.getLogger().warning("Queued reward item has invalid material: " + queued.material());
             return;
         }
-        ItemStack item = new ItemStack(material, queued.amount());
-        ItemMeta meta = item.getItemMeta();
-        if (queued.displayName() != null && !queued.displayName().isBlank()) {
-            meta.displayName(LegacyComponentSerializer.legacyAmpersand().deserialize(queued.displayName()));
-        }
-        if (!queued.lore().isEmpty()) {
-            meta.lore(queued.lore().stream()
-                .map(LegacyComponentSerializer.legacyAmpersand()::deserialize).toList());
-        }
-        item.setItemMeta(meta);
-        if (!hasInventoryCapacity(player, item)) return;
-        storage.markQueuedItemPendingAsync(player.getUniqueId(), queued).whenComplete((ignoredPending, pendingError) -> {
+        List<ItemStack> itemStacks = createRewardItems(material, queued.amount(),
+            queued.displayName(), queued.lore());
+        if (!hasInventoryCapacity(player, itemStacks.get(0), queued.amount())) return;
+        storage.markQueuedItemPendingAsync(playerId, queued).whenComplete((ignoredPending, pendingError) -> {
             if (pendingError != null) {
-                plugin.getLogger().warning("Failed to reserve queued item delivery for " + player.getUniqueId()
+                plugin.getLogger().warning("Failed to reserve queued item delivery for " + playerId
                     + ": " + pendingError.getMessage());
                 return;
             }
-            Bukkit.getScheduler().runTask(plugin, () -> insertReservedQueuedItem(player, items, index, queued, item));
+            scheduleMain(() -> insertReservedQueuedItem(playerId, items, index, queued, itemStacks));
         });
     }
 
-    private void insertReservedQueuedItem(Player player, List<RewardStorage.QueuedItem> items, int index,
-                                          RewardStorage.QueuedItem queued, ItemStack item) {
-        if (!player.isOnline() || !hasInventoryCapacity(player, item)
-            || !player.getInventory().addItem(item).isEmpty()) {
-            storage.returnQueuedItemAsync(player.getUniqueId(), queued);
+    private void insertReservedQueuedItem(UUID playerId, List<RewardStorage.QueuedItem> items, int index,
+                                          RewardStorage.QueuedItem queued, List<ItemStack> itemStacks) {
+        Player player = onlinePlayer(playerId);
+        if (player == null || !hasInventoryCapacity(player, itemStacks.get(0), queued.amount())) {
+            storage.returnQueuedItemAsync(playerId, queued);
             return;
         }
-        storage.markQueuedItemDeliveredAsync(player.getUniqueId(), queued).whenComplete((ignored, throwable) -> {
+        Map<Integer, ItemStack> leftovers =
+            player.getInventory().addItem(itemStacks.toArray(ItemStack[]::new));
+        if (!leftovers.isEmpty()) {
+            plugin.getLogger().severe("Inventory capacity changed during queued item insertion for " + playerId
+                + "; item delivery is ambiguous and requires reconciliation.");
+            return;
+        }
+        storage.completeQueuedItemAsync(playerId, queued).whenComplete((ignored, throwable) -> {
             if (throwable != null) {
                 plugin.getLogger().severe("Queued reward item was inserted but delivery marker failed for "
-                    + player.getUniqueId() + "; item now requires reconciliation: " + throwable.getMessage());
+                    + playerId + "; item now requires reconciliation: " + throwable.getMessage());
                 return;
             }
-            Bukkit.getScheduler().runTask(plugin, () -> drainItemOverflowOnMain(player, items, index + 1));
+            onQueuedItemDelivered(playerId, queued);
+            scheduleMain(() -> {
+                Player live = onlinePlayer(playerId);
+                if (live != null) {
+                    live.sendMessage(messages.get("rewards-queued-item-delivered"));
+                }
+                drainItemOverflowOnMain(playerId, items, index + 1);
+            });
         });
     }
 
-    private boolean hasInventoryCapacity(Player player, ItemStack item) {
+    private void onQueuedItemDelivered(UUID playerId, RewardStorage.QueuedItem queued) {
+        try {
+            RewardStatus overall = refreshOverallAfterReconciliation(playerId, queued.rewardId());
+            if (overall == null) {
+                resumeClaimAfterItem(playerId, queued.rewardId());
+            }
+        } catch (SQLException ex) {
+            plugin.getLogger().severe("Queued item delivered but reward finalization needs staff review for "
+                + playerId + "/" + queued.rewardId() + ": " + ex.getMessage());
+        }
+    }
+
+    private void recoverPendingRewards(UUID playerId) {
+        if (claimExecutor == null || claimExecutor.isShutdown()) return;
+        CompletableFuture.runAsync(() -> {
+            try {
+                RewardStorage.StoredRewardData stored = storage.loadNow(playerId);
+                for (String rewardId : storage.listKnownRewardIdsNow(playerId)) {
+                    String overall = stored.states().get("reward-delivery:" + rewardId);
+                    if (!RewardStatus.ITEM_QUEUED.name().equals(overall)
+                        && !RewardStatus.CLAIM_PENDING.name().equals(overall)) {
+                        continue;
+                    }
+                    RewardStatus refreshed = refreshOverallAfterReconciliation(playerId, rewardId);
+                    if (refreshed == null) {
+                        resumeClaimAfterItem(playerId, rewardId);
+                    }
+                }
+            } catch (SQLException ex) {
+                plugin.getLogger().warning("Failed to recover pending rewards for " + playerId + ": "
+                    + ex.getMessage());
+            }
+        }, claimExecutor);
+    }
+
+    private void scheduleMain(Runnable runnable) {
+        if (lifecycle.get() == ServiceLifecycle.STOPPING || lifecycle.get() == ServiceLifecycle.STOPPED) {
+            return;
+        }
+        try {
+            Bukkit.getScheduler().runTask(plugin, runnable);
+        } catch (RuntimeException ex) {
+            plugin.getLogger().warning("Could not schedule reward lifecycle callback: " + ex.getMessage());
+        }
+    }
+
+    private boolean hasInventoryCapacity(Player player, ItemStack item, int requiredAmount) {
         int capacity = 0;
         int maxStack = item.getMaxStackSize();
         for (ItemStack existing : player.getInventory().getStorageContents()) {
@@ -1571,7 +1993,7 @@ public final class RewardService {
             } else if (existing.isSimilar(item)) {
                 capacity += Math.max(0, maxStack - existing.getAmount());
             }
-            if (capacity >= item.getAmount()) {
+            if (capacity >= requiredAmount) {
                 return true;
             }
         }
@@ -1844,18 +2266,17 @@ public final class RewardService {
         repaired += raiseCounterToAtLeast(player, state, "iron_ore_mined",
             getBukkitMaterialStat(player, Statistic.MINE_BLOCK, Material.IRON_ORE));
         if (repaired > 0) {
-            state.setDirty(true);
             flushPlayerAsync(player.getUniqueId(), state);
         }
         return repaired;
     }
 
     private int raiseCounterToAtLeast(Player player, RewardPlayerState state, String key, long realValue) {
-        long cached = state.counters().getOrDefault(key, 0L);
+        long cached = state.getCounter(key);
         if (realValue <= cached) {
             return 0;
         }
-        state.counters().put(key, realValue);
+        state.raiseCounter(key, realValue);
         if (plugin.getConfig().getBoolean("global-scan.debug-log-repairs", false)) {
             plugin.getLogger().info("Reward sync repaired " + player.getName() + " " + key + ": " + cached + " -> " + realValue);
         }
@@ -1899,7 +2320,7 @@ public final class RewardService {
         }
         try {
             RewardStorage.StoredRewardData snapshot = snapshotState(state);
-            RewardStorage.WriteResult result = storage.saveAsync(playerId, snapshot).join();
+            RewardStorage.WriteResult result = storage.saveAsync(playerId, snapshot).get(5, TimeUnit.SECONDS);
             if (result == RewardStorage.WriteResult.WRITTEN) {
                 state.markClean(snapshot.revision());
             }
@@ -1926,7 +2347,9 @@ public final class RewardService {
         var configFile = org.bukkit.configuration.file.YamlConfiguration.loadConfiguration(file);
         config = RewardsConfig.from(configFile);
         ConfigurationSection section = configFile.getConfigurationSection("rewards");
+        Map<String, RewardDefinition> loadedRewards = new LinkedHashMap<>();
         if (section == null) {
+            rewards = Map.of();
             return;
         }
         for (String id : section.getKeys(false)) {
@@ -1944,9 +2367,10 @@ public final class RewardService {
                 completionMode = RewardCompletionMode.LATCHED;
                 plugin.getLogger().warning("Invalid completion-mode for reward " + id + "; using LATCHED");
             }
-            rewards.put(id.toLowerCase(Locale.ROOT),
+            loadedRewards.put(id.toLowerCase(Locale.ROOT),
                 new RewardDefinition(id, name, description, icon, criteria, actions, category, completionMode));
         }
+        rewards = java.util.Collections.unmodifiableMap(loadedRewards);
     }
 
     private List<RewardCriterion> loadCriteria(ConfigurationSection section) {
@@ -2024,6 +2448,10 @@ public final class RewardService {
         for (String key : section.getKeys(false)) {
             ConfigurationSection entry = section.getConfigurationSection(key);
             if (entry == null) {
+                plugin.getLogger().warning("Malformed reward action at " + section.getCurrentPath() + "." + key
+                    + "; reward " + rewardId + " will be unavailable.");
+                actions.add(new RewardAction(key.toLowerCase(Locale.ROOT), RewardActionType.TAG, "", 0D,
+                    "Malformed action", null, 0, "", List.of(), false));
                 continue;
             }
             String actionId = entry.getString("action-id", key).toLowerCase(Locale.ROOT);
@@ -2043,15 +2471,43 @@ public final class RewardService {
             int itemAmount = type == RewardActionType.ITEM ? entry.getInt("amount", 1) : 0;
             String displayName = entry.getString("display-name", "");
             List<String> lore = entry.getStringList("lore");
-            boolean valid = actionId.matches("[a-z0-9][a-z0-9._-]{0,63}") && actionIds.add(actionId);
-            if (!valid) {
+            boolean validId = actionId.matches("[a-z0-9][a-z0-9._-]{0,63}") && actionIds.add(actionId);
+            String invalidReason = validateActionDefinition(type, value, amount, itemMaterial, itemAmount);
+            boolean valid = validId && invalidReason == null;
+            if (!validId) {
                 plugin.getLogger().warning("Invalid or duplicate action-id '" + actionId
                     + "' for reward " + rewardId + "; reward will be unavailable.");
+            }
+            if (invalidReason != null) {
+                plugin.getLogger().warning("Invalid action " + rewardId + "/" + actionId + ": "
+                    + invalidReason + "; reward will be unavailable.");
             }
             actions.add(new RewardAction(actionId, type, value, amount, label,
                 itemMaterial, itemAmount, displayName, lore, valid));
         }
         return actions;
+    }
+
+    private String validateActionDefinition(RewardActionType type, String value, double amount,
+                                            Material itemMaterial, int itemAmount) {
+        return switch (type) {
+            case TAG -> {
+                if (value == null || value.isBlank()) yield "tag id is blank";
+                if (tagService.getRegistry().get(value.toLowerCase(Locale.ROOT)) == null) {
+                    yield "tag '" + value + "' is not configured";
+                }
+                yield null;
+            }
+            case MONEY -> !Double.isFinite(amount) || amount <= 0D
+                ? "money amount must be finite and greater than zero" : null;
+            case COMMAND -> value == null || value.isBlank() ? "command is blank" : null;
+            case ITEM -> {
+                if (itemMaterial == null) yield "item material is missing or invalid";
+                if (itemAmount <= 0) yield "item amount must be greater than zero";
+                if (itemAmount > 2304) yield "item amount exceeds the 36-slot inventory safety limit";
+                yield null;
+            }
+        };
     }
 
     private String inferCategory(List<RewardCriterion> criteria) {
@@ -2254,5 +2710,27 @@ public final class RewardService {
     }
 
     private record CriterionSource(RewardSourceType sourceType, Statistic statistic, Material material, String key) {
+    }
+
+    private enum ServiceLifecycle {
+        RUNNING,
+        RELOADING,
+        STOPPING,
+        STOPPED
+    }
+
+    private enum ItemDeliveryResult {
+        DELIVERED,
+        QUEUED,
+        FAILED
+    }
+
+    private record PlayerIdentity(String name, String ipAddress) {
+    }
+
+    private record Administrator(String name, UUID uuid) {
+    }
+
+    private record ReconciliationPlan(RewardStatus overall, boolean finalizeReward) {
     }
 }

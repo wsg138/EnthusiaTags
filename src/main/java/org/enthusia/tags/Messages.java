@@ -30,11 +30,6 @@ public final class Messages {
             YamlConfiguration defaults = YamlConfiguration.loadConfiguration(
                 new InputStreamReader(defaultsStream, StandardCharsets.UTF_8));
             config.setDefaults(defaults);
-            config.options().copyDefaults(true);
-            try {
-                config.save(file);
-            } catch (Exception ignored) {
-            }
         } catch (Exception ignored) {
         }
     }

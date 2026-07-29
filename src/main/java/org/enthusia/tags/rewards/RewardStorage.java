@@ -45,6 +45,17 @@ public final class RewardStorage {
                                              String newStatus, String administrator, String reason,
                                              long createdAt) {
     }
+    public record AtomicReconcileResult(String oldSubjectStatus, String newSubjectStatus,
+                                        String oldOverallStatus, String newOverallStatus,
+                                        boolean claimed, long revision) {
+    }
+    public record IpReservation(String rewardId, String ipAddress, UUID owner, long claimedAt) {
+    }
+    public record AdminHistoryEntry(long historyId, String category, String administratorName,
+                                    String administratorUuid, String subjectId, String oldSubjectStatus,
+                                    String newSubjectStatus, String oldOverallStatus, String newOverallStatus,
+                                    String decision, String reason, String evidence, long createdAt) {
+    }
     public record StoredRewardData(Set<String> claims, Map<String, Long> counters, Map<String, String> states,
                                    long revision) {
         public StoredRewardData {
@@ -205,6 +216,89 @@ public final class RewardStorage {
                     created_at INTEGER NOT NULL
                 )
                 """);
+            statement.executeUpdate("""
+                CREATE TABLE IF NOT EXISTS reward_reconciliation_history (
+                    history_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    category TEXT NOT NULL,
+                    administrator_name TEXT NOT NULL,
+                    administrator_uuid TEXT,
+                    player_uuid TEXT NOT NULL,
+                    reward_id TEXT NOT NULL,
+                    subject_id TEXT NOT NULL,
+                    old_subject_status TEXT,
+                    new_subject_status TEXT,
+                    old_overall_status TEXT,
+                    new_overall_status TEXT,
+                    decision TEXT NOT NULL,
+                    reason TEXT NOT NULL,
+                    evidence TEXT NOT NULL,
+                    created_at INTEGER NOT NULL
+                )
+                """);
+            statement.executeUpdate("""
+                CREATE TABLE IF NOT EXISTS reward_ip_reconciliation_history (
+                    history_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    administrator_name TEXT NOT NULL,
+                    administrator_uuid TEXT,
+                    player_uuid TEXT NOT NULL,
+                    reward_id TEXT NOT NULL,
+                    ip_address TEXT NOT NULL,
+                    decision TEXT NOT NULL,
+                    previous_owner TEXT,
+                    new_owner TEXT,
+                    reason TEXT NOT NULL,
+                    created_at INTEGER NOT NULL
+                )
+                """);
+            statement.executeUpdate("""
+                CREATE TABLE IF NOT EXISTS reward_inspection_history (
+                    history_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    administrator_name TEXT NOT NULL,
+                    administrator_uuid TEXT,
+                    player_uuid TEXT NOT NULL,
+                    reward_id TEXT NOT NULL,
+                    created_at INTEGER NOT NULL
+                )
+                """);
+        }
+        migratePreviousItemQueueSemantics();
+    }
+
+    private void migratePreviousItemQueueSemantics() throws SQLException {
+        connection.setAutoCommit(false);
+        try (Statement statement = connection.createStatement()) {
+            statement.executeUpdate("""
+                UPDATE reward_action_ledger SET status='ITEM_QUEUED',
+                  error_message='Migrated from pre-pending item queue semantics',updated_at=strftime('%s','now')*1000
+                WHERE status='CLAIMED' AND EXISTS (
+                  SELECT 1 FROM reward_item_overflow q
+                  WHERE q.player_uuid=reward_action_ledger.player_uuid
+                    AND q.reward_id=reward_action_ledger.reward_id
+                    AND q.action_id=reward_action_ledger.action_id
+                    AND q.fingerprint=reward_action_ledger.fingerprint
+                    AND q.status IN ('QUEUED','DELIVERY_PENDING'))
+                """);
+            statement.executeUpdate("""
+                DELETE FROM reward_claims WHERE EXISTS (
+                  SELECT 1 FROM reward_item_overflow q
+                  WHERE q.player_uuid=reward_claims.player_uuid AND q.reward_id=reward_claims.reward_id
+                    AND q.status IN ('QUEUED','DELIVERY_PENDING'))
+                """);
+            statement.executeUpdate("""
+                INSERT INTO reward_states(player_uuid,state_key,state_value)
+                SELECT player_uuid,'reward-delivery:'||reward_id,
+                  CASE WHEN SUM(CASE WHEN status='DELIVERY_PENDING' THEN 1 ELSE 0 END)>0
+                    THEN 'REQUIRES_RECONCILIATION' ELSE 'ITEM_QUEUED' END
+                FROM reward_item_overflow WHERE status IN ('QUEUED','DELIVERY_PENDING')
+                GROUP BY player_uuid,reward_id
+                ON CONFLICT(player_uuid,state_key) DO UPDATE SET state_value=excluded.state_value
+                """);
+            connection.commit();
+        } catch (SQLException ex) {
+            connection.rollback();
+            throw ex;
+        } finally {
+            connection.setAutoCommit(true);
         }
     }
 
@@ -319,6 +413,23 @@ public final class RewardStorage {
         });
     }
 
+    public long finalizeRewardNow(UUID playerId, String rewardId) throws SQLException {
+        return executeBlockingMeasured("storage.rewards.finalize", () -> {
+            connection.setAutoCommit(false);
+            try {
+                writeOverallAndClaim(playerId, rewardId, RewardStatus.CLAIMED, true);
+                long revision = bumpPlayerRevision(playerId);
+                connection.commit();
+                return revision;
+            } catch (SQLException ex) {
+                connection.rollback();
+                throw ex;
+            } finally {
+                connection.setAutoCommit(true);
+            }
+        });
+    }
+
     public void markUnlockedNow(UUID playerId, String rewardId) throws SQLException {
         executeBlockingMeasured("storage.rewards.unlock-marker", () -> {
             try (PreparedStatement statement = connection.prepareStatement(
@@ -404,6 +515,74 @@ public final class RewardStorage {
         });
     }
 
+    public boolean isUnlockedNow(UUID playerId, String rewardId) throws SQLException {
+        return executeBlockingMeasured("storage.rewards.unlock-inspect", () -> {
+            try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT 1 FROM reward_unlocks WHERE player_uuid=? AND reward_id=?")) {
+                statement.setString(1, playerId.toString());
+                statement.setString(2, rewardId);
+                try (ResultSet rs = statement.executeQuery()) {
+                    return rs.next();
+                }
+            }
+        });
+    }
+
+    public void recordInspectionNow(UUID playerId, String rewardId, String administratorName,
+                                    UUID administratorId) throws SQLException {
+        executeBlockingMeasured("storage.rewards.inspection-history", () -> {
+            try (PreparedStatement statement = connection.prepareStatement("""
+                INSERT INTO reward_inspection_history(
+                  administrator_name,administrator_uuid,player_uuid,reward_id,created_at) VALUES(?,?,?,?,?)
+                """)) {
+                statement.setString(1, administratorName);
+                if (administratorId == null) statement.setNull(2, java.sql.Types.VARCHAR);
+                else statement.setString(2, administratorId.toString());
+                statement.setString(3, playerId.toString());
+                statement.setString(4, rewardId);
+                statement.setLong(5, System.currentTimeMillis());
+                statement.executeUpdate();
+            }
+            return null;
+        });
+    }
+
+    public Set<String> listKnownRewardIdsNow(UUID playerId) throws SQLException {
+        return executeBlockingMeasured("storage.rewards.known-rewards", () -> {
+            Set<String> result = new java.util.TreeSet<>();
+            String uuid = playerId.toString();
+            for (String sql : java.util.List.of(
+                "SELECT reward_id FROM reward_claims WHERE player_uuid=?",
+                "SELECT reward_id FROM reward_unlocks WHERE player_uuid=?",
+                "SELECT reward_id FROM reward_action_ledger WHERE player_uuid=?",
+                "SELECT reward_id FROM reward_item_overflow WHERE player_uuid=?",
+                "SELECT reward_id FROM reward_ip_claims WHERE player_uuid=?")) {
+                try (PreparedStatement statement = connection.prepareStatement(sql)) {
+                    statement.setString(1, uuid);
+                    try (ResultSet rs = statement.executeQuery()) {
+                        while (rs.next()) result.add(rs.getString("reward_id"));
+                    }
+                }
+            }
+            try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT state_key FROM reward_states WHERE player_uuid=? AND state_key LIKE 'reward-%:%'")) {
+                statement.setString(1, uuid);
+                try (ResultSet rs = statement.executeQuery()) {
+                    while (rs.next()) {
+                        String key = rs.getString("state_key");
+                        int colon = key.indexOf(':');
+                        if (colon >= 0 && colon + 1 < key.length()) {
+                            String suffix = key.substring(colon + 1);
+                            int next = suffix.indexOf(':');
+                            result.add(next < 0 ? suffix : suffix.substring(0, next));
+                        }
+                    }
+                }
+            }
+            return result;
+        });
+    }
+
     public void recordLegacyReconciliationNow(String administrator, UUID playerId, String rewardId,
                                               java.util.Collection<String> removedKeys, String previousStatus,
                                               String decision, String reason) throws SQLException {
@@ -450,6 +629,26 @@ public final class RewardStorage {
                     insertItemOverflowHistory(playerId, rewardId, action.getActionId(), null, "QUEUED",
                         "Inventory capacity was insufficient");
                 }
+                RewardStatus oldStatus = selectActionStatus(playerId, rewardId, action.getActionId());
+                if (oldStatus != RewardStatus.CLAIM_PENDING) {
+                    throw new SQLException("Item action was not CLAIM_PENDING");
+                }
+                try (PreparedStatement ledger = connection.prepareStatement("""
+                    UPDATE reward_action_ledger SET status='ITEM_QUEUED',error_message=?,updated_at=?
+                    WHERE player_uuid=? AND reward_id=? AND action_id=? AND fingerprint=? AND status='CLAIM_PENDING'
+                    """)) {
+                    ledger.setString(1, "Durable item entitlement queued");
+                    ledger.setLong(2, System.currentTimeMillis());
+                    ledger.setString(3, playerId.toString());
+                    ledger.setString(4, rewardId);
+                    ledger.setString(5, action.getActionId());
+                    ledger.setString(6, fingerprint);
+                    if (ledger.executeUpdate() != 1) throw new SQLException("Item action queue transition failed");
+                }
+                insertActionHistory(playerId, rewardId, action.getActionId(), oldStatus,
+                    RewardStatus.ITEM_QUEUED, fingerprint, null, "Durable item entitlement queued");
+                writeOverallAndClaim(playerId, rewardId, RewardStatus.ITEM_QUEUED, false);
+                bumpPlayerRevision(playerId);
                 connection.commit();
             } catch (SQLException ex) {
                 connection.rollback();
@@ -484,7 +683,7 @@ public final class RewardStorage {
         });
     }
 
-    public CompletableFuture<Void> markQueuedItemDeliveredAsync(UUID playerId, QueuedItem item) {
+    public CompletableFuture<Void> completeQueuedItemAsync(UUID playerId, QueuedItem item) {
         return submitMeasured("storage.rewards.item-overflow-deliver", () -> {
             connection.setAutoCommit(false);
             try (PreparedStatement statement = connection.prepareStatement("""
@@ -499,6 +698,23 @@ public final class RewardStorage {
                 if (statement.executeUpdate() != 1) throw new SQLException("Queued item was not deliverable");
                 insertItemOverflowHistory(playerId, item.rewardId(), item.actionId(), "DELIVERY_PENDING", "DELIVERED",
                     "Delivered from persistent overflow queue");
+                try (PreparedStatement ledger = connection.prepareStatement("""
+                    UPDATE reward_action_ledger SET status='CLAIMED',error_message=?,updated_at=?
+                    WHERE player_uuid=? AND reward_id=? AND action_id=? AND fingerprint=? AND status='ITEM_QUEUED'
+                    """)) {
+                    ledger.setString(1, "Delivered from persistent overflow queue");
+                    ledger.setLong(2, System.currentTimeMillis());
+                    ledger.setString(3, playerId.toString());
+                    ledger.setString(4, item.rewardId());
+                    ledger.setString(5, item.actionId());
+                    ledger.setString(6, item.fingerprint());
+                    if (ledger.executeUpdate() != 1) throw new SQLException("Queued item action was not ITEM_QUEUED");
+                }
+                insertActionHistory(playerId, item.rewardId(), item.actionId(), RewardStatus.ITEM_QUEUED,
+                    RewardStatus.CLAIMED, item.fingerprint(), null,
+                    "Delivered from persistent overflow queue");
+                writeOverallAndClaim(playerId, item.rewardId(), RewardStatus.CLAIM_PENDING, false);
+                bumpPlayerRevision(playerId);
                 connection.commit();
             } catch (SQLException ex) {
                 connection.rollback();
@@ -524,18 +740,27 @@ public final class RewardStorage {
                                                                String newStatus, String reason) {
         return submitMeasured("storage.rewards.item-overflow-transition", () -> {
             connection.setAutoCommit(false);
-            try (PreparedStatement statement = connection.prepareStatement("""
+            try {
+                if ("QUEUED".equals(oldStatus)) {
+                    ActionLedgerEntry ledger = selectActionEntry(playerId, item.rewardId(), item.actionId());
+                    if (ledger == null || ledger.status() != RewardStatus.ITEM_QUEUED
+                        || !item.fingerprint().equals(ledger.fingerprint())) {
+                        throw new SQLException("Queued item does not match an ITEM_QUEUED action ledger entry");
+                    }
+                }
+                try (PreparedStatement statement = connection.prepareStatement("""
                 UPDATE reward_item_overflow SET status=?
                 WHERE player_uuid=? AND reward_id=? AND action_id=? AND fingerprint=? AND status=?
-                """)) {
-                statement.setString(1, newStatus);
-                statement.setString(2, playerId.toString());
-                statement.setString(3, item.rewardId());
-                statement.setString(4, item.actionId());
-                statement.setString(5, item.fingerprint());
-                statement.setString(6, oldStatus);
-                if (statement.executeUpdate() != 1) throw new SQLException("Queued item transition was rejected");
-                insertItemOverflowHistory(playerId, item.rewardId(), item.actionId(), oldStatus, newStatus, reason);
+                    """)) {
+                    statement.setString(1, newStatus);
+                    statement.setString(2, playerId.toString());
+                    statement.setString(3, item.rewardId());
+                    statement.setString(4, item.actionId());
+                    statement.setString(5, item.fingerprint());
+                    statement.setString(6, oldStatus);
+                    if (statement.executeUpdate() != 1) throw new SQLException("Queued item transition was rejected");
+                    insertItemOverflowHistory(playerId, item.rewardId(), item.actionId(), oldStatus, newStatus, reason);
+                }
                 connection.commit();
             } catch (SQLException ex) {
                 connection.rollback();
@@ -675,6 +900,146 @@ public final class RewardStorage {
         });
     }
 
+    public java.util.List<AdminHistoryEntry> loadAdminHistoryNow(UUID playerId, String rewardId, int limit)
+        throws SQLException {
+        return executeBlockingMeasured("storage.rewards.admin-history-load", () -> {
+            java.util.List<AdminHistoryEntry> entries = new java.util.ArrayList<>();
+            try (PreparedStatement statement = connection.prepareStatement("""
+                SELECT history_id,category,administrator_name,administrator_uuid,subject_id,
+                  old_subject_status,new_subject_status,old_overall_status,new_overall_status,
+                  decision,reason,evidence,created_at
+                FROM reward_reconciliation_history WHERE player_uuid=? AND reward_id=?
+                ORDER BY history_id DESC LIMIT ?
+                """)) {
+                statement.setString(1, playerId.toString());
+                statement.setString(2, rewardId);
+                statement.setInt(3, Math.max(1, limit));
+                try (ResultSet rs = statement.executeQuery()) {
+                    while (rs.next()) {
+                        entries.add(new AdminHistoryEntry(rs.getLong("history_id"), rs.getString("category"),
+                            rs.getString("administrator_name"), rs.getString("administrator_uuid"),
+                            rs.getString("subject_id"), rs.getString("old_subject_status"),
+                            rs.getString("new_subject_status"), rs.getString("old_overall_status"),
+                            rs.getString("new_overall_status"), rs.getString("decision"),
+                            rs.getString("reason"), rs.getString("evidence"), rs.getLong("created_at")));
+                    }
+                }
+            }
+            return entries;
+        });
+    }
+
+    public AtomicReconcileResult reconcileIpReservationNow(
+        UUID playerId, String rewardId, String ipAddress, String decision,
+        String administratorName, UUID administratorId, String reason) throws SQLException {
+        return executeBlockingMeasured("storage.rewards.ip-reconcile", () -> {
+            connection.setAutoCommit(false);
+            try {
+                String oldOwner = null;
+                try (PreparedStatement select = connection.prepareStatement(
+                    "SELECT player_uuid FROM reward_ip_claims WHERE reward_id=? AND ip_address=?")) {
+                    select.setString(1, rewardId);
+                    select.setString(2, ipAddress);
+                    try (ResultSet rs = select.executeQuery()) {
+                        if (rs.next()) oldOwner = rs.getString("player_uuid");
+                    }
+                }
+                String newOwner;
+                switch (decision) {
+                    case "retain" -> {
+                        if (!playerId.toString().equals(oldOwner)) {
+                            throw new SQLException("Reservation is not owned by the target player");
+                        }
+                        newOwner = oldOwner;
+                    }
+                    case "release" -> {
+                        if (!playerId.toString().equals(oldOwner)) {
+                            throw new SQLException("Reservation is not owned by the target player");
+                        }
+                        try (PreparedStatement delete = connection.prepareStatement(
+                            "DELETE FROM reward_ip_claims WHERE reward_id=? AND ip_address=? AND player_uuid=?")) {
+                            delete.setString(1, rewardId);
+                            delete.setString(2, ipAddress);
+                            delete.setString(3, playerId.toString());
+                            if (delete.executeUpdate() != 1) throw new SQLException("IP reservation changed");
+                        }
+                        newOwner = null;
+                    }
+                    case "repair" -> {
+                        try (PreparedStatement upsert = connection.prepareStatement("""
+                            INSERT INTO reward_ip_claims(reward_id,ip_address,player_uuid,claimed_at)
+                            VALUES(?,?,?,?) ON CONFLICT(reward_id,ip_address) DO UPDATE SET
+                              player_uuid=excluded.player_uuid,claimed_at=excluded.claimed_at
+                            """)) {
+                            upsert.setString(1, rewardId);
+                            upsert.setString(2, ipAddress);
+                            upsert.setString(3, playerId.toString());
+                            upsert.setLong(4, System.currentTimeMillis());
+                            upsert.executeUpdate();
+                        }
+                        newOwner = playerId.toString();
+                    }
+                    default -> throw new SQLException("Unknown IP reconciliation decision");
+                }
+                try (PreparedStatement history = connection.prepareStatement("""
+                    INSERT INTO reward_ip_reconciliation_history(
+                      administrator_name,administrator_uuid,player_uuid,reward_id,ip_address,
+                      decision,previous_owner,new_owner,reason,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)
+                    """)) {
+                    history.setString(1, administratorName);
+                    if (administratorId == null) history.setNull(2, java.sql.Types.VARCHAR);
+                    else history.setString(2, administratorId.toString());
+                    history.setString(3, playerId.toString());
+                    history.setString(4, rewardId);
+                    history.setString(5, ipAddress);
+                    history.setString(6, decision);
+                    history.setString(7, oldOwner);
+                    history.setString(8, newOwner);
+                    history.setString(9, reason);
+                    history.setLong(10, System.currentTimeMillis());
+                    history.executeUpdate();
+                }
+                connection.commit();
+                return new AtomicReconcileResult(oldOwner, newOwner, null, null, false,
+                    loadStoredRevision(playerId));
+            } catch (SQLException ex) {
+                connection.rollback();
+                throw ex;
+            } finally {
+                connection.setAutoCommit(true);
+            }
+        });
+    }
+
+    public java.util.List<String> loadIpHistoryNow(UUID playerId, String rewardId, int limit)
+        throws SQLException {
+        return executeBlockingMeasured("storage.rewards.ip-history-load", () -> {
+            java.util.List<String> result = new java.util.ArrayList<>();
+            try (PreparedStatement statement = connection.prepareStatement("""
+                SELECT history_id,administrator_name,administrator_uuid,ip_address,decision,
+                  previous_owner,new_owner,reason,created_at
+                FROM reward_ip_reconciliation_history WHERE player_uuid=? AND reward_id=?
+                ORDER BY history_id DESC LIMIT ?
+                """)) {
+                statement.setString(1, playerId.toString());
+                statement.setString(2, rewardId);
+                statement.setInt(3, Math.max(1, limit));
+                try (ResultSet rs = statement.executeQuery()) {
+                    while (rs.next()) {
+                        result.add("#" + rs.getLong("history_id") + " ip=" + rs.getString("ip_address")
+                            + " decision=" + rs.getString("decision") + " "
+                            + rs.getString("previous_owner") + " -> " + rs.getString("new_owner")
+                            + " by=" + rs.getString("administrator_name")
+                            + (rs.getString("administrator_uuid") == null ? ""
+                                : "/" + rs.getString("administrator_uuid"))
+                            + " at=" + rs.getLong("created_at") + " reason=" + rs.getString("reason"));
+                    }
+                }
+            }
+            return result;
+        });
+    }
+
     private static Double nullableDouble(ResultSet rs, String column) throws SQLException {
         double value = rs.getDouble(column);
         return rs.wasNull() ? null : value;
@@ -763,6 +1128,406 @@ public final class RewardStorage {
         });
     }
 
+    public AtomicReconcileResult reconcileActionAtomicNow(
+        UUID playerId, String rewardId, String actionId, String expectedFingerprint,
+        RewardStatus newStatus, RewardStatus newOverall, boolean finalize,
+        String administratorName, UUID administratorId, String decision, String reason, String evidence)
+        throws SQLException {
+        return executeBlockingMeasured("storage.rewards.action-reconcile-atomic", () -> {
+            connection.setAutoCommit(false);
+            try {
+                ActionLedgerEntry current = selectActionEntry(playerId, rewardId, actionId);
+                if (current == null) throw new SQLException("Action ledger entry not found");
+                if (!current.fingerprint().equals(expectedFingerprint)) {
+                    throw new SQLException("Action fingerprint changed during reconciliation");
+                }
+                if ((current.status() != RewardStatus.CLAIM_PENDING
+                    && current.status() != RewardStatus.REQUIRES_RECONCILIATION)
+                    || (newStatus != RewardStatus.CLAIMED && newStatus != RewardStatus.DELIVERY_FAILED)) {
+                    throw new SQLException("Invalid reconciliation transition " + current.status()
+                        + " -> " + newStatus);
+                }
+                String oldOverall = selectOverallStatus(playerId, rewardId);
+                try (PreparedStatement update = connection.prepareStatement("""
+                    UPDATE reward_action_ledger SET status=?,error_message=?,updated_at=?
+                    WHERE player_uuid=? AND reward_id=? AND action_id=? AND fingerprint=? AND status=?
+                    """)) {
+                    update.setString(1, newStatus.name());
+                    update.setString(2, evidence);
+                    update.setLong(3, System.currentTimeMillis());
+                    update.setString(4, playerId.toString());
+                    update.setString(5, rewardId);
+                    update.setString(6, actionId);
+                    update.setString(7, expectedFingerprint);
+                    update.setString(8, current.status().name());
+                    if (update.executeUpdate() != 1) throw new SQLException("Concurrent reconciliation change");
+                }
+                insertActionHistory(playerId, rewardId, actionId, current.status(), newStatus,
+                    expectedFingerprint, null, evidence);
+                writeOverallAndClaim(playerId, rewardId, newOverall, finalize);
+                insertReconciliationHistory("action", administratorName, administratorId, playerId, rewardId,
+                    actionId, current.status().name(), newStatus.name(), oldOverall, newOverall.name(),
+                    decision, reason, evidence);
+                long revision = bumpPlayerRevision(playerId);
+                connection.commit();
+                return new AtomicReconcileResult(current.status().name(), newStatus.name(), oldOverall,
+                    newOverall.name(), finalize, revision);
+            } catch (SQLException ex) {
+                connection.rollback();
+                throw ex;
+            } finally {
+                connection.setAutoCommit(true);
+            }
+        });
+    }
+
+    public AtomicReconcileResult reconcileItemAtomicNow(
+        UUID playerId, String rewardId, String actionId, String expectedFingerprint,
+        boolean delivered, RewardStatus newOverall, boolean finalize,
+        String administratorName, UUID administratorId, String reason, String evidence) throws SQLException {
+        return executeBlockingMeasured("storage.rewards.item-reconcile-atomic", () -> {
+            connection.setAutoCommit(false);
+            try {
+                ActionLedgerEntry action = selectActionEntry(playerId, rewardId, actionId);
+                if (action == null || !expectedFingerprint.equals(action.fingerprint())) {
+                    throw new SQLException("Matching item action ledger entry not found");
+                }
+                String oldItem;
+                try (PreparedStatement select = connection.prepareStatement("""
+                    SELECT status,fingerprint FROM reward_item_overflow
+                    WHERE player_uuid=? AND reward_id=? AND action_id=?
+                    """)) {
+                    select.setString(1, playerId.toString());
+                    select.setString(2, rewardId);
+                    select.setString(3, actionId);
+                    try (ResultSet rs = select.executeQuery()) {
+                        if (!rs.next()) throw new SQLException("Item overflow entry not found");
+                        oldItem = rs.getString("status");
+                        if (!expectedFingerprint.equals(rs.getString("fingerprint"))) {
+                            throw new SQLException("Item overflow fingerprint does not match the action ledger");
+                        }
+                    }
+                }
+                if (!"DELIVERY_PENDING".equals(oldItem)) {
+                    throw new SQLException("Item delivery is " + oldItem
+                        + "; only ambiguous DELIVERY_PENDING records require staff reconciliation");
+                }
+                String newItem = delivered ? "DELIVERED" : "QUEUED";
+                String oldOverall = selectOverallStatus(playerId, rewardId);
+                try (PreparedStatement update = connection.prepareStatement("""
+                    UPDATE reward_item_overflow SET status=?,delivered_at=?
+                    WHERE player_uuid=? AND reward_id=? AND action_id=? AND fingerprint=?
+                      AND status='DELIVERY_PENDING'
+                    """)) {
+                    update.setString(1, newItem);
+                    if (delivered) update.setLong(2, System.currentTimeMillis());
+                    else update.setNull(2, java.sql.Types.BIGINT);
+                    update.setString(3, playerId.toString());
+                    update.setString(4, rewardId);
+                    update.setString(5, actionId);
+                    update.setString(6, expectedFingerprint);
+                    if (update.executeUpdate() != 1) throw new SQLException("Concurrent item reconciliation");
+                }
+                insertItemOverflowHistory(playerId, rewardId, actionId, oldItem, newItem, evidence);
+                String newAction = action.status().name();
+                if (delivered) {
+                    if (action.status() != RewardStatus.ITEM_QUEUED) {
+                        throw new SQLException("Item action is " + action.status() + ", not ITEM_QUEUED");
+                    }
+                    try (PreparedStatement update = connection.prepareStatement("""
+                        UPDATE reward_action_ledger SET status='CLAIMED',error_message=?,updated_at=?
+                        WHERE player_uuid=? AND reward_id=? AND action_id=? AND fingerprint=?
+                          AND status='ITEM_QUEUED'
+                        """)) {
+                        update.setString(1, evidence);
+                        update.setLong(2, System.currentTimeMillis());
+                        update.setString(3, playerId.toString());
+                        update.setString(4, rewardId);
+                        update.setString(5, actionId);
+                        update.setString(6, expectedFingerprint);
+                        if (update.executeUpdate() != 1) throw new SQLException("Item action reconciliation failed");
+                    }
+                    insertActionHistory(playerId, rewardId, actionId, RewardStatus.ITEM_QUEUED,
+                        RewardStatus.CLAIMED, expectedFingerprint, null, evidence);
+                    newAction = RewardStatus.CLAIMED.name();
+                }
+                writeOverallAndClaim(playerId, rewardId, newOverall, finalize);
+                insertReconciliationHistory("item", administratorName, administratorId, playerId, rewardId,
+                    actionId, oldItem + "/" + action.status(), newItem + "/" + newAction,
+                    oldOverall, newOverall.name(), delivered ? "delivered" : "retry", reason, evidence);
+                long revision = bumpPlayerRevision(playerId);
+                connection.commit();
+                return new AtomicReconcileResult(oldItem + "/" + action.status(), newItem + "/" + newAction,
+                    oldOverall, newOverall.name(), finalize, revision);
+            } catch (SQLException ex) {
+                connection.rollback();
+                throw ex;
+            } finally {
+                connection.setAutoCommit(true);
+            }
+        });
+    }
+
+    private ActionLedgerEntry selectActionEntry(UUID playerId, String rewardId, String actionId)
+        throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+            SELECT action_id,action_type,fingerprint,status,requested_amount,response_amount,response_type,
+              balance_before,balance_after,error_message,updated_at
+            FROM reward_action_ledger WHERE player_uuid=? AND reward_id=? AND action_id=?
+            """)) {
+            statement.setString(1, playerId.toString());
+            statement.setString(2, rewardId);
+            statement.setString(3, actionId);
+            try (ResultSet rs = statement.executeQuery()) {
+                if (!rs.next()) return null;
+                return new ActionLedgerEntry(rs.getString("action_id"), rs.getString("action_type"),
+                    rs.getString("fingerprint"), RewardStatus.valueOf(rs.getString("status")),
+                    nullableDouble(rs, "requested_amount"), nullableDouble(rs, "response_amount"),
+                    rs.getString("response_type"), nullableDouble(rs, "balance_before"),
+                    nullableDouble(rs, "balance_after"), rs.getString("error_message"),
+                    rs.getLong("updated_at"));
+            }
+        }
+    }
+
+    private String selectOverallStatus(UUID playerId, String rewardId) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+            "SELECT state_value FROM reward_states WHERE player_uuid=? AND state_key=?")) {
+            statement.setString(1, playerId.toString());
+            statement.setString(2, "reward-delivery:" + rewardId);
+            try (ResultSet rs = statement.executeQuery()) {
+                return rs.next() ? rs.getString("state_value") : null;
+            }
+        }
+    }
+
+    private void writeOverallAndClaim(UUID playerId, String rewardId, RewardStatus overall, boolean finalize)
+        throws SQLException {
+        try (PreparedStatement state = connection.prepareStatement("""
+            INSERT INTO reward_states(player_uuid,state_key,state_value) VALUES(?,?,?)
+            ON CONFLICT(player_uuid,state_key) DO UPDATE SET state_value=excluded.state_value
+            """)) {
+            state.setString(1, playerId.toString());
+            state.setString(2, "reward-delivery:" + rewardId);
+            state.setString(3, overall.name());
+            state.executeUpdate();
+        }
+        if (finalize) {
+            try (PreparedStatement claim = connection.prepareStatement(
+                "INSERT OR IGNORE INTO reward_claims(player_uuid,reward_id,claimed_at) VALUES(?,?,?)")) {
+                claim.setString(1, playerId.toString());
+                claim.setString(2, rewardId);
+                claim.setLong(3, System.currentTimeMillis());
+                claim.executeUpdate();
+            }
+        } else {
+            try (PreparedStatement claim = connection.prepareStatement(
+                "DELETE FROM reward_claims WHERE player_uuid=? AND reward_id=?")) {
+                claim.setString(1, playerId.toString());
+                claim.setString(2, rewardId);
+                claim.executeUpdate();
+            }
+        }
+    }
+
+    private void insertReconciliationHistory(
+        String category, String administratorName, UUID administratorId, UUID playerId, String rewardId,
+        String subjectId, String oldSubject, String newSubject, String oldOverall, String newOverall,
+        String decision, String reason, String evidence) throws SQLException {
+        try (PreparedStatement history = connection.prepareStatement("""
+            INSERT INTO reward_reconciliation_history(
+              category,administrator_name,administrator_uuid,player_uuid,reward_id,subject_id,
+              old_subject_status,new_subject_status,old_overall_status,new_overall_status,
+              decision,reason,evidence,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """)) {
+            history.setString(1, category);
+            history.setString(2, administratorName);
+            if (administratorId == null) history.setNull(3, java.sql.Types.VARCHAR);
+            else history.setString(3, administratorId.toString());
+            history.setString(4, playerId.toString());
+            history.setString(5, rewardId);
+            history.setString(6, subjectId);
+            history.setString(7, oldSubject);
+            history.setString(8, newSubject);
+            history.setString(9, oldOverall);
+            history.setString(10, newOverall);
+            history.setString(11, decision);
+            history.setString(12, reason);
+            history.setString(13, evidence == null ? "" : evidence);
+            history.setLong(14, System.currentTimeMillis());
+            history.executeUpdate();
+        }
+    }
+
+    private long bumpPlayerRevision(UUID playerId) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+            INSERT INTO reward_player_versions(player_uuid,revision) VALUES(?,1)
+            ON CONFLICT(player_uuid) DO UPDATE SET revision=revision+1
+            """)) {
+            statement.setString(1, playerId.toString());
+            statement.executeUpdate();
+        }
+        return loadStoredRevision(playerId);
+    }
+
+    public AtomicReconcileResult reconcileLegacyAtomicNow(
+        UUID playerId, String rewardId, java.util.Collection<String> expectedKeys, boolean delivered,
+        String administratorName, UUID administratorId, String reason) throws SQLException {
+        return executeBlockingMeasured("storage.rewards.legacy-reconcile-atomic", () -> {
+            connection.setAutoCommit(false);
+            try {
+                java.util.List<String> actualKeys = new java.util.ArrayList<>();
+                try (PreparedStatement select = connection.prepareStatement(
+                    "SELECT state_key FROM reward_states WHERE player_uuid=? AND state_key LIKE ? ORDER BY state_key")) {
+                    select.setString(1, playerId.toString());
+                    select.setString(2, "reward-action:" + rewardId + ":%");
+                    try (ResultSet rs = select.executeQuery()) {
+                        while (rs.next()) actualKeys.add(rs.getString("state_key"));
+                    }
+                }
+                java.util.List<String> expected = expectedKeys.stream().sorted().toList();
+                if (actualKeys.isEmpty() || !actualKeys.equals(expected)) {
+                    throw new SQLException("Legacy state changed since inspection");
+                }
+                String oldOverall = selectOverallStatus(playerId, rewardId);
+                try (PreparedStatement delete = connection.prepareStatement(
+                    "DELETE FROM reward_states WHERE player_uuid=? AND state_key=?")) {
+                    for (String key : actualKeys) {
+                        delete.setString(1, playerId.toString());
+                        delete.setString(2, key);
+                        delete.addBatch();
+                    }
+                    delete.executeBatch();
+                }
+                RewardStatus newOverall = delivered
+                    ? RewardStatus.REQUIRES_RECONCILIATION : RewardStatus.DELIVERY_FAILED;
+                if (delivered) {
+                    try (PreparedStatement marker = connection.prepareStatement("""
+                        INSERT INTO reward_states(player_uuid,state_key,state_value) VALUES(?,?,?)
+                        ON CONFLICT(player_uuid,state_key) DO UPDATE SET state_value=excluded.state_value
+                        """)) {
+                        marker.setString(1, playerId.toString());
+                        marker.setString(2, "reward-legacy-unmapped:" + rewardId);
+                        marker.setString(3, "requires-force-resolution");
+                        marker.executeUpdate();
+                    }
+                } else {
+                    try (PreparedStatement marker = connection.prepareStatement(
+                        "DELETE FROM reward_states WHERE player_uuid=? AND state_key=?")) {
+                        marker.setString(1, playerId.toString());
+                        marker.setString(2, "reward-legacy-unmapped:" + rewardId);
+                        marker.executeUpdate();
+                    }
+                }
+                writeOverallAndClaim(playerId, rewardId, newOverall, false);
+                try (PreparedStatement history = connection.prepareStatement("""
+                    INSERT INTO reward_legacy_reconciliation_history(
+                      administrator,player_uuid,reward_id,removed_state_keys,previous_overall_status,
+                      decision,reason,created_at) VALUES(?,?,?,?,?,?,?,?)
+                    """)) {
+                    history.setString(1, administratorId == null ? administratorName
+                        : administratorName + "/" + administratorId);
+                    history.setString(2, playerId.toString());
+                    history.setString(3, rewardId);
+                    history.setString(4, String.join("\n", actualKeys));
+                    history.setString(5, oldOverall);
+                    history.setString(6, delivered ? "delivered-unmapped" : "retry");
+                    history.setString(7, reason);
+                    history.setLong(8, System.currentTimeMillis());
+                    history.executeUpdate();
+                }
+                insertReconciliationHistory("legacy", administratorName, administratorId, playerId, rewardId,
+                    "legacy", String.join(",", actualKeys), delivered ? "legacy-unmapped" : "retryable",
+                    oldOverall, newOverall.name(), delivered ? "delivered" : "retry", reason,
+                    "Removed exact keys: " + actualKeys);
+                long revision = bumpPlayerRevision(playerId);
+                connection.commit();
+                return new AtomicReconcileResult(String.join(",", actualKeys),
+                    delivered ? "legacy-unmapped" : "retryable", oldOverall, newOverall.name(), false, revision);
+            } catch (SQLException ex) {
+                connection.rollback();
+                throw ex;
+            } finally {
+                connection.setAutoCommit(true);
+            }
+        });
+    }
+
+    public AtomicReconcileResult forceWholeAtomicNow(
+        UUID playerId, String rewardId, boolean delivered, String administratorName, UUID administratorId,
+        String reason, String evidence) throws SQLException {
+        return executeBlockingMeasured("storage.rewards.whole-reconcile-atomic", () -> {
+            connection.setAutoCommit(false);
+            try {
+                String marker;
+                try (PreparedStatement select = connection.prepareStatement(
+                    "SELECT state_value FROM reward_states WHERE player_uuid=? AND state_key=?")) {
+                    select.setString(1, playerId.toString());
+                    select.setString(2, "reward-legacy-unmapped:" + rewardId);
+                    try (ResultSet rs = select.executeQuery()) {
+                        marker = rs.next() ? rs.getString("state_value") : null;
+                    }
+                }
+                if (marker == null) {
+                    throw new SQLException("No persisted legacy-unmapped condition permits whole force-resolution");
+                }
+                try (PreparedStatement inspected = connection.prepareStatement("""
+                    SELECT 1 FROM reward_inspection_history
+                    WHERE player_uuid=? AND reward_id=? AND administrator_name=?
+                      AND ((administrator_uuid IS NULL AND ? IS NULL) OR administrator_uuid=?)
+                    ORDER BY history_id DESC LIMIT 1
+                    """)) {
+                    inspected.setString(1, playerId.toString());
+                    inspected.setString(2, rewardId);
+                    inspected.setString(3, administratorName);
+                    if (administratorId == null) inspected.setNull(4, java.sql.Types.VARCHAR);
+                    else inspected.setString(4, administratorId.toString());
+                    if (administratorId == null) inspected.setNull(5, java.sql.Types.VARCHAR);
+                    else inspected.setString(5, administratorId.toString());
+                    try (ResultSet rs = inspected.executeQuery()) {
+                        if (!rs.next()) {
+                            throw new SQLException("This administrator must inspect the reward before force-resolution");
+                        }
+                    }
+                }
+                try (PreparedStatement pending = connection.prepareStatement("""
+                    SELECT action_id,status FROM reward_item_overflow
+                    WHERE player_uuid=? AND reward_id=? AND status IN ('QUEUED','DELIVERY_PENDING')
+                    """)) {
+                    pending.setString(1, playerId.toString());
+                    pending.setString(2, rewardId);
+                    try (ResultSet rs = pending.executeQuery()) {
+                        if (rs.next()) {
+                            throw new SQLException("Pending item " + rs.getString("action_id")
+                                + " must be delivered or reconciled first");
+                        }
+                    }
+                }
+                String oldOverall = selectOverallStatus(playerId, rewardId);
+                RewardStatus next = delivered ? RewardStatus.CLAIMED : RewardStatus.DELIVERY_FAILED;
+                try (PreparedStatement delete = connection.prepareStatement(
+                    "DELETE FROM reward_states WHERE player_uuid=? AND state_key=?")) {
+                    delete.setString(1, playerId.toString());
+                    delete.setString(2, "reward-legacy-unmapped:" + rewardId);
+                    delete.executeUpdate();
+                }
+                writeOverallAndClaim(playerId, rewardId, next, delivered);
+                insertReconciliationHistory("whole-force", administratorName, administratorId, playerId, rewardId,
+                    "whole", marker, delivered ? "force-delivered" : "force-retry",
+                    oldOverall, next.name(), delivered ? "force-delivered" : "force-retry", reason, evidence);
+                long revision = bumpPlayerRevision(playerId);
+                connection.commit();
+                return new AtomicReconcileResult(marker, delivered ? "force-delivered" : "force-retry",
+                    oldOverall, next.name(), delivered, revision);
+            } catch (SQLException ex) {
+                connection.rollback();
+                throw ex;
+            } finally {
+                connection.setAutoCommit(true);
+            }
+        });
+    }
+
     private RewardStatus selectActionStatus(UUID playerId, String rewardId, String actionId) throws SQLException {
         try (PreparedStatement statement = connection.prepareStatement(
             "SELECT status FROM reward_action_ledger WHERE player_uuid=? AND reward_id=? AND action_id=?")) {
@@ -780,7 +1545,7 @@ public final class RewardStorage {
             return oldStatus == null || oldStatus == RewardStatus.DELIVERY_FAILED;
         }
         if (next == RewardStatus.CLAIMED || next == RewardStatus.DELIVERY_FAILED
-            || next == RewardStatus.REQUIRES_RECONCILIATION) {
+            || next == RewardStatus.REQUIRES_RECONCILIATION || next == RewardStatus.ITEM_QUEUED) {
             return oldStatus == RewardStatus.CLAIM_PENDING;
         }
         return false;

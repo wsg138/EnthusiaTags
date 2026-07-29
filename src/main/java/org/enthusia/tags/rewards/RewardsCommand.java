@@ -42,6 +42,11 @@ public final class RewardsCommand implements CommandExecutor, TabCompleter {
             sender.sendMessage(message("players-only"));
             return true;
         }
+        if (args.length == 1 && args[0].equalsIgnoreCase("retryitems")) {
+            rewardService.retryQueuedItems(player);
+            player.sendMessage(Component.text("Queued item delivery retry requested."));
+            return true;
+        }
         if (args.length == 2 && args[0].equalsIgnoreCase("open")) {
             RewardDefinition reward = rewardService.getRewards().get(args[1].toLowerCase(java.util.Locale.ROOT));
             if (reward == null) {
@@ -57,8 +62,9 @@ public final class RewardsCommand implements CommandExecutor, TabCompleter {
 
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
-        if (args.length == 1 && sender.hasPermission("enthusia.tags.admin")) {
-            return List.of("reload", "open");
+        if (args.length == 1) {
+            return sender.hasPermission("enthusia.tags.admin")
+                ? List.of("reload", "open", "retryitems") : List.of("retryitems");
         }
         return Collections.emptyList();
     }

@@ -64,7 +64,7 @@ public final class RewardMenu {
         for (RewardDefinition reward : rewardService.getRewards().values()) {
             if (!reward.getCategory().equalsIgnoreCase(target.getCategory())) continue;
             if (reward.getId().equalsIgnoreCase(target.getId())) {
-                return createCategory(player, target.getCategory(), index / 45);
+                return createCategory(player, target.getCategory(), index / 45, target.getId());
             }
             index++;
         }
@@ -72,6 +72,10 @@ public final class RewardMenu {
     }
 
     public Inventory createCategory(Player player, String categoryId, int page) {
+        return createCategory(player, categoryId, page, null);
+    }
+
+    private Inventory createCategory(Player player, String categoryId, int page, String focusedRewardId) {
         RewardMenuHolder holder = new RewardMenuHolder(rewardService, categoryId, page);
         RewardCategory category = rewardService.getConfig().categories().get(categoryId);
         String titleText = category == null
@@ -95,7 +99,8 @@ public final class RewardMenu {
         long renderStart = System.nanoTime();
         RewardService.ProgressSnapshot snapshot = rewardService.getProgressSnapshot(player);
         for (int i = start; i < end; i++) {
-            inventory.setItem(slot++, createRewardItem(player, list.get(i), snapshot));
+            inventory.setItem(slot++, createRewardItem(player, list.get(i), snapshot,
+                list.get(i).getId().equalsIgnoreCase(focusedRewardId == null ? "" : focusedRewardId)));
         }
         if (tagService.getPlugin() instanceof org.enthusia.tags.EnthusiaTagsPlugin plugin) {
             plugin.getPerformanceMonitor().add("rewards.gui.items-rendered", end - start);
@@ -128,7 +133,8 @@ public final class RewardMenu {
         return prevKey;
     }
 
-    private ItemStack createRewardItem(Player player, RewardDefinition reward, RewardService.ProgressSnapshot snapshot) {
+    private ItemStack createRewardItem(Player player, RewardDefinition reward, RewardService.ProgressSnapshot snapshot,
+                                       boolean focused) {
         ItemStack stack = new ItemStack(reward.getIcon());
         ItemMeta meta = stack.getItemMeta();
         meta.displayName(LegacyComponentSerializer.legacyAmpersand().deserialize(reward.getName()));
@@ -141,9 +147,27 @@ public final class RewardMenu {
         RewardEvaluation evaluation = rewardService.evaluate(player, reward, snapshot);
         boolean claimed = evaluation.status() == RewardStatus.CLAIMED;
         boolean complete = evaluation.claimable();
+        if (focused) {
+            lore.add(LegacyComponentSerializer.legacyAmpersand()
+                .deserialize(rewardService.getMessage("rewards-status-focused")));
+            meta.addEnchant(Enchantment.UNBREAKING, 1, true);
+            meta.addItemFlags(ItemFlag.HIDE_ENCHANTS);
+        }
         if (claimed) {
             lore.add(LegacyComponentSerializer.legacyAmpersand()
                 .deserialize(rewardService.getMessage("rewards-status-claimed")));
+        } else if (evaluation.status() == RewardStatus.ITEM_QUEUED) {
+            lore.add(LegacyComponentSerializer.legacyAmpersand()
+                .deserialize(rewardService.getMessage("rewards-status-queued")));
+        } else if (evaluation.status() == RewardStatus.REQUIRES_RECONCILIATION) {
+            lore.add(LegacyComponentSerializer.legacyAmpersand()
+                .deserialize(rewardService.getMessage("rewards-status-reconciliation")));
+        } else if (evaluation.status() == RewardStatus.DELIVERY_FAILED) {
+            lore.add(LegacyComponentSerializer.legacyAmpersand()
+                .deserialize(rewardService.getMessage("rewards-status-retryable")));
+        } else if (evaluation.status() == RewardStatus.CLAIM_PENDING) {
+            lore.add(LegacyComponentSerializer.legacyAmpersand()
+                .deserialize(rewardService.getMessage("rewards-status-pending")));
         } else if (complete) {
             lore.add(LegacyComponentSerializer.legacyAmpersand()
                 .deserialize(rewardService.getMessage("rewards-status-claimable")));
