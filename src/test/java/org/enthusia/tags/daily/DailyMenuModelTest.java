@@ -15,7 +15,7 @@ class DailyMenuModelTest {
 
     @Test
     void firstVisitShowsOnlyDayOneAsClaimable() {
-        DailyMenuModel.View view = build(DailyState.empty(true), null);
+        DailyMenuModel.View view = build(DailyState.empty(true), DailyMenuModel.LedgerState.NONE);
 
         assertAll(
             () -> assertEquals(1, view.activeDay()),
@@ -27,7 +27,7 @@ class DailyMenuModelTest {
 
     @Test
     void sameDayClaimCannotBeClaimedAgain() {
-        DailyMenuModel.View view = build(state(TODAY, 3, 5), DailyStorage.TransactionStatus.DELIVERED);
+        DailyMenuModel.View view = build(state(TODAY, 3, 5), DailyMenuModel.LedgerState.DELIVERED);
 
         assertAll(
             () -> assertEquals(-1, view.claimIndex()),
@@ -39,7 +39,8 @@ class DailyMenuModelTest {
 
     @Test
     void consecutiveDayMakesNextRewardClaimable() {
-        DailyMenuModel.View view = build(state(TODAY.minusDays(1), 3, 5), null);
+        DailyMenuModel.View view = build(state(TODAY.minusDays(1), 3, 5),
+            DailyMenuModel.LedgerState.NONE);
 
         assertAll(
             () -> assertEquals(4, view.activeDay()),
@@ -50,20 +51,22 @@ class DailyMenuModelTest {
 
     @Test
     void missedDayResetsVisibleTrackAndClaimToDayOne() {
-        DailyMenuModel.View view = build(state(TODAY.minusDays(2), 10, 10), null);
+        DailyMenuModel.View view = build(state(TODAY.minusDays(2), 10, 10),
+            DailyMenuModel.LedgerState.NONE);
 
         assertAll(
             () -> assertEquals(1, view.activeDay()),
             () -> assertEquals(0, view.claimIndex()),
             () -> assertEquals(DailyMenuModel.Status.CLAIMABLE, view.days().get(0).status()),
-            () -> assertFalse(view.days().stream().anyMatch(day -> day.status() == DailyMenuModel.Status.CLAIMED))
+            () -> assertFalse(view.days().stream().anyMatch(
+                day -> day.status() == DailyMenuModel.Status.CLAIMED))
         );
     }
 
     @Test
     void failedDepositCanBeRetriedFromSameSlot() {
         DailyMenuModel.View view = build(state(TODAY.minusDays(1), 2, 4),
-            DailyStorage.TransactionStatus.FAILED);
+            DailyMenuModel.LedgerState.FAILED);
 
         assertAll(
             () -> assertEquals(2, view.claimIndex()),
@@ -75,8 +78,8 @@ class DailyMenuModelTest {
     @Test
     void uncertainAndInProgressTransactionsBlockAdditionalDeposits() {
         DailyState state = state(TODAY.minusDays(1), 2, 4);
-        DailyMenuModel.View uncertain = build(state, DailyStorage.TransactionStatus.UNCERTAIN);
-        DailyMenuModel.View depositing = build(state, DailyStorage.TransactionStatus.DEPOSITING);
+        DailyMenuModel.View uncertain = build(state, DailyMenuModel.LedgerState.UNCERTAIN);
+        DailyMenuModel.View depositing = build(state, DailyMenuModel.LedgerState.DEPOSITING);
 
         assertAll(
             () -> assertEquals(-1, uncertain.claimIndex()),
@@ -91,7 +94,7 @@ class DailyMenuModelTest {
     @Test
     void deliveredLedgerWithoutAppliedStateRequiresReconciliation() {
         DailyMenuModel.View view = build(state(TODAY.minusDays(1), 2, 4),
-            DailyStorage.TransactionStatus.DELIVERED);
+            DailyMenuModel.LedgerState.DELIVERED);
 
         assertAll(
             () -> assertEquals(-1, view.claimIndex()),
@@ -102,7 +105,8 @@ class DailyMenuModelTest {
 
     @Test
     void dayEightUsesRollingSeventhSlot() {
-        DailyMenuModel.View view = build(state(TODAY.minusDays(1), 7, 7), null);
+        DailyMenuModel.View view = build(state(TODAY.minusDays(1), 7, 7),
+            DailyMenuModel.LedgerState.NONE);
         DailyMenuModel.Day rolling = view.days().get(6);
 
         assertAll(
@@ -118,7 +122,7 @@ class DailyMenuModelTest {
     @Test
     void dayTenShowsClaimedRollingRewardAfterClaim() {
         DailyMenuModel.View view = build(state(TODAY, 10, 10),
-            DailyStorage.TransactionStatus.DELIVERED);
+            DailyMenuModel.LedgerState.DELIVERED);
         DailyMenuModel.Day rolling = view.days().get(6);
 
         assertAll(
@@ -129,9 +133,8 @@ class DailyMenuModelTest {
         );
     }
 
-    private DailyMenuModel.View build(DailyState state,
-                                      DailyStorage.TransactionStatus transactionStatus) {
-        return DailyMenuModel.build(state, TODAY, PAYOUTS, transactionStatus);
+    private DailyMenuModel.View build(DailyState state, DailyMenuModel.LedgerState ledgerState) {
+        return DailyMenuModel.build(state, TODAY, PAYOUTS, ledgerState);
     }
 
     private DailyState state(LocalDate lastClaim, int current, int best) {
