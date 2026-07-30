@@ -13,6 +13,7 @@ import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.persistence.PersistentDataType;
 import org.enthusia.tags.TagService;
 
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -194,27 +195,8 @@ public final class RewardMenu {
             lore.add(LegacyComponentSerializer.legacyAmpersand()
                 .deserialize(rewardService.getMessage("rewards-rewards-title")));
             for (RewardAction action : reward.getActions()) {
-                String line;
-                if (action.getType() == RewardActionType.TAG) {
-                    String tagName = action.getValue();
-                    var tag = tagService.getRegistry().get(action.getValue());
-                    if (tag != null) {
-                        tagName = tag.getDisplayName();
-                    }
-                    line = rewardService.getMessage("rewards-rewards-line-tag")
-                        .replace("{tag}", tagName);
-                } else if (action.getType() == RewardActionType.MONEY) {
-                    line = rewardService.getMessage("rewards-rewards-line-money")
-                        .replace("{amount}", String.valueOf(action.getAmount()));
-                } else {
-                    String label = action.getLabel();
-                    if (label == null || label.isBlank()) {
-                        label = rewardService.getMessage("rewards-rewards-command-default");
-                    }
-                    line = rewardService.getMessage("rewards-rewards-line-command")
-                        .replace("{command}", label);
-                }
-                lore.add(LegacyComponentSerializer.legacyAmpersand().deserialize(line));
+                lore.add(LegacyComponentSerializer.legacyAmpersand()
+                    .deserialize(formatActionLine(action)));
             }
         }
 
@@ -222,6 +204,63 @@ public final class RewardMenu {
         meta.getPersistentDataContainer().set(rewardKey, PersistentDataType.STRING, reward.getId().toLowerCase(Locale.ROOT));
         stack.setItemMeta(meta);
         return stack;
+    }
+
+    private String formatActionLine(RewardAction action) {
+        return switch (action.getType()) {
+            case TAG -> {
+                String tagName = action.getValue();
+                var tag = tagService.getRegistry().get(action.getValue());
+                if (tag != null) {
+                    tagName = tag.getDisplayName();
+                }
+                yield rewardService.getMessage("rewards-rewards-line-tag")
+                    .replace("{tag}", tagName);
+            }
+            case MONEY -> rewardService.getMessage("rewards-rewards-line-money")
+                .replace("{amount}", formatAmount(action.getAmount()));
+            case ITEM -> rewardService.getMessage("rewards-rewards-line-item")
+                .replace("{amount}", String.valueOf(action.getItemAmount()))
+                .replace("{item}", itemDisplayName(action));
+            case COMMAND -> rewardService.getMessage("rewards-rewards-line-unlock")
+                .replace("{unlock}", actionLabel(action, "rewards-rewards-unlock-default"));
+        };
+    }
+
+    private String itemDisplayName(RewardAction action) {
+        if (action.getDisplayName() != null && !action.getDisplayName().isBlank()) {
+            return action.getDisplayName();
+        }
+        if (action.getMaterial() == null) {
+            return rewardService.getMessage("rewards-rewards-item-default");
+        }
+        return titleCase(action.getMaterial().name());
+    }
+
+    private String actionLabel(RewardAction action, String fallbackKey) {
+        if (action.getLabel() != null && !action.getLabel().isBlank()) {
+            return action.getLabel();
+        }
+        return rewardService.getMessage(fallbackKey);
+    }
+
+    private String formatAmount(double amount) {
+        return BigDecimal.valueOf(amount).stripTrailingZeros().toPlainString();
+    }
+
+    private String titleCase(String value) {
+        String[] words = value.toLowerCase(Locale.ROOT).split("_");
+        StringBuilder result = new StringBuilder();
+        for (String word : words) {
+            if (word.isBlank()) {
+                continue;
+            }
+            if (result.length() > 0) {
+                result.append(' ');
+            }
+            result.append(Character.toUpperCase(word.charAt(0))).append(word.substring(1));
+        }
+        return result.toString();
     }
 
     private ItemStack createCategoryItem(RewardCategory category) {
