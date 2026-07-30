@@ -1,5 +1,16 @@
 # EnthusiaTags
 
+[![Build](https://github.com/wsg138/EnthusiaTags/actions/workflows/build.yml/badge.svg)](https://github.com/wsg138/EnthusiaTags/actions/workflows/build.yml)
+[![Codacy Badge](https://app.codacy.com/project/badge/Grade/9c192e33b3d94e69b212a465ffdc08fb)](https://app.codacy.com/gh/wsg138/EnthusiaTags/dashboard?utm_source=gh&utm_medium=referral&utm_content=&utm_campaign=Badge_grade)
+
+Tags, rewards, cosmetics, and daily-reward plugin with PlaceholderAPI and Vault economy integrations.
+
+| Download | Version | Runtime |
+| --- | --- | --- |
+| [EnthusiaTags.jar](https://github.com/wsg138/EnthusiaTags/releases/download/latest/EnthusiaTags.jar) | rolling `main` build (`2.1.0`) | Java 21, Paper/Leaf 1.21.11 |
+
+The `latest` download is rebuilt from `main` after every merged commit. Pull requests and branch pushes also run the full Maven test/package workflow and retain a downloadable Actions artifact.
+
 ## Reward configuration compatibility
 
 Upgrades preserve administrator-owned configuration. Existing values win, unknown rewards and tags
@@ -33,12 +44,15 @@ Latched achievements store their unlock marker before the notification is sent. 
 includes a permission-checked `/rewards open <reward-id>` link and a configurable subtle sound.
 Text and sound settings are in `messages.yml` and `config.yml`.
 
-[![Codacy Badge](https://app.codacy.com/project/badge/Grade/9c192e33b3d94e69b212a465ffdc08fb)](https://app.codacy.com/gh/wsg138/EnthusiaTags/dashboard?utm_source=gh&utm_medium=referral&utm_content=&utm_campaign=Badge_grade)
-
-Tags, rewards, and cosmetic menu plugin with PlaceholderAPI and economy integrations.
-
 ## Build
 
-```powershell
-mvn -q -DskipTests package
+Use JDK 21 and Maven:
+
+```bash
+mvn --batch-mode --no-transfer-progress clean test package
 ```
+
+The server-ready output is `target/EnthusiaTags.jar`.
+
+Every push and pull request runs the build workflow and uploads the JAR as a GitHub Actions artifact.
+Every push to `main` also replaces the rolling `latest` prerelease asset used by the download table.
