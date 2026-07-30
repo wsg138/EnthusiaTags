@@ -231,24 +231,12 @@ public final class ConfigMigrator {
             warnings.add(line);
         }
 
-        public List<String> backups() {
-            return List.copyOf(backups);
-        }
-
-        public List<String> added() {
-            return List.copyOf(added);
-        }
-
-        public List<String> migrated() {
-            return List.copyOf(migrated);
-        }
-
-        public List<String> warnings() {
-            return List.copyOf(warnings);
-        }
-
-        public boolean hasChanges() {
-            return !backups.isEmpty() || !added.isEmpty() || !migrated.isEmpty();
+        public List<String> summaryLines() {
+            List<String> lines = new ArrayList<>();
+            lines.add("config backups=" + backups.size() + ", migrated=" + migrated.size()
+                + ", added=" + added.size() + ", warnings=" + warnings.size());
+            lines.addAll(warnings);
+            return lines;
         }
     }
 }
