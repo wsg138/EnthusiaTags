@@ -1,0 +1,373 @@
+name: Apply reward Vault rebalance
+
+on:
+  push:
+    branches: [agent/reward-vault-rebalance]
+    paths: [.github/workflows/apply-reward-vault-rebalance.yml]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/reward-vault-rebalance
+          fetch-depth: 0
+
+      - name: Apply reward configuration and safety changes
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+
+          def replace_once(text, old, new, label):
+              if old not in text:
+                  raise SystemExit(f"Missing expected text for {label}")
+              return text.replace(old, new, 1)
+
+          def reward_bounds(lines, reward_id):
+              marker = f"  {reward_id}:\n"
+              try:
+                  start = lines.index(marker)
+              except ValueError as exc:
+                  raise SystemExit(f"Missing reward {reward_id}") from exc
+              end = len(lines)
+              for index in range(start + 1, len(lines)):
+                  if re.fullmatch(r"  [a-z0-9_]+:\n", lines[index]):
+                      end = index
+                      break
+              return start, end
+
+          def set_money_action(text, reward_id, action_id, amount):
+              lines = text.splitlines(keepends=True)
+              start, end = reward_bounds(lines, reward_id)
+              action_marker = f"      {action_id}:\n"
+              action_start = None
+              for index in range(start, end):
+                  if lines[index] == action_marker:
+                      action_start = index
+                      break
+              replacement = [
+                  action_marker,
+                  "        type: MONEY\n",
+                  f"        amount: {amount}\n",
+              ]
+              if action_start is None:
+                  lines[end:end] = replacement
+                  return "".join(lines)
+              action_end = end
+              for index in range(action_start + 1, end):
+                  if re.fullmatch(r"      [a-z0-9_-]+:\n", lines[index]):
+                      action_end = index
+                      break
+              lines[action_start:action_end] = replacement
+              return "".join(lines)
+
+          rewards_path = Path("src/main/resources/rewards.yml")
+          rewards = rewards_path.read_text()
+          rewards = replace_once(rewards, "config-version: 4\n", "config-version: 5\n", "rewards version")
+          for reward_id, action_id, amount in [
+              ("block_game_addict", "r2", 1500),
+              ("payday", "r1", 750),
+              ("high_roller", "r2", 3000),
+              ("diamond_hands", "r2", 1500),
+              ("warpath", "r2", 4000),
+              ("unstoppable", "r2", 5000),
+          ]:
+              rewards = set_money_action(rewards, reward_id, action_id, amount)
+          rewards_path.write_text(rewards)
+
+          messages_path = Path("src/main/resources/messages.yml")
+          messages = messages_path.read_text()
+          messages = replace_once(messages, "config-version: 2\n", "config-version: 3\n", "messages version")
+          messages = replace_once(
+              messages,
+              'rewards-rewards-line-money: "&7- &fMoney: &e{amount}"',
+              'rewards-rewards-line-money: "&7- &fRaw Gold: &e{amount}"',
+              "raw gold reward label",
+          )
+          messages_path.write_text(messages)
+
+          migrator_path = Path("src/main/java/org/enthusia/tags/ConfigMigrator.java")
+          migrator = migrator_path.read_text()
+          migrator = replace_once(
+              migrator,
+              "    private static final int REWARDS_CONFIG_VERSION = 4;\n",
+              "    private static final int REWARDS_CONFIG_VERSION = 5;\n"
+              "    private static final int MESSAGES_CONFIG_VERSION = 3;\n",
+              "migration versions",
+          )
+          migrator = replace_once(
+              migrator,
+              '        if ("rewards.yml".equals(resourceName)) {\n'
+              '            return REWARDS_CONFIG_VERSION;\n'
+              '        }\n',
+              '        if ("rewards.yml".equals(resourceName)) {\n'
+              '            return REWARDS_CONFIG_VERSION;\n'
+              '        }\n'
+              '        if ("messages.yml".equals(resourceName)) {\n'
+              '            return MESSAGES_CONFIG_VERSION;\n'
+              '        }\n',
+              "messages target version",
+          )
+          migrator = replace_once(
+              migrator,
+              '        if ("rewards.yml".equals(resourceName) && existingVersion < REWARDS_CONFIG_VERSION) {\n'
+              '            return migrateRewardValues(config, report);\n'
+              '        }\n',
+              '        if ("rewards.yml".equals(resourceName) && existingVersion < REWARDS_CONFIG_VERSION) {\n'
+              '            return migrateRewardValues(config, existingVersion, report);\n'
+              '        }\n'
+              '        if ("messages.yml".equals(resourceName) && existingVersion < MESSAGES_CONFIG_VERSION) {\n'
+              '            return migrateMessageValues(config, report);\n'
+              '        }\n',
+              "versioned reward and message migration",
+          )
+          old_method = '''    private boolean migrateRewardValues(YamlConfiguration config, MigrationReport report) {
+        boolean changed = false;
+        changed |= replaceRewardMoneyAmount(config, "rewards.payday.rewards.r1.amount", 500.0, 200.0, report);
+        changed |= replaceRewardMoneyAmount(config, "rewards.diamond_hands.rewards.r2.amount", 500.0, 200.0, report);
+        changed |= replaceExact(config, "rewards.diamond_hands.description",
+            List.of("&7Obtain 64 diamonds."), List.of("&7Mine 64 diamond or deepslate diamond ore."), report);
+        changed |= replaceExact(config, "rewards.diamond_hands.criteria.c1.key",
+            "diamonds_obtained", "diamond_ore_mined", report);
+        changed |= replaceExact(config, "rewards.fear_me.criteria.c1.type",
+            "DEATHS_TOTAL", "CUSTOM_COUNTER", report);
+        changed |= addFearMeCounterKey(config, report);
+        changed |= replaceExact(config, "rewards.i_swear_it_worked.description",
+            List.of("&7Die to your own explosion."), List.of("&7Die to an explosion."), report);
+        changed |= migrateStarterPackItem(config, report);
+        return changed;
+    }
+'''
+          new_method = '''    private boolean migrateRewardValues(YamlConfiguration config, int existingVersion,
+                                                MigrationReport report) {
+        boolean changed = false;
+        if (existingVersion < 4) {
+            changed |= replaceRewardMoneyAmount(config, "rewards.payday.rewards.r1.amount", 500.0, 200.0, report);
+            changed |= replaceRewardMoneyAmount(config, "rewards.diamond_hands.rewards.r2.amount", 500.0, 200.0, report);
+            changed |= replaceExact(config, "rewards.diamond_hands.description",
+                List.of("&7Obtain 64 diamonds."), List.of("&7Mine 64 diamond or deepslate diamond ore."), report);
+            changed |= replaceExact(config, "rewards.diamond_hands.criteria.c1.key",
+                "diamonds_obtained", "diamond_ore_mined", report);
+            changed |= replaceExact(config, "rewards.fear_me.criteria.c1.type",
+                "DEATHS_TOTAL", "CUSTOM_COUNTER", report);
+            changed |= addFearMeCounterKey(config, report);
+            changed |= replaceExact(config, "rewards.i_swear_it_worked.description",
+                List.of("&7Die to your own explosion."), List.of("&7Die to an explosion."), report);
+            changed |= migrateStarterPackItem(config, report);
+        }
+        if (existingVersion < 5) {
+            changed |= migrateMoneyAction(config, "rewards.block_game_addict.rewards.r2", 250D, 1500D, report);
+            changed |= migrateMoneyAction(config, "rewards.payday.rewards.r1", 200D, 750D, report);
+            changed |= migrateMoneyAction(config, "rewards.high_roller.rewards.r2", 2500D, 3000D, report);
+            changed |= migrateMoneyAction(config, "rewards.diamond_hands.rewards.r2", 200D, 1500D, report);
+            changed |= migrateMoneyAction(config, "rewards.warpath.rewards.r2", 1000D, 4000D, report);
+            changed |= migrateUnstoppableMoney(config, report);
+        }
+        return changed;
+    }
+
+    private boolean migrateMessageValues(YamlConfiguration config, MigrationReport report) {
+        return replaceExact(config, "rewards-rewards-line-money",
+            "&7- &fMoney: &e{amount}", "&7- &fRaw Gold: &e{amount}", report);
+    }
+
+    private boolean migrateMoneyAction(YamlConfiguration config, String path, double oldAmount,
+                                       double newAmount, MigrationReport report) {
+        String type = config.getString(path + ".type", "");
+        boolean unchangedMoney = "MONEY".equalsIgnoreCase(type)
+            && Double.compare(config.getDouble(path + ".amount"), oldAmount) == 0;
+        String material = config.getString(path + ".material", "");
+        boolean physicalGold = "ITEM".equalsIgnoreCase(type) && isPhysicalGold(material);
+        if (!unchangedMoney && !physicalGold) {
+            return false;
+        }
+        config.set(path + ".type", "MONEY");
+        config.set(path + ".amount", newAmount);
+        clearPath(config, path + ".id");
+        clearPath(config, path + ".material");
+        clearPath(config, path + ".label");
+        clearPath(config, path + ".display-name");
+        clearPath(config, path + ".lore");
+        report.migrated("rewards.yml: restored Vault raw-gold reward " + path + " -> " + newAmount);
+        return true;
+    }
+
+    private boolean migrateUnstoppableMoney(YamlConfiguration config, MigrationReport report) {
+        String path = "rewards.unstoppable.rewards.r2";
+        if (config.contains(path)) {
+            return migrateMoneyAction(config, path, 5000D, 5000D, report);
+        }
+        boolean unchangedTag = "TAG".equalsIgnoreCase(
+            config.getString("rewards.unstoppable.rewards.r1.type"))
+            && "unstoppable".equals(config.getString("rewards.unstoppable.rewards.r1.id"));
+        if (!unchangedTag) {
+            return false;
+        }
+        config.set(path + ".type", "MONEY");
+        config.set(path + ".amount", 5000D);
+        report.migrated("rewards.yml: added 5000 Vault raw gold to unchanged unstoppable reward");
+        return true;
+    }
+
+    private boolean isPhysicalGold(String material) {
+        return "GOLD_NUGGET".equalsIgnoreCase(material)
+            || "GOLD_INGOT".equalsIgnoreCase(material)
+            || "GOLD_BLOCK".equalsIgnoreCase(material)
+            || "RAW_GOLD".equalsIgnoreCase(material)
+            || "RAW_GOLD_BLOCK".equalsIgnoreCase(material);
+    }
+'''
+          migrator = replace_once(migrator, old_method, new_method, "reward migration method")
+          migrator_path.write_text(migrator)
+
+          service_path = Path("src/main/java/org/enthusia/tags/rewards/RewardService.java")
+          service = service_path.read_text()
+          service = replace_once(
+              service,
+              '            case MONEY -> !Double.isFinite(amount) || amount <= 0D\n'
+              '                ? "money amount must be finite and greater than zero" : null;\n',
+              '            case MONEY -> RewardMoneyPolicy.validationError(amount);\n',
+              "money validation policy",
+          )
+          service_path.write_text(service)
+
+          Path("src/main/java/org/enthusia/tags/rewards/RewardMoneyPolicy.java").write_text('''package org.enthusia.tags.rewards;
+
+final class RewardMoneyPolicy {
+    static final double MAX_AMOUNT = 5000D;
+
+    private RewardMoneyPolicy() {
+    }
+
+    static String validationError(double amount) {
+        if (!Double.isFinite(amount) || amount <= 0D) {
+            return "money amount must be finite and greater than zero";
+        }
+        if (amount > MAX_AMOUNT) {
+            return "money amount exceeds the 5000 raw-gold reward limit";
+        }
+        return null;
+    }
+}
+''')
+
+          Path("src/test/java/org/enthusia/tags/rewards/RewardMoneyPolicyTest.java").write_text('''package org.enthusia.tags.rewards;
+
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+
+import org.junit.jupiter.api.Test;
+
+class RewardMoneyPolicyTest {
+    @Test
+    void acceptsPositiveAmountsThroughTheMaximum() {
+        assertNull(RewardMoneyPolicy.validationError(1D));
+        assertNull(RewardMoneyPolicy.validationError(5000D));
+    }
+
+    @Test
+    void rejectsInvalidOrExcessiveAmounts() {
+        assertNotNull(RewardMoneyPolicy.validationError(0D));
+        assertNotNull(RewardMoneyPolicy.validationError(-1D));
+        assertNotNull(RewardMoneyPolicy.validationError(Double.NaN));
+        assertNotNull(RewardMoneyPolicy.validationError(Double.POSITIVE_INFINITY));
+        assertNotNull(RewardMoneyPolicy.validationError(5000.01D));
+    }
+}
+''')
+
+          Path("src/test/java/org/enthusia/tags/rewards/RewardConfigPolicyTest.java").write_text('''package org.enthusia.tags.rewards;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
+import java.util.Map;
+import java.util.Set;
+import org.bukkit.configuration.ConfigurationSection;
+import org.bukkit.configuration.file.YamlConfiguration;
+import org.junit.jupiter.api.Test;
+
+class RewardConfigPolicyTest {
+    private static final Map<String, Double> EXPECTED = Map.of(
+        "block_game_addict.r2", 1500D,
+        "payday.r1", 750D,
+        "high_roller.r2", 3000D,
+        "diamond_hands.r2", 1500D,
+        "warpath.r2", 4000D,
+        "unstoppable.r2", 5000D
+    );
+    private static final Set<String> PHYSICAL_GOLD = Set.of(
+        "GOLD_NUGGET", "GOLD_INGOT", "GOLD_BLOCK", "RAW_GOLD", "RAW_GOLD_BLOCK"
+    );
+
+    @Test
+    void bundledCurrencyRewardsUseVaultMoneyActions() throws Exception {
+        YamlConfiguration config;
+        try (var stream = getClass().getClassLoader().getResourceAsStream("rewards.yml")) {
+            assertNotNull(stream);
+            config = YamlConfiguration.loadConfiguration(
+                new InputStreamReader(stream, StandardCharsets.UTF_8));
+        }
+
+        for (Map.Entry<String, Double> expected : EXPECTED.entrySet()) {
+            String path = "rewards." + expected.getKey();
+            assertEquals("MONEY", config.getString(path + ".type"));
+            assertEquals(expected.getValue(), config.getDouble(path + ".amount"));
+        }
+
+        ConfigurationSection rewards = config.getConfigurationSection("rewards");
+        assertNotNull(rewards);
+        for (String rewardId : rewards.getKeys(false)) {
+            ConfigurationSection actions = config.getConfigurationSection("rewards." + rewardId + ".rewards");
+            if (actions == null) {
+                continue;
+            }
+            for (String actionId : actions.getKeys(false)) {
+                String path = actions.getCurrentPath() + "." + actionId;
+                String type = config.getString(path + ".type", "");
+                if ("MONEY".equals(type)) {
+                    double amount = config.getDouble(path + ".amount");
+                    assertTrue(amount > 0D && amount <= RewardMoneyPolicy.MAX_AMOUNT, path);
+                }
+                if ("ITEM".equals(type)) {
+                    assertFalse(PHYSICAL_GOLD.contains(config.getString(path + ".material", "")), path);
+                }
+            }
+        }
+    }
+}
+''')
+
+          readme_path = Path("README.md")
+          readme = readme_path.read_text()
+          marker = "## Daily rewards\n"
+          addition = (
+              "## Achievement reward currency\n\n"
+              "Achievement actions configured as `MONEY` are deposited through Vault and displayed as raw gold; "
+              "they never deliver gold ingots or raw-gold items. Bundled achievement payouts range from 750 to "
+              "5,000 raw gold, with 5,000 enforced as the absolute per-action maximum. Existing version-4 bundled "
+              "money actions and known physical-gold replacements are migrated to the Vault-backed version-5 values.\n\n"
+          )
+          if marker not in readme:
+              raise SystemExit("README daily section marker missing")
+          readme = readme.replace(marker, addition + marker, 1)
+          readme_path.write_text(readme)
+
+          Path(".github/workflows/apply-reward-vault-rebalance.yml").unlink()
+
+      - name: Commit and push final changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add README.md src/main src/test .github/workflows/apply-reward-vault-rebalance.yml
+          git commit -m "Restore Vault reward payouts and rebalance raw gold"
+          git push origin HEAD:agent/reward-vault-rebalance
