@@ -28,6 +28,23 @@ jobs:
       - name: Test and package
         run: mvn --batch-mode --no-transfer-progress clean test package
 
+      - name: Report Codacy PR issues
+        if: github.event_name == 'pull_request'
+        shell: bash
+        run: |
+          endpoint="https://api.codacy.com/api/v3/analysis/organizations/gh/wsg138/repositories/EnthusiaTags/pull-requests/${{ github.event.pull_request.number }}/issues?status=new&limit=100"
+          for attempt in {1..30}; do
+            response="$(curl --fail --silent --show-error --header 'Accept: application/json' "$endpoint")"
+            analyzed="$(jq -r '.analyzed // false' <<<"$response")"
+            if [[ "$analyzed" == "true" ]]; then
+              jq '.' <<<"$response"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "Codacy did not finish analysis during the diagnostic window."
+          exit 1
+
       - name: Upload plugin JAR
         uses: actions/upload-artifact@v4
         with:
