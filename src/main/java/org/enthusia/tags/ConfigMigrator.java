@@ -5,6 +5,7 @@ import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.plugin.java.JavaPlugin;
 
 import java.io.File;
+import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -15,7 +16,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 public final class ConfigMigrator {
-    public static final int CURRENT_CONFIG_VERSION = 3;
+    public static final int CURRENT_CONFIG_VERSION = 4;
     private static final int REWARDS_CONFIG_VERSION = 4;
     private static final DateTimeFormatter BACKUP_FORMAT = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
 
@@ -65,7 +66,7 @@ public final class ConfigMigrator {
             if (changed) {
                 config.save(file);
             }
-        } catch (Exception ex) {
+        } catch (IOException | IllegalArgumentException | SecurityException ex) {
             report.warning(resourceName + ": migration failed: " + ex.getMessage());
         }
     }
@@ -80,43 +81,73 @@ public final class ConfigMigrator {
         return defaults.getInt("config-version", CURRENT_CONFIG_VERSION);
     }
 
-    private boolean migrateKnownValues(String resourceName,
-                                       YamlConfiguration config,
-                                       int existingVersion,
-                                       MigrationReport report) {
-        boolean changed = false;
-        if ("config.yml".equals(resourceName) && existingVersion < CURRENT_CONFIG_VERSION) {
-            changed |= migrateInvisibilityDefault(config, report);
+    private boolean migrateKnownValues(String resourceName, YamlConfiguration config,
+                                       int existingVersion, MigrationReport report) {
+        if ("config.yml".equals(resourceName)) {
+            return migrateConfigValues(config, existingVersion, report);
         }
         if ("rewards.yml".equals(resourceName) && existingVersion < REWARDS_CONFIG_VERSION) {
-            changed |= replaceRewardMoneyAmount(config, "rewards.payday.rewards.r1.amount", 500.0, 200.0, report);
-            changed |= replaceRewardMoneyAmount(config, "rewards.diamond_hands.rewards.r2.amount", 500.0, 200.0, report);
-            changed |= replaceExact(config, "rewards.diamond_hands.description",
-                List.of("&7Obtain 64 diamonds."), List.of("&7Mine 64 diamond or deepslate diamond ore."), report);
-            changed |= replaceExact(config, "rewards.diamond_hands.criteria.c1.key",
-                "diamonds_obtained", "diamond_ore_mined", report);
-            changed |= replaceExact(config, "rewards.fear_me.criteria.c1.type",
-                "DEATHS_TOTAL", "CUSTOM_COUNTER", report);
-            if ("CUSTOM_COUNTER".equals(config.getString("rewards.fear_me.criteria.c1.type"))
-                && !config.contains("rewards.fear_me.criteria.c1.key")) {
-                config.set("rewards.fear_me.criteria.c1.key", "pvp_deaths");
-                report.migrated("rewards.yml: corrected default fear_me counter");
-                changed = true;
-            }
-            changed |= replaceExact(config, "rewards.i_swear_it_worked.description",
-                List.of("&7Die to your own explosion."), List.of("&7Die to an explosion."), report);
-            if ("COMMAND".equalsIgnoreCase(config.getString("rewards.starter_pack.rewards.r1.type"))
-                && "give {player} golden_apple 2".equals(config.getString("rewards.starter_pack.rewards.r1.id"))
-                && "Starter Pack (2 Golden Apples)".equals(config.getString("rewards.starter_pack.rewards.r1.label"))) {
-                config.set("rewards.starter_pack.rewards.r1.type", "ITEM");
-                config.set("rewards.starter_pack.rewards.r1.id", null);
-                config.set("rewards.starter_pack.rewards.r1.material", "GOLDEN_APPLE");
-                config.set("rewards.starter_pack.rewards.r1.amount", 2);
-                report.migrated("rewards.yml: migrated unchanged starter_pack command to ITEM");
-                changed = true;
-            }
+            return migrateRewardValues(config, report);
+        }
+        return false;
+    }
+
+    private boolean migrateConfigValues(YamlConfiguration config, int existingVersion,
+                                        MigrationReport report) {
+        boolean changed = false;
+        if (existingVersion < 3) {
+            changed |= migrateInvisibilityDefault(config, report);
+        }
+        if (existingVersion < 4) {
+            changed |= removeDeprecated(config, "daily.animation.default-player-preference", report);
+            changed |= removeDeprecated(config, "daily.animation.duration-ticks", report);
         }
         return changed;
+    }
+
+    private boolean migrateRewardValues(YamlConfiguration config, MigrationReport report) {
+        boolean changed = false;
+        changed |= replaceRewardMoneyAmount(config, "rewards.payday.rewards.r1.amount", 500.0, 200.0, report);
+        changed |= replaceRewardMoneyAmount(config, "rewards.diamond_hands.rewards.r2.amount", 500.0, 200.0, report);
+        changed |= replaceExact(config, "rewards.diamond_hands.description",
+            List.of("&7Obtain 64 diamonds."), List.of("&7Mine 64 diamond or deepslate diamond ore."), report);
+        changed |= replaceExact(config, "rewards.diamond_hands.criteria.c1.key",
+            "diamonds_obtained", "diamond_ore_mined", report);
+        changed |= replaceExact(config, "rewards.fear_me.criteria.c1.type",
+            "DEATHS_TOTAL", "CUSTOM_COUNTER", report);
+        changed |= addFearMeCounterKey(config, report);
+        changed |= replaceExact(config, "rewards.i_swear_it_worked.description",
+            List.of("&7Die to your own explosion."), List.of("&7Die to an explosion."), report);
+        changed |= migrateStarterPackItem(config, report);
+        return changed;
+    }
+
+    private boolean addFearMeCounterKey(YamlConfiguration config, MigrationReport report) {
+        if (!"CUSTOM_COUNTER".equals(config.getString("rewards.fear_me.criteria.c1.type"))
+            || config.contains("rewards.fear_me.criteria.c1.key")) {
+            return false;
+        }
+        config.set("rewards.fear_me.criteria.c1.key", "pvp_deaths");
+        report.migrated("rewards.yml: corrected default fear_me counter");
+        return true;
+    }
+
+    private boolean migrateStarterPackItem(YamlConfiguration config, MigrationReport report) {
+        boolean unchangedCommand = "COMMAND".equalsIgnoreCase(
+            config.getString("rewards.starter_pack.rewards.r1.type"));
+        boolean unchangedId = "give {player} golden_apple 2".equals(
+            config.getString("rewards.starter_pack.rewards.r1.id"));
+        boolean unchangedLabel = "Starter Pack (2 Golden Apples)".equals(
+            config.getString("rewards.starter_pack.rewards.r1.label"));
+        if (!unchangedCommand || !unchangedId || !unchangedLabel) {
+            return false;
+        }
+        config.set("rewards.starter_pack.rewards.r1.type", "ITEM");
+        clearPath(config, "rewards.starter_pack.rewards.r1.id");
+        config.set("rewards.starter_pack.rewards.r1.material", "GOLDEN_APPLE");
+        config.set("rewards.starter_pack.rewards.r1.amount", 2);
+        report.migrated("rewards.yml: migrated unchanged starter_pack command to ITEM");
+        return true;
     }
 
     private boolean replaceExact(YamlConfiguration config, String path, Object oldValue,
@@ -135,6 +166,19 @@ public final class ConfigMigrator {
         config.set(path, true);
         report.migrated("config.yml: " + path + " false -> true");
         return true;
+    }
+
+    private boolean removeDeprecated(YamlConfiguration config, String path, MigrationReport report) {
+        if (!config.contains(path)) return false;
+        clearPath(config, path);
+        report.migrated("config.yml: removed deprecated key " + path);
+        return true;
+    }
+
+    @SuppressWarnings("PMD.NullAssignment")
+    private void clearPath(YamlConfiguration config, String path) {
+        // Bukkit's Configuration API removes a key by assigning null.
+        config.set(path, null);
     }
 
     private boolean replaceRewardMoneyAmount(YamlConfiguration config,
@@ -184,7 +228,7 @@ public final class ConfigMigrator {
         return "config.yml".equals(resourceName) && path.startsWith("tags.");
     }
 
-    private void backup(File file, String resourceName, MigrationReport report) throws Exception {
+    private void backup(File file, String resourceName, MigrationReport report) throws IOException {
         File backupDir = new File(plugin.getDataFolder(), "backups");
         if (!backupDir.exists() && !backupDir.mkdirs()) {
             report.warning(resourceName + ": failed to create backup directory");

@@ -1,4 +1,4 @@
-config-version: 3
+config-version: 4
 
 # Format shown above the player. `{tag}` is replaced with the configured tag text.
 line-format: "&7[{tag}&7]"
@@ -63,10 +63,29 @@ debug:
 daily:
   timezone: "America/Indiana/Indianapolis"
   payouts: [5, 10, 15, 20, 30, 40, 50]
+
+  # Plays when /daily is opened. This is a global server option, not a player GUI toggle.
   animation:
     enabled: true
-    default-player-preference: true
-    duration-ticks: 15
+    frames: 18
+    frame-ticks: 2
+    sound:
+      enabled: true
+      step-sound: "BLOCK_NOTE_BLOCK_HAT"
+      accent-sound: "BLOCK_NOTE_BLOCK_CHIME"
+      volume: 0.35
+      starting-pitch: 0.72
+      pitch-step: 0.055
+      final-sound: "BLOCK_AMETHYST_BLOCK_CHIME"
+      final-volume: 0.65
+      final-pitch: 1.2
+
+  # Short confirmation sound after a successful claim.
+  claim-sound:
+    enabled: true
+    sound: "ENTITY_EXPERIENCE_ORB_PICKUP"
+    volume: 0.7
+    pitch: 1.25
 
 tags:
   beta_tester:
