@@ -1,7 +1,7 @@
 package org.enthusia.tags.daily;
 
 final class DailyAnimationPlan {
-    private static final int BORDER_LENGTH = 24;
+    static final int BORDER_RING_LENGTH = 24;
 
     private DailyAnimationPlan() {
     }
@@ -19,7 +19,7 @@ final class DailyAnimationPlan {
             ? 0 : Math.min(DailyMenuModel.TRACK_LENGTH, Math.max(0, (frame - 1) / 2));
         int progressSegments = Math.min(DailyMenuModel.TRACK_LENGTH,
             1 + (frame * DailyMenuModel.TRACK_LENGTH / (totalFrames - 1)));
-        int borderHead = frame * (BORDER_LENGTH - 1) / (totalFrames - 1);
+        int borderHead = frame * (BORDER_RING_LENGTH - 1) / (totalFrames - 1);
         CenterStage centerStage = centerStage(frame, totalFrames);
 
         return new Frame(frame, borderHead, revealedDays, progressSegments,
