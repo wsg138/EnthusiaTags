@@ -17,7 +17,7 @@ import java.util.List;
 
 public final class ConfigMigrator {
     public static final int CURRENT_CONFIG_VERSION = 4;
-    private static final int REWARDS_CONFIG_VERSION = 4;
+    private static final int REWARDS_CONFIG_VERSION = 5;
     private static final DateTimeFormatter BACKUP_FORMAT = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
 
     private final JavaPlugin plugin;
@@ -87,7 +87,14 @@ public final class ConfigMigrator {
             return migrateConfigValues(config, existingVersion, report);
         }
         if ("rewards.yml".equals(resourceName) && existingVersion < REWARDS_CONFIG_VERSION) {
-            return migrateRewardValues(config, report);
+            boolean changed = existingVersion < 4 && migrateRewardValues(config, report);
+            if (existingVersion < 5) {
+                changed |= RewardConfigV5Migration.migrateRewards(config, report);
+            }
+            return changed;
+        }
+        if ("messages.yml".equals(resourceName) && existingVersion < 3) {
+            return RewardConfigV5Migration.migrateMessages(config, report);
         }
         return false;
     }
