@@ -15,8 +15,14 @@ The `latest` download is rebuilt from `main` after every merged commit. Pull req
 
 Upgrades preserve administrator-owned configuration. Existing values win, unknown rewards and tags
 are retained, and missing bundled reward or tag entries are not forced into an existing collection.
-`rewards.yml` version 4 only changes a known field when its complete old bundled value is still
-present. Structural migrations create a timestamped backup in `plugins/EnthusiaTags/backups`.
+`rewards.yml` version 5 changes only recognized unchanged payout values and known physical-gold
+reward actions. Structural migrations create a timestamped backup in `plugins/EnthusiaTags/backups`.
+
+The bundled configuration contains 100 rewards. Currency actions use `type: MONEY`, are deposited
+through Vault, and are displayed as raw gold. Achievement rewards never deliver gold nuggets,
+ingots, blocks, raw-gold items, or raw-gold blocks as currency. The bundled payout scale ranges from
+50 to 5,000 raw gold, and the loader rejects any money action above the 5,000 per-action maximum.
+Only Two Thousand Hours, Ten Million Steps, and Ultimate Survivor use the maximum.
 
 ## Daily rewards
 

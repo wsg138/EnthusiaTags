@@ -1,4 +1,4 @@
-config-version: 4
+config-version: 5
 
 placeholders:
   # Placeholder fallback values. These are only used if
@@ -32,11 +32,84 @@ categories:
   economy:
     name: "&6Economy"
     icon: "GOLD_INGOT"
+  exploration:
+    name: "&3Exploration"
+    icon: "COMPASS"
   misc:
     name: "&dMisc"
     icon: "NAME_TAG"
 underground-max-y: 56
 rewards:
+  first_hour:
+    name: '&aFirst Hour'
+    description:
+      - '&7Spend your first hour on the server.'
+    icon: CLOCK
+    category: playtime
+    criteria:
+      time:
+        type: PLAYTIME_TOTAL_MINUTES
+        amount: 60
+    rewards:
+      payout:
+        type: MONEY
+        amount: 50
+  payday:
+    name: "&aPayday"
+    description:
+      - "&7Play 5 hours total."
+    icon: "SUNFLOWER"
+    criteria:
+      c1:
+        type: PLAYTIME_TOTAL_MINUTES
+        amount: 300
+    rewards:
+      r1:
+        type: MONEY
+        amount: 150
+    category: playtime
+  rep_unlock:
+    name: "&dReputation Unlocked"
+    description:
+      - "&7Unlock reputation system."
+    icon: "BOOK"
+    criteria:
+      c1:
+        type: PLAYTIME_ACTIVE_MINUTES
+        amount: 300
+    rewards:
+      r1:
+        type: COMMAND
+        id: "lp user %player% permission set reps.add true"
+    category: playtime
+  market_access:
+    name: "&eMarket Access"
+    description:
+      - "&7Unlock stall access."
+    icon: "LECTERN"
+    criteria:
+      c1:
+        type: PLAYTIME_TOTAL_MINUTES
+        amount: 600
+    rewards:
+      r1:
+        type: COMMAND
+        id: "lp user %player% permission set arm.member.limit.market1 true"
+    category: playtime
+  regular_player:
+    name: '&bRegular Player'
+    description:
+      - '&7Reach 10 hours of active playtime.'
+    icon: CLOCK
+    category: playtime
+    criteria:
+      time:
+        type: PLAYTIME_ACTIVE_MINUTES
+        amount: 600
+    rewards:
+      payout:
+        type: MONEY
+        amount: 250
   block_game_addict:
     name: "&bBlock Game Addict"
     description:
@@ -52,20 +125,177 @@ rewards:
         id: block_game_addict
       r2:
         type: MONEY
-        amount: 250
-  payday:
-    name: "&aPayday"
+        amount: 500
+    category: playtime
+  dedicated_player:
+    name: '&dDedicated Player'
     description:
-      - "&7Play 5 hours total."
-    icon: "SUNFLOWER"
+      - '&7Reach 50 hours of active playtime.'
+    icon: CLOCK
+    category: playtime
+    criteria:
+      time:
+        type: PLAYTIME_ACTIVE_MINUTES
+        amount: 3000
+    rewards:
+      payout:
+        type: MONEY
+        amount: 750
+  no_life:
+    name: "&5No Life"
+    description:
+      - "&7Play 72 hours of active time."
+    icon: "CLOCK"
     criteria:
       c1:
-        type: PLAYTIME_TOTAL_MINUTES
-        amount: 300
+        type: PLAYTIME_ACTIVE_MINUTES
+        amount: 4320
     rewards:
       r1:
+        type: TAG
+        id: no_life
+    category: playtime
+  grass_never:
+    name: "&2Grass? Never Heard of It"
+    description:
+      - "&7Play 120 hours of active time."
+    icon: "CLOCK"
+    criteria:
+      c1:
+        type: PLAYTIME_ACTIVE_MINUTES
+        amount: 7200
+    rewards:
+      r1:
+        type: TAG
+        id: grass_never
+    category: playtime
+  touch_grass_failed:
+    name: "&aTouch Grass Challenge (Failed)"
+    description:
+      - "&7Play 200 hours of active time."
+    icon: "CLOCK"
+    criteria:
+      c1:
+        type: PLAYTIME_ACTIVE_MINUTES
+        amount: 12000
+    rewards:
+      r1:
+        type: TAG
+        id: touch_grass_failed
+    category: playtime
+  my_life_now:
+    name: "&dThis Is My Life Now"
+    description:
+      - "&7Play 300 hours of active time."
+    icon: "CLOCK"
+    criteria:
+      c1:
+        type: PLAYTIME_ACTIVE_MINUTES
+        amount: 18000
+    rewards:
+      r1:
+        type: TAG
+        id: my_life_now
+    category: playtime
+  server_home:
+    name: "&6This Server Is My Home"
+    description:
+      - "&7Play 500 hours of active time."
+    icon: "CLOCK"
+    criteria:
+      c1:
+        type: PLAYTIME_ACTIVE_MINUTES
+        amount: 30000
+    rewards:
+      r1:
+        type: TAG
+        id: server_home
+    category: playtime
+  thousand_hour_club:
+    name: '&5Thousand Hour Club'
+    description:
+      - '&7Reach 1,000 hours of active playtime.'
+    icon: AMETHYST_SHARD
+    category: playtime
+    criteria:
+      time:
+        type: PLAYTIME_ACTIVE_MINUTES
+        amount: 60000
+    rewards:
+      payout:
         type: MONEY
-        amount: 200
+        amount: 3000
+      item:
+        type: ITEM
+        material: DIAMOND
+        amount: 8
+        label: 1,000-hour bonus
+  two_thousand_hours:
+    name: '&5&lTwo Thousand Hours'
+    description:
+      - '&7Reach 2,000 hours of active playtime.'
+    icon: NETHER_STAR
+    category: playtime
+    criteria:
+      time:
+        type: PLAYTIME_ACTIVE_MINUTES
+        amount: 120000
+    rewards:
+      payout:
+        type: MONEY
+        amount: 5000
+      item:
+        type: ITEM
+        material: DIAMOND
+        amount: 16
+        label: 2,000-hour bonus
+  marathon_session:
+    name: '&6Marathon Session'
+    description:
+      - '&7Stay active for 6 consecutive hours.'
+    icon: HONEY_BOTTLE
+    category: playtime
+    criteria:
+      time:
+        type: PLAYTIME_CONSECUTIVE_ACTIVE_MINUTES
+        amount: 360
+    rewards:
+      payout:
+        type: MONEY
+        amount: 250
+      item:
+        type: ITEM
+        material: GOLDEN_APPLE
+        amount: 2
+        label: Marathon supplies
+  sleeps_in_minecraft:
+    name: "&3Sleeps in Minecraft"
+    description:
+      - "&7Reach 12 consecutive hours of active time."
+    icon: "CLOCK"
+    criteria:
+      c1:
+        type: PLAYTIME_CONSECUTIVE_ACTIVE_MINUTES
+        amount: 720
+    rewards:
+      r1:
+        type: TAG
+        id: sleeps_in_minecraft
+    category: playtime
+  deep_dweller:
+    name: '&8Deep Dweller'
+    description:
+      - '&7Spend 30 active hours underground.'
+    icon: SCULK
+    category: playtime
+    criteria:
+      time:
+        type: UNDERGROUND_ACTIVE_MINUTES
+        amount: 1800
+    rewards:
+      payout:
+        type: MONEY
+        amount: 500
   starter_pack:
     name: "&dStarter Pack"
     description:
@@ -82,187 +312,7 @@ rewards:
         material: GOLDEN_APPLE
         amount: 2
         label: "Starter Pack (2 Golden Apples)"
-  trail_starter:
-    name: "&bTrail Starter"
-    description:
-      - "&7Walk 20,000 blocks."
-    icon: "FEATHER"
-    category: "misc"
-    criteria:
-      c1:
-        type: STEPS_WALKED
-        amount: 20000
-    rewards:
-      r1:
-        type: COMMAND
-        id: "lp user %player% permission set enthusia.cosmetics.trail_mist true"
-        label: "Mist Trail Cosmetic"
-  kill_sparks_reward:
-    name: "&cFirst Blood FX"
-    description:
-      - "&7Get 10 player kills."
-    icon: "BLAZE_POWDER"
-    category: "combat"
-    criteria:
-      c1:
-        type: KILLS_TOTAL
-        amount: 10
-    rewards:
-      r1:
-        type: COMMAND
-        id: "lp user %player% permission set enthusia.cosmetics.kill_sparks true"
-        label: "Sparks Kill Effect"
-  proj_spark_reward:
-    name: "&dArrow Flair"
-    description:
-      - "&7Hit 50 projectile shots."
-    icon: "ARROW"
-    category: "combat"
-    criteria:
-      c1:
-        type: CUSTOM_COUNTER
-        key: projectile_hits
-        amount: 50
-    rewards:
-      r1:
-        type: COMMAND
-        id: "lp user %player% permission set enthusia.cosmetics.proj_spark true"
-        label: "Spark Shot Projectiles"
-  km_gg_reward:
-    name: "&aGG Messages"
-    description:
-      - "&7Win 5 fights."
-    icon: "PAPER"
-    category: "combat"
-    criteria:
-      c1:
-        type: KILLS_TOTAL
-        amount: 5
-    rewards:
-      r1:
-        type: COMMAND
-        id: "lp user %player% permission set enthusia.cosmetics.km_gg true"
-        label: "GG Kill Message"
-  high_roller:
-    name: "&6High Roller"
-    description:
-      - "&7Hold 100,000 currency."
-    icon: "GOLD_BLOCK"
-    criteria:
-      c1:
-        type: BALANCE_AT_LEAST
-        amount: 100000
-    rewards:
-      r1:
-        type: TAG
-        id: high_roller
-      r2:
-        type: MONEY
-        amount: 2500
-  market_access:
-    name: "&eMarket Access"
-    description:
-      - "&7Unlock stall access."
-    icon: "LECTERN"
-    criteria:
-      c1:
-        type: PLAYTIME_TOTAL_MINUTES
-        amount: 600
-    rewards:
-      r1:
-        type: COMMAND
-        id: "lp user %player% permission set arm.member.limit.market1 true"
-  rep_unlock:
-    name: "&dReputation Unlocked"
-    description:
-      - "&7Unlock reputation system."
-    icon: "BOOK"
-    criteria:
-      c1:
-        type: PLAYTIME_ACTIVE_MINUTES
-        amount: 300
-    rewards:
-      r1:
-        type: COMMAND
-        id: "lp user %player% permission set reps.add true"
-  no_life:
-    name: "&5No Life"
-    description:
-      - "&7Play 72 hours of active time."
-    icon: "CLOCK"
-    criteria:
-      c1:
-        type: PLAYTIME_ACTIVE_MINUTES
-        amount: 4320
-    rewards:
-      r1:
-        type: TAG
-        id: no_life
-  grass_never:
-    name: "&2Grass? Never Heard of It"
-    description:
-      - "&7Play 120 hours of active time."
-    icon: "CLOCK"
-    criteria:
-      c1:
-        type: PLAYTIME_ACTIVE_MINUTES
-        amount: 7200
-    rewards:
-      r1:
-        type: TAG
-        id: grass_never
-  touch_grass_failed:
-    name: "&aTouch Grass Challenge (Failed)"
-    description:
-      - "&7Play 200 hours of active time."
-    icon: "CLOCK"
-    criteria:
-      c1:
-        type: PLAYTIME_ACTIVE_MINUTES
-        amount: 12000
-    rewards:
-      r1:
-        type: TAG
-        id: touch_grass_failed
-  my_life_now:
-    name: "&dThis Is My Life Now"
-    description:
-      - "&7Play 300 hours of active time."
-    icon: "CLOCK"
-    criteria:
-      c1:
-        type: PLAYTIME_ACTIVE_MINUTES
-        amount: 18000
-    rewards:
-      r1:
-        type: TAG
-        id: my_life_now
-  server_home:
-    name: "&6This Server Is My Home"
-    description:
-      - "&7Play 500 hours of active time."
-    icon: "CLOCK"
-    criteria:
-      c1:
-        type: PLAYTIME_ACTIVE_MINUTES
-        amount: 30000
-    rewards:
-      r1:
-        type: TAG
-        id: server_home
-  sleeps_in_minecraft:
-    name: "&3Sleeps in Minecraft"
-    description:
-      - "&7Reach 12 consecutive hours of active time."
-    icon: "CLOCK"
-    criteria:
-      c1:
-        type: PLAYTIME_CONSECUTIVE_ACTIVE_MINUTES
-        amount: 720
-    rewards:
-      r1:
-        type: TAG
-        id: sleeps_in_minecraft
+    category: mining
   tree_puncher:
     name: "&aProfessional Tree Puncher"
     description:
@@ -278,21 +328,6 @@ rewards:
       r1:
         type: TAG
         id: tree_puncher
-  industrial_lumberjack:
-    name: "&2Industrial Lumberjack"
-    description:
-      - "&7Mine 5000 logs."
-    icon: "OAK_LOG"
-    category: "mining"
-    criteria:
-      c1:
-        type: CUSTOM_COUNTER
-        key: logs_mined
-        amount: 5000
-    rewards:
-      r1:
-        type: TAG
-        id: industrial_lumberjack
   dirt_collector:
     name: "&6Certified Dirt Collector"
     description:
@@ -323,6 +358,87 @@ rewards:
       r1:
         type: TAG
         id: stone_age
+  deepslate_dedication:
+    name: '&8Deepslate Dedication'
+    description:
+      - '&7Mine 100,000 deepslate.'
+    icon: DEEPSLATE
+    category: mining
+    criteria:
+      blocks:
+        type: BLOCK_MINED
+        source: bukkit_stat_material
+        statistic: MINE_BLOCK
+        material: DEEPSLATE
+        amount: 100000
+    rewards:
+      payout:
+        type: MONEY
+        amount: 1500
+      item:
+        type: ITEM
+        material: DIAMOND
+        amount: 4
+        label: 8Deepslate Dedication bonus
+  industrial_lumberjack:
+    name: "&2Industrial Lumberjack"
+    description:
+      - "&7Mine 5000 logs."
+    icon: "OAK_LOG"
+    category: "mining"
+    criteria:
+      c1:
+        type: CUSTOM_COUNTER
+        key: logs_mined
+        amount: 5000
+    rewards:
+      r1:
+        type: TAG
+        id: industrial_lumberjack
+  coal_miner:
+    name: '&8Coal Miner'
+    description:
+      - '&7Mine 1,000 coal ore.'
+    icon: COAL_ORE
+    category: mining
+    criteria:
+      blocks:
+        type: BLOCK_MINED
+        source: bukkit_stat_material
+        statistic: MINE_BLOCK
+        material: COAL_ORE
+        amount: 1000
+    rewards:
+      payout:
+        type: MONEY
+        amount: 150
+      item:
+        type: ITEM
+        material: COAL
+        amount: 32
+        label: 8Coal Miner bonus
+  deep_coal_miner:
+    name: '&8Deep Coal Miner'
+    description:
+      - '&7Mine 1,000 deepslate coal ore.'
+    icon: DEEPSLATE_COAL_ORE
+    category: mining
+    criteria:
+      blocks:
+        type: BLOCK_MINED
+        source: bukkit_stat_material
+        statistic: MINE_BLOCK
+        material: DEEPSLATE_COAL_ORE
+        amount: 1000
+    rewards:
+      payout:
+        type: MONEY
+        amount: 250
+      item:
+        type: ITEM
+        material: COAL
+        amount: 32
+        label: 8Deep Coal Miner bonus
   iron_deficiency:
     name: "&fIron Deficiency"
     description:
@@ -338,6 +454,106 @@ rewards:
       r1:
         type: TAG
         id: iron_deficiency
+  lapis_hoarder:
+    name: '&9Lapis Hoarder'
+    description:
+      - '&7Mine 1,000 lapis ore.'
+    icon: LAPIS_ORE
+    category: mining
+    criteria:
+      blocks:
+        type: BLOCK_MINED
+        source: bukkit_stat_material
+        statistic: MINE_BLOCK
+        material: LAPIS_ORE
+        amount: 1000
+    rewards:
+      payout:
+        type: MONEY
+        amount: 250
+      item:
+        type: ITEM
+        material: LAPIS_LAZULI
+        amount: 32
+        label: 9Lapis Hoarder bonus
+  redstone_engineer:
+    name: '&cRedstone Engineer'
+    description:
+      - '&7Mine 5,000 redstone ore.'
+    icon: REDSTONE_ORE
+    category: mining
+    criteria:
+      blocks:
+        type: BLOCK_MINED
+        source: bukkit_stat_material
+        statistic: MINE_BLOCK
+        material: REDSTONE_ORE
+        amount: 5000
+    rewards:
+      payout:
+        type: MONEY
+        amount: 500
+      item:
+        type: ITEM
+        material: REDSTONE
+        amount: 64
+        label: cRedstone Engineer bonus
+  deep_redstone_engineer:
+    name: '&4Deep Redstone Engineer'
+    description:
+      - '&7Mine 5,000 deepslate redstone ore.'
+    icon: DEEPSLATE_REDSTONE_ORE
+    category: mining
+    criteria:
+      blocks:
+        type: BLOCK_MINED
+        source: bukkit_stat_material
+        statistic: MINE_BLOCK
+        material: DEEPSLATE_REDSTONE_ORE
+        amount: 5000
+    rewards:
+      payout:
+        type: MONEY
+        amount: 650
+      item:
+        type: ITEM
+        material: REDSTONE
+        amount: 64
+        label: 4Deep Redstone Engineer bonus
+  gold_rush:
+    name: '&6Gold Rush'
+    description:
+      - '&7Mine 1,000 gold ore.'
+    icon: GOLD_ORE
+    category: mining
+    criteria:
+      blocks:
+        type: BLOCK_MINED
+        source: bukkit_stat_material
+        statistic: MINE_BLOCK
+        material: GOLD_ORE
+        amount: 1000
+    rewards:
+      payout:
+        type: MONEY
+        amount: 400
+  deep_gold_rush:
+    name: '&6Deep Gold Rush'
+    description:
+      - '&7Mine 1,000 deepslate gold ore.'
+    icon: DEEPSLATE_GOLD_ORE
+    category: mining
+    criteria:
+      blocks:
+        type: BLOCK_MINED
+        source: bukkit_stat_material
+        statistic: MINE_BLOCK
+        material: DEEPSLATE_GOLD_ORE
+        amount: 1000
+    rewards:
+      payout:
+        type: MONEY
+        amount: 500
   diamond_hands:
     name: "&bDiamond Hands"
     description:
@@ -355,7 +571,51 @@ rewards:
         id: diamond_hands
       r2:
         type: MONEY
-        amount: 200
+        amount: 750
+  emerald_hunter:
+    name: '&aEmerald Hunter'
+    description:
+      - '&7Mine 100 emerald ore.'
+    icon: EMERALD_ORE
+    category: mining
+    criteria:
+      blocks:
+        type: BLOCK_MINED
+        source: bukkit_stat_material
+        statistic: MINE_BLOCK
+        material: EMERALD_ORE
+        amount: 100
+    rewards:
+      payout:
+        type: MONEY
+        amount: 500
+      item:
+        type: ITEM
+        material: EMERALD
+        amount: 8
+        label: aEmerald Hunter bonus
+  ancient_debris_hunter:
+    name: '&5Ancient Debris Hunter'
+    description:
+      - '&7Mine 50 ancient debris.'
+    icon: ANCIENT_DEBRIS
+    category: mining
+    criteria:
+      blocks:
+        type: BLOCK_MINED
+        source: bukkit_stat_material
+        statistic: MINE_BLOCK
+        material: ANCIENT_DEBRIS
+        amount: 50
+    rewards:
+      payout:
+        type: MONEY
+        amount: 1000
+      item:
+        type: ITEM
+        material: NETHERITE_SCRAP
+        amount: 2
+        label: 5Ancient Debris Hunter bonus
   nether_enjoyer:
     name: "&cNether Enjoyer"
     description:
@@ -373,6 +633,40 @@ rewards:
       r1:
         type: TAG
         id: nether_enjoyer
+  nether_quarry:
+    name: '&cNether Quarry'
+    description:
+      - '&7Mine 50,000 netherrack.'
+    icon: NETHERRACK
+    category: mining
+    criteria:
+      blocks:
+        type: BLOCK_MINED
+        source: bukkit_stat_material
+        statistic: MINE_BLOCK
+        material: NETHERRACK
+        amount: 50000
+    rewards:
+      payout:
+        type: MONEY
+        amount: 1250
+  obsidian_breaker:
+    name: '&5Obsidian Breaker'
+    description:
+      - '&7Mine 1,000 obsidian.'
+    icon: OBSIDIAN
+    category: mining
+    criteria:
+      blocks:
+        type: BLOCK_MINED
+        source: bukkit_stat_material
+        statistic: MINE_BLOCK
+        material: OBSIDIAN
+        amount: 1000
+    rewards:
+      payout:
+        type: MONEY
+        amount: 1000
   yearn_for_mines:
     name: "&8I Yearn for the Mines"
     description:
@@ -387,6 +681,50 @@ rewards:
       r1:
         type: TAG
         id: yearn_for_mines
+  first_blood:
+    name: '&cFirst Blood'
+    description:
+      - '&7Get your first player kill.'
+    icon: STONE_SWORD
+    category: combat
+    criteria:
+      kills:
+        type: KILLS_TOTAL
+        amount: 1
+    rewards:
+      payout:
+        type: MONEY
+        amount: 50
+  km_gg_reward:
+    name: "&aGG Messages"
+    description:
+      - "&7Win 5 fights."
+    icon: "PAPER"
+    category: "combat"
+    criteria:
+      c1:
+        type: KILLS_TOTAL
+        amount: 5
+    rewards:
+      r1:
+        type: COMMAND
+        id: "lp user %player% permission set enthusia.cosmetics.km_gg true"
+        label: "GG Kill Message"
+  kill_sparks_reward:
+    name: "&cFirst Blood FX"
+    description:
+      - "&7Get 10 player kills."
+    icon: "BLAZE_POWDER"
+    category: "combat"
+    criteria:
+      c1:
+        type: KILLS_TOTAL
+        amount: 10
+    rewards:
+      r1:
+        type: COMMAND
+        id: "lp user %player% permission set enthusia.cosmetics.kill_sparks true"
+        label: "Sparks Kill Effect"
   no_mercy:
     name: "&cNo Mercy"
     description:
@@ -400,202 +738,21 @@ rewards:
       r1:
         type: TAG
         id: no_mercy
-  silent_killer:
-    name: "&4Silent Killer"
+    category: combat
+  hunter:
+    name: '&cHunter'
     description:
-      - "&7Reach a 10 kill streak."
-    icon: "IRON_SWORD"
+      - '&7Reach 50 total player kills.'
+    icon: IRON_SWORD
+    category: combat
     criteria:
-      c1:
-        type: KILL_STREAK_CURRENT
-        amount: 10
-    rewards:
-      r1:
-        type: TAG
-        id: silent_killer
-  already_dead:
-    name: "&4Already Dead"
-    description:
-      - "&7Reach a 25 kill streak."
-    icon: "NETHERITE_SWORD"
-    criteria:
-      c1:
-        type: KILL_STREAK_CURRENT
-        amount: 25
-    rewards:
-      r1:
-        type: TAG
-        id: already_dead
-  death_sentence:
-    name: "&6Death Sentence"
-    description:
-      - "&7Kill within 10s of first hit (x10)."
-    icon: "GOLDEN_SWORD"
-    criteria:
-      c1:
-        type: QUICK_KILL_COUNT
-        amount: 10
-    rewards:
-      r1:
-        type: TAG
-        id: death_sentence
-  checkmate:
-    name: "&bCheckmate"
-    description:
-      - "&7Kill a player wearing full armor."
-    icon: "DIAMOND_CHESTPLATE"
-    criteria:
-      c1:
-        type: KILL_FULL_ARMOR_COUNT
-        amount: 1
-    rewards:
-      r1:
-        type: TAG
-        id: checkmate
-  not_even_close:
-    name: "&cNot Even Close"
-    description:
-      - "&7Win a fight under 3 hearts."
-    icon: "RED_DYE"
-    criteria:
-      c1:
-        type: KILL_LOW_HEALTH_COUNT
-        amount: 1
-    rewards:
-      r1:
-        type: TAG
-        id: not_even_close
-  fear_me:
-    name: "&7Fear Me (Please)"
-    description:
-      - "&7Die to a player 10 times."
-    icon: "SKELETON_SKULL"
-    criteria:
-      c1:
-        type: CUSTOM_COUNTER
-        key: pvp_deaths
-        amount: 10
-    rewards:
-      r1:
-        type: TAG
-        id: fear_me
-  fallen:
-    name: "&7Fallen"
-    description:
-      - "&7Die 50 times."
-    icon: "SKELETON_SKULL"
-    criteria:
-      c1:
-        type: DEATHS_TOTAL
+      kills:
+        type: KILLS_TOTAL
         amount: 50
     rewards:
-      r1:
-        type: TAG
-        id: fallen
-  very_experienced:
-    name: "&7Very Experienced"
-    description:
-      - "&7Die 100 times."
-    icon: "SKELETON_SKULL"
-    criteria:
-      c1:
-        type: DEATHS_TOTAL
-        amount: 100
-    rewards:
-      r1:
-        type: TAG
-        id: very_experienced
-  respawn_enjoyer:
-    name: "&7Respawn Enjoyer"
-    description:
-      - "&7Die 250 times."
-    icon: "SKELETON_SKULL"
-    criteria:
-      c1:
-        type: DEATHS_TOTAL
-        amount: 250
-    rewards:
-      r1:
-        type: TAG
-        id: respawn_enjoyer
-  unkillable_spirit:
-    name: "&7Unkillable Spirit"
-    description:
-      - "&7Die 500 times."
-    icon: "SKELETON_SKULL"
-    criteria:
-      c1:
-        type: DEATHS_TOTAL
-        amount: 500
-    rewards:
-      r1:
-        type: TAG
-        id: unkillable_spirit
-  refuses_to_quit:
-    name: "&7Refuses to Quit"
-    description:
-      - "&7Die 1000 times."
-    icon: "SKELETON_SKULL"
-    criteria:
-      c1:
-        type: DEATHS_TOTAL
-        amount: 1000
-    rewards:
-      r1:
-        type: TAG
-        id: refuses_to_quit
-  target_practice:
-    name: "&eTarget Practice"
-    description:
-      - "&7Die to the same player 5 times in a row."
-    icon: "BOW"
-    criteria:
-      c1:
-        type: DEATH_STREAK_SAME
-        amount: 5
-    rewards:
-      r1:
-        type: TAG
-        id: target_practice
-  personal_problem:
-    name: "&6Personal Problem"
-    description:
-      - "&7Die to the same player 10 times in a row."
-    icon: "BOW"
-    criteria:
-      c1:
-        type: DEATH_STREAK_SAME
-        amount: 10
-    rewards:
-      r1:
-        type: TAG
-        id: personal_problem
-  rent_free:
-    name: "&6Rent Free"
-    description:
-      - "&7Die to the same player 15 times in a row."
-    icon: "BOW"
-    criteria:
-      c1:
-        type: DEATH_STREAK_SAME
-        amount: 15
-    rewards:
-      r1:
-        type: TAG
-        id: rent_free
-  nemesis:
-    name: "&cNemesis"
-    description:
-      - "&7Die to the same player 25 times in a row."
-    icon: "BOW"
-    criteria:
-      c1:
-        type: DEATH_STREAK_SAME
-        amount: 25
-    rewards:
-      r1:
-        type: TAG
-        id: nemesis
+      payout:
+        type: MONEY
+        amount: 300
   blooded:
     name: "&cBlooded"
     description:
@@ -609,6 +766,7 @@ rewards:
       r1:
         type: TAG
         id: blooded
+    category: combat
   seasoned:
     name: "&cSeasoned"
     description:
@@ -622,6 +780,7 @@ rewards:
       r1:
         type: TAG
         id: seasoned
+    category: combat
   battle_hardened:
     name: "&cBattle-Hardened"
     description:
@@ -635,6 +794,7 @@ rewards:
       r1:
         type: TAG
         id: battle_hardened
+    category: combat
   warpath:
     name: "&4Warpath"
     description:
@@ -650,7 +810,8 @@ rewards:
         id: warpath
       r2:
         type: MONEY
-        amount: 1000
+        amount: 2000
+    category: combat
   unstoppable:
     name: "&4Unstoppable"
     description:
@@ -664,6 +825,396 @@ rewards:
       r1:
         type: TAG
         id: unstoppable
+    category: combat
+  elite_hunter:
+    name: '&4Elite Hunter'
+    description:
+      - '&7Reach 5,000 total player kills.'
+    icon: NETHERITE_SWORD
+    category: combat
+    criteria:
+      kills:
+        type: KILLS_TOTAL
+        amount: 5000
+    rewards:
+      payout:
+        type: MONEY
+        amount: 4000
+      item:
+        type: ITEM
+        material: DIAMOND
+        amount: 8
+        label: Elite hunter bonus
+  silent_killer:
+    name: "&4Silent Killer"
+    description:
+      - "&7Reach a 10 kill streak."
+    icon: "IRON_SWORD"
+    criteria:
+      c1:
+        type: KILL_STREAK_CURRENT
+        amount: 10
+    rewards:
+      r1:
+        type: TAG
+        id: silent_killer
+    category: combat
+  already_dead:
+    name: "&4Already Dead"
+    description:
+      - "&7Reach a 25 kill streak."
+    icon: "NETHERITE_SWORD"
+    criteria:
+      c1:
+        type: KILL_STREAK_CURRENT
+        amount: 25
+    rewards:
+      r1:
+        type: TAG
+        id: already_dead
+    category: combat
+  rampage:
+    name: '&4Rampage'
+    description:
+      - '&7Reach a 50 player kill streak.'
+    icon: NETHERITE_AXE
+    category: combat
+    criteria:
+      streak:
+        type: KILL_STREAK_CURRENT
+        amount: 50
+    rewards:
+      payout:
+        type: MONEY
+        amount: 1500
+  untouchable:
+    name: '&4&lUntouchable'
+    description:
+      - '&7Reach a 100 player kill streak.'
+    icon: TOTEM_OF_UNDYING
+    category: combat
+    criteria:
+      streak:
+        type: KILL_STREAK_CURRENT
+        amount: 100
+    rewards:
+      payout:
+        type: MONEY
+        amount: 3000
+      item:
+        type: ITEM
+        material: TOTEM_OF_UNDYING
+        amount: 1
+        label: Untouchable trophy
+  death_sentence:
+    name: "&6Death Sentence"
+    description:
+      - "&7Kill within 10s of first hit (x10)."
+    icon: "GOLDEN_SWORD"
+    criteria:
+      c1:
+        type: QUICK_KILL_COUNT
+        amount: 10
+    rewards:
+      r1:
+        type: TAG
+        id: death_sentence
+    category: combat
+  executioner:
+    name: '&6Executioner'
+    description:
+      - '&7Earn 100 quick kills within 10 seconds of first hit.'
+    icon: GOLDEN_SWORD
+    category: combat
+    criteria:
+      quick:
+        type: QUICK_KILL_COUNT
+        amount: 100
+    rewards:
+      payout:
+        type: MONEY
+        amount: 1000
+  checkmate:
+    name: "&bCheckmate"
+    description:
+      - "&7Kill a player wearing full armor."
+    icon: "DIAMOND_CHESTPLATE"
+    criteria:
+      c1:
+        type: KILL_FULL_ARMOR_COUNT
+        amount: 1
+    rewards:
+      r1:
+        type: TAG
+        id: checkmate
+    category: combat
+  armor_breaker:
+    name: '&bArmor Breaker'
+    description:
+      - '&7Kill 25 players wearing full armor.'
+    icon: DIAMOND_CHESTPLATE
+    category: combat
+    criteria:
+      armored:
+        type: KILL_FULL_ARMOR_COUNT
+        amount: 25
+    rewards:
+      payout:
+        type: MONEY
+        amount: 750
+  not_even_close:
+    name: "&cNot Even Close"
+    description:
+      - "&7Win a fight under 3 hearts."
+    icon: "RED_DYE"
+    criteria:
+      c1:
+        type: KILL_LOW_HEALTH_COUNT
+        amount: 1
+    rewards:
+      r1:
+        type: TAG
+        id: not_even_close
+    category: combat
+  clutch_master:
+    name: '&cClutch Master'
+    description:
+      - '&7Win 10 fights while at or below 3 hearts.'
+    icon: RED_DYE
+    category: combat
+    criteria:
+      clutches:
+        type: KILL_LOW_HEALTH_COUNT
+        amount: 10
+    rewards:
+      payout:
+        type: MONEY
+        amount: 750
+  proj_spark_reward:
+    name: "&dArrow Flair"
+    description:
+      - "&7Hit 50 projectile shots."
+    icon: "ARROW"
+    category: "combat"
+    criteria:
+      c1:
+        type: CUSTOM_COUNTER
+        key: projectile_hits
+        amount: 50
+    rewards:
+      r1:
+        type: COMMAND
+        id: "lp user %player% permission set enthusia.cosmetics.proj_spark true"
+        label: "Spark Shot Projectiles"
+  arrow_storm:
+    name: '&eArrow Storm'
+    description:
+      - '&7Hit players or mobs with 250 projectiles.'
+    icon: ARROW
+    category: combat
+    criteria:
+      hits:
+        type: PROJECTILE_HITS
+        amount: 250
+    rewards:
+      payout:
+        type: MONEY
+        amount: 200
+      item:
+        type: ITEM
+        material: ARROW
+        amount: 64
+        label: Arrow Storm ammunition
+  deadeye:
+    name: '&6Deadeye'
+    description:
+      - '&7Land 1,000 projectile hits.'
+    icon: SPECTRAL_ARROW
+    category: combat
+    criteria:
+      hits:
+        type: PROJECTILE_HITS
+        amount: 1000
+    rewards:
+      payout:
+        type: MONEY
+        amount: 750
+      item:
+        type: ITEM
+        material: SPECTRAL_ARROW
+        amount: 32
+        label: Deadeye ammunition
+  first_respawn:
+    name: '&7First Respawn'
+    description:
+      - '&7Die for the first time.'
+    icon: BREAD
+    category: deaths
+    criteria:
+      deaths:
+        type: DEATHS_TOTAL
+        amount: 1
+    rewards:
+      item:
+        type: ITEM
+        material: BREAD
+        amount: 16
+        label: Respawn rations
+  fear_me:
+    name: "&7Fear Me (Please)"
+    description:
+      - "&7Die to a player 10 times."
+    icon: "SKELETON_SKULL"
+    criteria:
+      c1:
+        type: CUSTOM_COUNTER
+        key: pvp_deaths
+        amount: 10
+    rewards:
+      r1:
+        type: TAG
+        id: fear_me
+    category: deaths
+  fallen:
+    name: "&7Fallen"
+    description:
+      - "&7Die 50 times."
+    icon: "SKELETON_SKULL"
+    criteria:
+      c1:
+        type: DEATHS_TOTAL
+        amount: 50
+    rewards:
+      r1:
+        type: TAG
+        id: fallen
+    category: deaths
+  very_experienced:
+    name: "&7Very Experienced"
+    description:
+      - "&7Die 100 times."
+    icon: "SKELETON_SKULL"
+    criteria:
+      c1:
+        type: DEATHS_TOTAL
+        amount: 100
+    rewards:
+      r1:
+        type: TAG
+        id: very_experienced
+    category: deaths
+  respawn_enjoyer:
+    name: "&7Respawn Enjoyer"
+    description:
+      - "&7Die 250 times."
+    icon: "SKELETON_SKULL"
+    criteria:
+      c1:
+        type: DEATHS_TOTAL
+        amount: 250
+    rewards:
+      r1:
+        type: TAG
+        id: respawn_enjoyer
+    category: deaths
+  unkillable_spirit:
+    name: "&7Unkillable Spirit"
+    description:
+      - "&7Die 500 times."
+    icon: "SKELETON_SKULL"
+    criteria:
+      c1:
+        type: DEATHS_TOTAL
+        amount: 500
+    rewards:
+      r1:
+        type: TAG
+        id: unkillable_spirit
+    category: deaths
+  refuses_to_quit:
+    name: "&7Refuses to Quit"
+    description:
+      - "&7Die 1000 times."
+    icon: "SKELETON_SKULL"
+    criteria:
+      c1:
+        type: DEATHS_TOTAL
+        amount: 1000
+    rewards:
+      r1:
+        type: TAG
+        id: refuses_to_quit
+    category: deaths
+  professional_respawner:
+    name: '&8Professional Respawner'
+    description:
+      - '&7Die 2,000 times.'
+    icon: RESPAWN_ANCHOR
+    category: deaths
+    criteria:
+      deaths:
+        type: DEATHS_TOTAL
+        amount: 2000
+    rewards:
+      payout:
+        type: MONEY
+        amount: 1000
+  target_practice:
+    name: "&eTarget Practice"
+    description:
+      - "&7Die to the same player 5 times in a row."
+    icon: "BOW"
+    criteria:
+      c1:
+        type: DEATH_STREAK_SAME
+        amount: 5
+    rewards:
+      r1:
+        type: TAG
+        id: target_practice
+    category: deaths
+  personal_problem:
+    name: "&6Personal Problem"
+    description:
+      - "&7Die to the same player 10 times in a row."
+    icon: "BOW"
+    criteria:
+      c1:
+        type: DEATH_STREAK_SAME
+        amount: 10
+    rewards:
+      r1:
+        type: TAG
+        id: personal_problem
+    category: deaths
+  rent_free:
+    name: "&6Rent Free"
+    description:
+      - "&7Die to the same player 15 times in a row."
+    icon: "BOW"
+    criteria:
+      c1:
+        type: DEATH_STREAK_SAME
+        amount: 15
+    rewards:
+      r1:
+        type: TAG
+        id: rent_free
+    category: deaths
+  nemesis:
+    name: "&cNemesis"
+    description:
+      - "&7Die to the same player 25 times in a row."
+    icon: "BOW"
+    criteria:
+      c1:
+        type: DEATH_STREAK_SAME
+        amount: 25
+    rewards:
+      r1:
+        type: TAG
+        id: nemesis
+    category: deaths
   gravity_victim:
     name: "&7Gravity's Victim"
     description:
@@ -678,6 +1229,7 @@ rewards:
       r1:
         type: TAG
         id: gravity_victim
+    category: deaths
   skill_issue:
     name: "&7Skill Issue"
     description:
@@ -692,6 +1244,7 @@ rewards:
       r1:
         type: TAG
         id: skill_issue
+    category: deaths
   physics_hard:
     name: "&7Physics Is Hard"
     description:
@@ -706,6 +1259,44 @@ rewards:
       r1:
         type: TAG
         id: physics_hard
+    category: deaths
+  terminal_velocity:
+    name: '&7Terminal Velocity'
+    description:
+      - '&7Die to fall damage 100 times.'
+    icon: FEATHER
+    category: deaths
+    criteria:
+      cause:
+        type: DEATH_CAUSE_COUNT
+        key: fall
+        amount: 100
+    rewards:
+      payout:
+        type: MONEY
+        amount: 250
+      item:
+        type: ITEM
+        material: FEATHER
+        amount: 64
+        label: Terminal Velocity feathers
+  lava_learner:
+    name: '&6Lava Learner'
+    description:
+      - '&7Die to lava 5 times.'
+    icon: MAGMA_CREAM
+    category: deaths
+    criteria:
+      cause:
+        type: DEATH_CAUSE_COUNT
+        key: lava
+        amount: 5
+    rewards:
+      item:
+        type: ITEM
+        material: MAGMA_CREAM
+        amount: 16
+        label: Lava lesson
   lava_allergy:
     name: "&6Lava Allergy"
     description:
@@ -720,6 +1311,7 @@ rewards:
       r1:
         type: TAG
         id: lava_allergy
+    category: deaths
   i_swear_it_worked:
     name: "&7I Swear It Worked"
     description:
@@ -734,19 +1326,136 @@ rewards:
       r1:
         type: TAG
         id: i_swear_it_worked
-  lag_was_crazy:
-    name: "&7Lag Was Crazy"
+    category: deaths
+  boom_magnet:
+    name: '&cBoom Magnet'
     description:
-      - "&7Reach 150ms ping."
-    icon: "ENDER_PEARL"
+      - '&7Die to explosions 10 times.'
+    icon: TNT
+    category: deaths
+    criteria:
+      cause:
+        type: DEATH_CAUSE_COUNT
+        key: explosion
+        amount: 10
+    rewards:
+      item:
+        type: ITEM
+        material: TNT
+        amount: 16
+        label: Boom Magnet consolation prize
+  chicken_incident:
+    name: '&eChicken Incident'
+    description:
+      - '&7Die to a chicken.'
+    icon: CHICKEN
+    category: deaths
+    criteria:
+      cause:
+        type: DEATH_CAUSE_COUNT
+        key: chicken
+        amount: 1
+    rewards:
+      tag:
+        type: TAG
+        id: died_to_chicken
+  first_thousand:
+    name: '&eFirst Thousand'
+    description:
+      - '&7Hold 1,000 raw gold at once.'
+    icon: GOLD_NUGGET
+    category: economy
+    criteria:
+      balance:
+        type: BALANCE_AT_LEAST
+        amount: 1000
+    rewards:
+      payout:
+        type: MONEY
+        amount: 50
+  comfortable:
+    name: '&6Comfortable'
+    description:
+      - '&7Hold 10,000 raw gold at once.'
+    icon: GOLD_INGOT
+    category: economy
+    criteria:
+      balance:
+        type: BALANCE_AT_LEAST
+        amount: 10000
+    rewards:
+      payout:
+        type: MONEY
+        amount: 100
+  wealthy:
+    name: '&6Wealthy'
+    description:
+      - '&7Hold 50,000 raw gold at once.'
+    icon: GOLD_BLOCK
+    category: economy
+    criteria:
+      balance:
+        type: BALANCE_AT_LEAST
+        amount: 50000
+    rewards:
+      payout:
+        type: MONEY
+        amount: 250
+  high_roller:
+    name: "&6High Roller"
+    description:
+      - "&7Hold 100,000 raw gold."
+    icon: "GOLD_BLOCK"
     criteria:
       c1:
-        type: PING_MS_AT_LEAST
-        amount: 150
+        type: BALANCE_AT_LEAST
+        amount: 100000
     rewards:
       r1:
         type: TAG
-        id: lag_was_crazy
+        id: high_roller
+      r2:
+        type: MONEY
+        amount: 500
+    category: economy
+  quarter_million:
+    name: '&eQuarter Million'
+    description:
+      - '&7Hold 250,000 raw gold at once.'
+    icon: EMERALD_BLOCK
+    category: economy
+    criteria:
+      balance:
+        type: BALANCE_AT_LEAST
+        amount: 250000
+    rewards:
+      payout:
+        type: MONEY
+        amount: 750
+      item:
+        type: ITEM
+        material: EMERALD
+        amount: 8
+        label: eQuarter Million bonus
+  millionaire:
+    name: '&6&lMillionaire'
+    description:
+      - '&7Hold 1,000,000 raw gold at once.'
+    icon: NETHER_STAR
+    category: economy
+    criteria:
+      balance:
+        type: BALANCE_AT_LEAST
+        amount: 1000000
+    rewards:
+      payout:
+        type: MONEY
+        amount: 1500
+      item:
+        type: ITEM
+        material: EMERALD
+        amount: 16
+        label: 6lMillionaire bonus
   baltop_top3:
     name: "&6Baltop Elite"
     description:
@@ -760,3 +1469,212 @@ rewards:
       r1:
         type: TAG
         id: baltop_elite
+
+  # ---------------------------------------------------------------------------
+  # Reward expansion: 48 new rewards. Existing reward IDs above are unchanged.
+  # ---------------------------------------------------------------------------
+    category: economy
+  getting_around:
+    name: '&aGetting Around'
+    description:
+      - '&7Walk 5,000 blocks.'
+    icon: LEATHER_BOOTS
+    category: exploration
+    criteria:
+      steps:
+        type: STEPS_WALKED
+        amount: 5000
+    rewards:
+      item:
+        type: ITEM
+        material: BREAD
+        amount: 16
+        label: Trail rations
+  trail_starter:
+    name: "&bTrail Starter"
+    description:
+      - "&7Walk 20,000 blocks."
+    icon: "FEATHER"
+    category: "exploration"
+    criteria:
+      c1:
+        type: STEPS_WALKED
+        amount: 20000
+    rewards:
+      r1:
+        type: COMMAND
+        id: "lp user %player% permission set enthusia.cosmetics.trail_mist true"
+        label: "Mist Trail Cosmetic"
+  long_walk:
+    name: '&3A Long Walk'
+    description:
+      - '&7Walk 100,000 blocks.'
+    icon: COMPASS
+    category: exploration
+    criteria:
+      steps:
+        type: STEPS_WALKED
+        amount: 100000
+    rewards:
+      payout:
+        type: MONEY
+        amount: 250
+  world_walker:
+    name: '&bWorld Walker'
+    description:
+      - '&7Walk 500,000 blocks.'
+    icon: COMPASS
+    category: exploration
+    criteria:
+      steps:
+        type: STEPS_WALKED
+        amount: 500000
+    rewards:
+      payout:
+        type: MONEY
+        amount: 750
+  million_steps:
+    name: '&dMillion Steps'
+    description:
+      - '&7Walk 1,000,000 blocks.'
+    icon: RECOVERY_COMPASS
+    category: exploration
+    criteria:
+      steps:
+        type: STEPS_WALKED
+        amount: 1000000
+    rewards:
+      payout:
+        type: MONEY
+        amount: 1500
+      item:
+        type: ITEM
+        material: COMPASS
+        amount: 1
+        label: Million-step compass
+        display-name: '&dMillion-Step Compass'
+        lore:
+          - '&7Earned for walking 1,000,000 blocks.'
+  ten_million_steps:
+    name: '&5&lTen Million Steps'
+    description:
+      - '&7Walk 10,000,000 blocks.'
+    icon: NETHER_STAR
+    category: exploration
+    criteria:
+      steps:
+        type: STEPS_WALKED
+        amount: 10000000
+    rewards:
+      payout:
+        type: MONEY
+        amount: 5000
+      item:
+        type: ITEM
+        material: RECOVERY_COMPASS
+        amount: 1
+        label: Ten-million-step compass
+        display-name: '&5Ten-Million-Step Compass'
+        lore:
+          - '&7A trophy for crossing 10,000,000 blocks.'
+  lag_was_crazy:
+    name: "&7Lag Was Crazy"
+    description:
+      - "&7Reach 150ms ping."
+    icon: "ENDER_PEARL"
+    criteria:
+      c1:
+        type: PING_MS_AT_LEAST
+        amount: 150
+    rewards:
+      r1:
+        type: TAG
+        id: lag_was_crazy
+    category: misc
+  all_rounder:
+    name: '&dAll-Rounder'
+    description:
+      - '&7Reach 100 active hours, 100 kills,'
+      - '&7mine 10,000 stone, and hold 10,000 raw gold.'
+    icon: HEART_OF_THE_SEA
+    category: misc
+    criteria:
+      playtime:
+        type: PLAYTIME_ACTIVE_MINUTES
+        amount: 6000
+      kills:
+        type: KILLS_TOTAL
+        amount: 100
+      stone:
+        type: BLOCK_MINED
+        source: bukkit_stat_material
+        statistic: MINE_BLOCK
+        material: STONE
+        amount: 10000
+      balance:
+        type: BALANCE_AT_LEAST
+        amount: 10000
+    rewards:
+      payout:
+        type: MONEY
+        amount: 1250
+      item:
+        type: ITEM
+        material: DIAMOND
+        amount: 4
+        label: All-Rounder bonus
+  server_legend:
+    name: '&6&lServer Legend'
+    description:
+      - '&7Reach 500 active hours, 1,000 kills,'
+      - '&7a 100,000 raw-gold balance, and 1,000,000 steps.'
+    icon: NETHER_STAR
+    category: misc
+    criteria:
+      playtime:
+        type: PLAYTIME_ACTIVE_MINUTES
+        amount: 30000
+      kills:
+        type: KILLS_TOTAL
+        amount: 1000
+      balance:
+        type: BALANCE_AT_LEAST
+        amount: 100000
+      steps:
+        type: STEPS_WALKED
+        amount: 1000000
+    rewards:
+      payout:
+        type: MONEY
+        amount: 3500
+      item:
+        type: ITEM
+        material: NETHERITE_SCRAP
+        amount: 4
+        label: Server Legend bonus
+  ultimate_survivor:
+    name: '&c&lUltimate Survivor'
+    description:
+      - '&7Reach 1,000 active hours, 2,500 kills,'
+      - '&7and a 50-player kill streak.'
+    icon: DRAGON_EGG
+    category: misc
+    criteria:
+      playtime:
+        type: PLAYTIME_ACTIVE_MINUTES
+        amount: 60000
+      kills:
+        type: KILLS_TOTAL
+        amount: 2500
+      streak:
+        type: KILL_STREAK_CURRENT
+        amount: 50
+    rewards:
+      payout:
+        type: MONEY
+        amount: 5000
+      item:
+        type: ITEM
+        material: TOTEM_OF_UNDYING
+        amount: 2
+        label: Ultimate Survivor bonus

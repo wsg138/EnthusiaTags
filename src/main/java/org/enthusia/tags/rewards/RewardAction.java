@@ -30,7 +30,8 @@ public final class RewardAction {
         this.itemAmount = itemAmount;
         this.displayName = displayName;
         this.lore = lore == null ? List.of() : List.copyOf(lore);
-        this.valid = valid;
+        this.valid = valid && (type != RewardActionType.MONEY
+            || RewardMoneyPolicy.validationError(amount) == null);
     }
 
     public String getActionId() { return actionId; }
