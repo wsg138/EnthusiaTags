@@ -21,13 +21,14 @@ jobs:
         shell: python
         run: |
           from pathlib import Path
-          import textwrap
 
           workflow = Path('.github/workflows/apply-reward-vault-rebalance.yml').read_text().splitlines()
           start = workflow.index('        run: |') + 1
           end = workflow.index('      - name: Commit and push final changes')
-          code = textwrap.dedent('\n'.join(workflow[start:end]))
-          exec(compile(code, 'reward-rebalance-transform', 'exec'))
+          code_lines = []
+          for line in workflow[start:end]:
+              code_lines.append(line[10:] if line.startswith('          ') else line)
+          exec(compile('\n'.join(code_lines), 'reward-rebalance-transform', 'exec'))
           Path('.github/workflows/apply-reward-vault-rebalance-pr.yml').unlink()
 
       - name: Commit and push final changes
