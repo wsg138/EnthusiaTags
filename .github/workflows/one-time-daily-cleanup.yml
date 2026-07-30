@@ -1,0 +1,57 @@
+name: One-time daily cleanup
+
+on:
+  push:
+    branches:
+      - agent/daily-live-hardening
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.event.head_commit.message == 'Apply one-time daily cleanup patch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/daily-live-hardening
+          fetch-depth: 0
+
+      - name: Apply targeted cleanup
+        shell: python
+        run: |
+          from pathlib import Path
+
+          service = Path("src/main/java/org/enthusia/tags/daily/DailyService.java")
+          text = service.read_text(encoding="utf-8")
+          replacements = {
+              "BalanceLookup balance = lookupBalance(playerId, currentDate);":
+                  "BalanceLookup balance = lookupBalance(playerId);",
+              "private BalanceLookup lookupBalance(UUID playerId, LocalDate date) {":
+                  "private BalanceLookup lookupBalance(UUID playerId) {",
+          }
+          for old, new in replacements.items():
+              if text.count(old) != 1:
+                  raise SystemExit(f"Expected exactly one occurrence: {old}")
+              text = text.replace(old, new)
+          service.write_text(text, encoding="utf-8")
+
+          config = Path("src/main/resources/config.yml")
+          config_text = config.read_text(encoding="utf-8")
+          old_config = 'daily:\n  timezone: "America/Indiana/Indianapolis"\n  payouts:'
+          new_config = 'daily:\n  timezone: "America/Indiana/Indianapolis"\n  currency-label: "Raw Gold"\n  payouts:'
+          if config_text.count(old_config) != 1:
+              raise SystemExit("Expected daily configuration header")
+          config.write_text(config_text.replace(old_config, new_config), encoding="utf-8")
+
+          Path(".github/workflows/one-time-daily-cleanup.yml").unlink()
+
+      - name: Commit cleanup
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/main/java/org/enthusia/tags/daily/DailyService.java src/main/resources/config.yml .github/workflows/one-time-daily-cleanup.yml
+          git commit -m "Clean up daily currency and balance configuration"
+          git push origin HEAD:agent/daily-live-hardening
