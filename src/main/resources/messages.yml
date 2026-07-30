@@ -1,4 +1,4 @@
-config-version: 2
+config-version: 3
 
 no-permission: "&cYou do not have permission to do that."
 players-only: "&cOnly players can use this command."
@@ -32,7 +32,7 @@ rewards-progress-title: "&7Task:"
 rewards-progress-line: "&7- {label}: {color}{progress}"
 rewards-rewards-title: "&7Reward:"
 rewards-rewards-line-tag: "&7- &fTag: &e{tag}"
-rewards-rewards-line-money: "&7- &fMoney: &e{amount}"
+rewards-rewards-line-money: "&7- &fRaw Gold: &e{amount}"
 rewards-rewards-line-item: "&7- &fItem: &e{amount}x {item}"
 rewards-rewards-line-unlock: "&7- &fUnlock: &e{unlock}"
 rewards-rewards-item-default: "Item reward"
