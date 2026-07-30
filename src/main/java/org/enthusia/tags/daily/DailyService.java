@@ -1,7 +1,6 @@
 package org.enthusia.tags.daily;
 
 import java.io.File;
-import java.math.BigDecimal;
 import java.sql.SQLException;
 import java.time.DateTimeException;
 import java.time.LocalDate;
@@ -11,6 +10,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.Callable;
@@ -39,6 +39,7 @@ import org.bukkit.event.inventory.InventoryDragEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.InventoryHolder;
+import org.bukkit.plugin.IllegalPluginAccessException;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitRunnable;
 import org.bukkit.scheduler.BukkitTask;
@@ -47,6 +48,8 @@ import org.enthusia.tags.rewards.VaultHook;
 public final class DailyService implements CommandExecutor, Listener {
     private static final String DAILY_UNAVAILABLE = "Daily rewards are temporarily unavailable.";
     private static final String DEFAULT_TIMEZONE = "America/Indiana/Indianapolis";
+    private static final String DISCONNECTED_BEFORE_VAULT =
+        "Player disconnected before Vault invocation";
     private static final List<Double> DEFAULT_PAYOUTS =
         List.of(5D, 10D, 15D, 20D, 30D, 40D, 50D);
     private static final boolean LEGACY_ANIMATION_DEFAULT = true;
@@ -127,28 +130,24 @@ public final class DailyService implements CommandExecutor, Listener {
     }
 
     public boolean handleAdminCommand(CommandSender sender, String[] args) {
-        if (args.length < 2 || (!args[0].equalsIgnoreCase("inspect")
-            && !args[0].equalsIgnoreCase("reconcile"))) {
+        if (!isValidAdminOperation(args)) {
             sendAdminUsage(sender);
             return true;
         }
 
-        OfflinePlayer target = resolveTarget(sender, args[1]);
-        if (target == null) {
-            return true;
-        }
-        ParsedAdminDate parsedDate = parseAdminDate(sender, args);
-        if (parsedDate == null) {
+        Optional<OfflinePlayer> target = resolveTarget(sender, args[1]);
+        Optional<ParsedAdminDate> parsedDate = parseAdminDate(sender, args);
+        if (target.isEmpty() || parsedDate.isEmpty()) {
             return true;
         }
 
-        UUID playerId = target.getUniqueId();
-        LocalDate selectedDate = parsedDate.date();
+        UUID playerId = target.orElseThrow().getUniqueId();
+        ParsedAdminDate selection = parsedDate.orElseThrow();
         if (args[0].equalsIgnoreCase("inspect")) {
-            completeToSender(sender, submit(() -> inspect(playerId, selectedDate)));
+            completeToSender(sender, submit(() -> inspect(playerId, selection.date())));
             return true;
         }
-        return handleReconciliation(sender, args, parsedDate.reasonEnd(), playerId, selectedDate);
+        return handleReconciliation(sender, args, selection.reasonEnd(), playerId, selection.date());
     }
 
     public void open(Player player) {
@@ -191,6 +190,11 @@ public final class DailyService implements CommandExecutor, Listener {
         }
     }
 
+    private boolean isValidAdminOperation(String[] args) {
+        return args.length >= 2 && (args[0].equalsIgnoreCase("inspect")
+            || args[0].equalsIgnoreCase("reconcile"));
+    }
+
     private boolean stopExecutor() {
         if (executor == null) {
             return true;
@@ -218,25 +222,25 @@ public final class DailyService implements CommandExecutor, Listener {
     private void scheduleReloadRetry() {
         try {
             Bukkit.getScheduler().runTaskLater(plugin, this::reload, 1L);
-        } catch (IllegalArgumentException | IllegalStateException ex) {
+        } catch (IllegalArgumentException | IllegalPluginAccessException ex) {
             plugin.getLogger().log(Level.WARNING, "Could not reschedule daily reload", ex);
         }
     }
 
-    private OfflinePlayer resolveTarget(CommandSender sender, String supplied) {
-        OfflinePlayer target = Bukkit.getOfflinePlayerIfCached(supplied);
-        if (target != null) {
-            return target;
+    private Optional<OfflinePlayer> resolveTarget(CommandSender sender, String supplied) {
+        OfflinePlayer cached = Bukkit.getOfflinePlayerIfCached(supplied);
+        if (cached != null) {
+            return Optional.of(cached);
         }
         try {
-            return Bukkit.getOfflinePlayer(UUID.fromString(supplied));
+            return Optional.of(Bukkit.getOfflinePlayer(UUID.fromString(supplied)));
         } catch (IllegalArgumentException ex) {
             sender.sendMessage("Player must be cached or supplied as a UUID.");
-            return null;
+            return Optional.empty();
         }
     }
 
-    private ParsedAdminDate parseAdminDate(CommandSender sender, String[] args) {
+    private Optional<ParsedAdminDate> parseAdminDate(CommandSender sender, String[] args) {
         LocalDate date = today();
         int reasonEnd = args.length;
         if (args[0].equalsIgnoreCase("inspect") && args.length > 2) {
@@ -244,7 +248,7 @@ public final class DailyService implements CommandExecutor, Listener {
                 date = LocalDate.parse(args[2]);
             } catch (DateTimeException ex) {
                 sender.sendMessage("Date must use YYYY-MM-DD.");
-                return null;
+                return Optional.empty();
             }
         } else if (args[0].equalsIgnoreCase("reconcile") && args.length > 4) {
             try {
@@ -254,7 +258,7 @@ public final class DailyService implements CommandExecutor, Listener {
                 // The final argument is part of the required free-form reason.
             }
         }
-        return new ParsedAdminDate(date, reasonEnd);
+        return Optional.of(new ParsedAdminDate(date, reasonEnd));
     }
 
     private boolean handleReconciliation(CommandSender sender, String[] args, int reasonEnd,
@@ -292,9 +296,10 @@ public final class DailyService implements CommandExecutor, Listener {
             throw new SQLException("Cannot finalize a transaction older than the current daily state");
         }
         boolean stateAlreadyApplied = delivered && date.equals(old.lastClaimDate());
-        DailyState next = reconciledState(old, transaction, date, delivered, stateAlreadyApplied);
+        DailyState deliveredState = reconciledState(old, transaction, date,
+            delivered, stateAlreadyApplied);
         DailyStorage.Transaction result = storage.reconcileAtomic(playerId, date, administrator,
-            delivered, reason, next, stateAlreadyApplied);
+            delivered, reason, deliveredState, stateAlreadyApplied);
         return List.of("Daily transaction reconciled atomically as " + decision + " for " + date
             + "; final status=" + result.status() + ".");
     }
@@ -303,7 +308,7 @@ public final class DailyService implements CommandExecutor, Listener {
                                        LocalDate date, boolean delivered,
                                        boolean stateAlreadyApplied) throws SQLException {
         if (!delivered || stateAlreadyApplied) {
-            return null;
+            return old;
         }
         int streak = DailyRules.nextStreak(old.lastClaimDate(), date, old.currentStreak());
         if (streak <= 0) {
@@ -316,7 +321,8 @@ public final class DailyService implements CommandExecutor, Listener {
     private List<String> inspect(UUID playerId, LocalDate date) throws SQLException {
         List<String> lines = new ArrayList<>();
         DailyState state = storage.load(playerId, LEGACY_ANIMATION_DEFAULT);
-        DailyStorage.Transaction transaction = storage.transaction(playerId, date);
+        Optional<DailyStorage.Transaction> transaction =
+            Optional.ofNullable(storage.transaction(playerId, date));
         lines.add("Daily inspection: " + playerId + " / " + date);
         lines.add("  state last=" + state.lastClaimDate() + " streak=" + state.currentStreak()
             + " highest=" + state.highestStreak() + " claims=" + state.totalClaims()
@@ -326,16 +332,18 @@ public final class DailyService implements CommandExecutor, Listener {
         return lines;
     }
 
-    private void appendTransactionInspection(List<String> lines, DailyStorage.Transaction transaction) {
-        if (transaction == null) {
+    private void appendTransactionInspection(List<String> lines,
+                                             Optional<DailyStorage.Transaction> transaction) {
+        if (transaction.isEmpty()) {
             lines.add("  transaction: none");
             return;
         }
-        lines.add("  transaction status=" + transaction.status() + " amount=" + transaction.amount()
-            + " created=" + transaction.createdAt() + " completed=" + transaction.completedAt());
-        lines.add("  vault before=" + transaction.balanceBefore() + " after=" + transaction.balanceAfter()
-            + " requested=" + transaction.amount() + " returned=" + transaction.responseAmount()
-            + " provider=" + transaction.responseType() + " failure=" + transaction.failure());
+        DailyStorage.Transaction value = transaction.orElseThrow();
+        lines.add("  transaction status=" + value.status() + " amount=" + value.amount()
+            + " created=" + value.createdAt() + " completed=" + value.completedAt());
+        lines.add("  vault before=" + value.balanceBefore() + " after=" + value.balanceAfter()
+            + " requested=" + value.amount() + " returned=" + value.responseAmount()
+            + " provider=" + value.responseType() + " failure=" + value.failure());
     }
 
     private void appendHistoryInspection(List<String> lines, UUID playerId,
@@ -370,16 +378,17 @@ public final class DailyService implements CommandExecutor, Listener {
                                          List<Double> payoutSnapshot) throws SQLException {
         DailyState state = storage.load(playerId, LEGACY_ANIMATION_DEFAULT);
         DailyStorage.Transaction transaction = storage.transaction(playerId, currentDate);
-        DailyStorage.TransactionStatus status = transaction == null ? null : transaction.status();
-        return DailyMenuModel.build(state, currentDate, payoutSnapshot, status);
+        return DailyMenuModel.build(state, currentDate, payoutSnapshot,
+            DailyMenuModel.ledgerState(transaction));
     }
 
     private void finishOpen(UUID playerId, boolean allowAnimation, DailyMenuModel.View view,
                             Throwable throwable) {
-        Player player = onlinePlayer(playerId);
-        if (player == null) {
+        Optional<Player> online = onlinePlayer(playerId);
+        if (online.isEmpty()) {
             return;
         }
+        Player player = online.orElseThrow();
         if (throwable != null) {
             plugin.getLogger().log(Level.WARNING, "Could not load daily menu for " + playerId,
                 unwrapCompletionException(throwable));
@@ -398,34 +407,36 @@ public final class DailyService implements CommandExecutor, Listener {
         UUID sessionId = UUID.randomUUID();
         cancelAnimation(playerId);
         Inventory inventory = animationRenderer.createInventory(sessionId);
+        DailyAnimationRenderer.Presentation presentation = animationRenderer.prepare(view);
         player.openInventory(inventory);
 
         int frames = animationRenderer.frameCount();
-        BukkitRunnable animation = animationTask(playerId, sessionId, inventory, view, frames);
+        BukkitRunnable animation = animationTask(playerId, sessionId, inventory, presentation, frames);
         try {
             BukkitTask task = animation.runTaskTimer(plugin, 0L, animationRenderer.frameTicks());
             animations.put(playerId, new ActiveAnimation(sessionId, task));
-        } catch (IllegalArgumentException | IllegalStateException ex) {
+        } catch (IllegalArgumentException | IllegalPluginAccessException ex) {
             plugin.getLogger().log(Level.WARNING, "Could not start daily animation", ex);
             player.openInventory(menuRenderer.createMenu(view));
         }
     }
 
     private BukkitRunnable animationTask(UUID playerId, UUID sessionId, Inventory inventory,
-                                         DailyMenuModel.View view, int frames) {
+                                         DailyAnimationRenderer.Presentation presentation, int frames) {
         return new BukkitRunnable() {
             private int frame;
 
             @Override
             public void run() {
-                Player player = onlinePlayer(playerId);
-                if (player == null || !isCurrentAnimation(playerId, sessionId)
-                    || !hasAnimationSession(player, sessionId)) {
+                Optional<Player> online = onlinePlayer(playerId);
+                if (online.isEmpty() || !isCurrentAnimation(playerId, sessionId)
+                    || !hasAnimationSession(online.orElseThrow(), sessionId)) {
                     stopAnimation(playerId, sessionId, this);
                     return;
                 }
 
-                animationRenderer.renderFrame(inventory, view, frame, frames);
+                Player player = online.orElseThrow();
+                animationRenderer.renderFrame(inventory, presentation, frame, frames);
                 animationRenderer.playFrameSound(player, frame, frames);
                 frame++;
                 if (frame >= frames) {
@@ -439,12 +450,12 @@ public final class DailyService implements CommandExecutor, Listener {
         stopAnimation(playerId, sessionId, animation);
         try {
             Bukkit.getScheduler().runTaskLater(plugin, () -> {
-                Player player = onlinePlayer(playerId);
-                if (player != null && hasAnimationSession(player, sessionId)) {
+                Optional<Player> online = onlinePlayer(playerId);
+                if (online.isPresent() && hasAnimationSession(online.orElseThrow(), sessionId)) {
                     openLoaded(playerId, false);
                 }
             }, 1L);
-        } catch (IllegalArgumentException | IllegalStateException ex) {
+        } catch (IllegalArgumentException | IllegalPluginAccessException ex) {
             plugin.getLogger().log(Level.WARNING, "Could not finish daily animation", ex);
         }
     }
@@ -495,17 +506,21 @@ public final class DailyService implements CommandExecutor, Listener {
             return;
         }
 
-        submit(() -> claimOffThread(playerId)).whenComplete((outcome, throwable) -> {
-            claims.remove(playerId);
-            runMain(() -> finishClaim(playerId, outcome, throwable));
-        });
+        LocalDate currentDate = today();
+        List<Double> payoutSnapshot = payouts;
+        submit(() -> claimOffThread(playerId, currentDate, payoutSnapshot))
+            .whenComplete((outcome, throwable) -> {
+                claims.remove(playerId);
+                runMain(() -> finishClaim(playerId, outcome, throwable));
+            });
     }
 
     private void finishClaim(UUID playerId, DailyClaimOutcome outcome, Throwable throwable) {
-        Player player = onlinePlayer(playerId);
-        if (player == null) {
+        Optional<Player> online = onlinePlayer(playerId);
+        if (online.isEmpty()) {
             return;
         }
+        Player player = online.orElseThrow();
         if (throwable != null) {
             plugin.getLogger().log(Level.WARNING, "Daily claim failed for " + playerId,
                 unwrapCompletionException(throwable));
@@ -513,83 +528,140 @@ public final class DailyService implements CommandExecutor, Listener {
             return;
         }
 
-        player.sendMessage(Component.text(outcome.message()));
-        if (outcome.state() != null) {
+        String message = outcome.claimed()
+            ? "Daily reward claimed: " + menuRenderer.rewardText(outcome.amount())
+            : outcome.message();
+        player.sendMessage(Component.text(message));
+        if (outcome.claimed()) {
             animationRenderer.playClaimSound(player);
         }
         openLoaded(playerId, false);
     }
 
-    private DailyClaimOutcome claimOffThread(UUID playerId) throws SQLException {
-        LocalDate currentDate = today();
+    private DailyClaimOutcome claimOffThread(UUID playerId, LocalDate currentDate,
+                                             List<Double> payoutSnapshot) throws SQLException {
         DailyState old = storage.load(playerId, LEGACY_ANIMATION_DEFAULT);
         int streak = DailyRules.nextStreak(old.lastClaimDate(), currentDate, old.currentStreak());
         if (streak == 0) {
-            return new DailyClaimOutcome("You already claimed today's reward.", null);
+            return DailyClaimOutcome.failure("You already claimed today's reward.");
         }
 
-        double amount = DailyRules.payout(streak, payouts);
+        double amount = DailyRules.payout(streak, payoutSnapshot);
         if (!storage.reserve(playerId, currentDate, amount)) {
             return reservationConflict(playerId, currentDate);
         }
-        Double balanceBefore = onlineBalance(playerId);
-        if (balanceBefore == null) {
-            return failDisconnected(playerId, currentDate);
+
+        BalanceLookup balance = lookupBalance(playerId, currentDate);
+        if (!balance.available()) {
+            return DailyClaimOutcome.failure(balance.failureMessage());
+        }
+        if (!markDepositing(playerId, currentDate, balance.amount())) {
+            return DailyClaimOutcome.failure(
+                "The daily claim could not be prepared safely and may be retried.");
         }
 
-        storage.markDepositing(playerId, currentDate, balanceBefore);
-        VaultHook.DepositResult result = deposit(playerId, amount);
-        if (result == null) {
-            return failDisconnected(playerId, currentDate);
+        DepositLookup deposit = invokeDeposit(playerId, currentDate, amount, balance.amount());
+        if (!deposit.completed()) {
+            return DailyClaimOutcome.failure(deposit.failureMessage());
         }
+        return finalizeDeposit(playerId, currentDate, old, streak, amount, deposit.result());
+    }
 
+    private BalanceLookup lookupBalance(UUID playerId, LocalDate date) {
+        try {
+            return callOnMain(() -> onlinePlayer(playerId)
+                .map(player -> BalanceLookup.available(vault.getBalance(player)))
+                .orElseGet(() -> BalanceLookup.unavailable(
+                    "Daily claim stopped before the economy was invoked; it may be retried.")));
+        } catch (SQLException ex) {
+            failReservationSafely(playerId, date,
+                "Balance lookup failed before Vault deposit: " + ex.getMessage());
+            return BalanceLookup.unavailable(
+                "The economy balance could not be checked safely; the claim may be retried.");
+        }
+    }
+
+    private boolean markDepositing(UUID playerId, LocalDate date, double balanceBefore) {
+        try {
+            storage.markDepositing(playerId, date, balanceBefore);
+            return true;
+        } catch (SQLException ex) {
+            failReservationSafely(playerId, date,
+                "Could not mark Vault deposit as started: " + ex.getMessage());
+            plugin.getLogger().log(Level.WARNING,
+                "Could not prepare daily deposit for " + playerId, ex);
+            return false;
+        }
+    }
+
+    private DepositLookup invokeDeposit(UUID playerId, LocalDate date, double amount,
+                                        double balanceBefore) {
+        try {
+            DepositLookup lookup = callOnMain(() -> onlinePlayer(playerId)
+                .map(player -> DepositLookup.completed(vault.depositDetailed(player, amount)))
+                .orElseGet(() -> DepositLookup.notInvoked(
+                    "Daily claim stopped before the economy was invoked; it may be retried.")));
+            if (!lookup.completed()) {
+                failReservationSafely(playerId, date, DISCONNECTED_BEFORE_VAULT);
+            }
+            return lookup;
+        } catch (SQLException ex) {
+            markInvocationUncertain(playerId, date, balanceBefore, ex);
+            return DepositLookup.notInvoked(
+                "The economy result was uncertain. Do not retry; contact staff for reconciliation.");
+        }
+    }
+
+    private DailyClaimOutcome finalizeDeposit(UUID playerId, LocalDate date, DailyState old,
+                                              int streak, double amount,
+                                              VaultHook.DepositResult result) throws SQLException {
         DailyStorage.TransactionStatus status = classifyVaultResult(result);
-        storage.recordVaultResult(playerId, currentDate, status, result.balanceAfter(),
+        storage.recordVaultResult(playerId, date, status, result.balanceAfter(),
             result.responseAmount(), result.responseType(), result.errorMessage());
         if (status != DailyStorage.TransactionStatus.DELIVERED) {
             return unsuccessfulDeposit(status);
         }
 
-        DailyState next = new DailyState(currentDate, streak, Math.max(old.highestStreak(), streak),
+        DailyState next = new DailyState(date, streak, Math.max(old.highestStreak(), streak),
             old.totalClaims() + 1, old.totalAwarded() + amount, true);
-        storage.complete(playerId, currentDate, next);
-        return new DailyClaimOutcome("Daily reward claimed: "
-            + formatAmount(amount) + " " + menuRenderer.currencyLabel(), next);
+        storage.complete(playerId, date, next);
+        return DailyClaimOutcome.success(amount);
     }
 
     private DailyClaimOutcome reservationConflict(UUID playerId, LocalDate currentDate)
         throws SQLException {
         DailyStorage.Transaction existing = storage.transaction(playerId, currentDate);
         String status = existing == null ? "unknown" : existing.status().name();
-        return new DailyClaimOutcome("Today's daily transaction is " + status
-            + ". Contact staff if your reward or streak is missing.", null);
+        return DailyClaimOutcome.failure("Today's daily transaction is " + status
+            + ". Contact staff if your reward or streak is missing.");
     }
 
-    private Double onlineBalance(UUID playerId) throws SQLException {
-        return callOnMain(() -> {
-            Player player = onlinePlayer(playerId);
-            return player == null ? null : vault.getBalance(player);
-        });
+    private void failReservationSafely(UUID playerId, LocalDate date, String reason) {
+        try {
+            storage.fail(playerId, date, reason);
+        } catch (SQLException ex) {
+            plugin.getLogger().log(Level.SEVERE,
+                "Could not mark pre-Vault daily reservation as failed for " + playerId, ex);
+        }
     }
 
-    private VaultHook.DepositResult deposit(UUID playerId, double amount) throws SQLException {
-        return callOnMain(() -> {
-            Player player = onlinePlayer(playerId);
-            return player == null ? null : vault.depositDetailed(player, amount);
-        });
-    }
-
-    private DailyClaimOutcome failDisconnected(UUID playerId, LocalDate date) throws SQLException {
-        storage.fail(playerId, date, "Player disconnected before Vault invocation");
-        return new DailyClaimOutcome(
-            "Daily claim stopped before the economy was invoked; it may be retried.", null);
+    private void markInvocationUncertain(UUID playerId, LocalDate date, double balanceBefore,
+                                         SQLException cause) {
+        try {
+            storage.recordVaultResult(playerId, date, DailyStorage.TransactionStatus.UNCERTAIN,
+                balanceBefore, 0D, "EXCEPTION", cause.getMessage());
+        } catch (SQLException storageFailure) {
+            storageFailure.addSuppressed(cause);
+            plugin.getLogger().log(Level.SEVERE,
+                "Could not persist uncertain daily Vault result for " + playerId, storageFailure);
+        }
     }
 
     private DailyClaimOutcome unsuccessfulDeposit(DailyStorage.TransactionStatus status) {
         String message = status == DailyStorage.TransactionStatus.UNCERTAIN
             ? "The economy result was uncertain. Do not retry; contact staff for reconciliation."
             : "The economy rejected the deposit; your streak was not advanced and may be retried.";
-        return new DailyClaimOutcome(message, null);
+        return DailyClaimOutcome.failure(message);
     }
 
     private DailyStorage.TransactionStatus classifyVaultResult(VaultHook.DepositResult result) {
@@ -638,14 +710,7 @@ public final class DailyService implements CommandExecutor, Listener {
             throw new SQLException("Daily service is stopping");
         }
         CompletableFuture<T> result = new CompletableFuture<>();
-        boolean scheduled = runMain(() -> {
-            try {
-                result.complete(callable.call());
-            } catch (Exception ex) {
-                result.completeExceptionally(ex);
-            }
-        });
-        if (!scheduled) {
+        if (!runMain(() -> completeCallable(callable, result))) {
             throw new SQLException("Daily main-thread work could not be scheduled");
         }
 
@@ -659,6 +724,14 @@ public final class DailyService implements CommandExecutor, Listener {
         }
     }
 
+    private <T> void completeCallable(Callable<T> callable, CompletableFuture<T> result) {
+        try {
+            result.complete(callable.call());
+        } catch (Exception ex) {
+            result.completeExceptionally(ex);
+        }
+    }
+
     private boolean runMain(Runnable runnable) {
         if (!accepting.get()) {
             return false;
@@ -666,15 +739,15 @@ public final class DailyService implements CommandExecutor, Listener {
         try {
             Bukkit.getScheduler().runTask(plugin, runnable);
             return true;
-        } catch (IllegalArgumentException | IllegalStateException ex) {
+        } catch (IllegalArgumentException | IllegalPluginAccessException ex) {
             plugin.getLogger().log(Level.WARNING, "Could not schedule daily callback", ex);
             return false;
         }
     }
 
-    private Player onlinePlayer(UUID playerId) {
+    private Optional<Player> onlinePlayer(UUID playerId) {
         Player player = Bukkit.getPlayer(playerId);
-        return player != null && player.isOnline() ? player : null;
+        return player != null && player.isOnline() ? Optional.of(player) : Optional.empty();
     }
 
     private void completeToSender(CommandSender sender, CompletableFuture<List<String>> future) {
@@ -718,17 +791,41 @@ public final class DailyService implements CommandExecutor, Listener {
         return LocalDate.now(zone);
     }
 
-    private String formatAmount(double amount) {
-        return BigDecimal.valueOf(amount).stripTrailingZeros().toPlainString();
-    }
-
     private record ActiveAnimation(UUID sessionId, BukkitTask task) {
     }
 
     private record ParsedAdminDate(LocalDate date, int reasonEnd) {
     }
 
-    private record DailyClaimOutcome(String message, DailyState state) {
+    private record BalanceLookup(boolean available, double amount, String failureMessage) {
+        private static BalanceLookup available(double amount) {
+            return new BalanceLookup(true, amount, "");
+        }
+
+        private static BalanceLookup unavailable(String message) {
+            return new BalanceLookup(false, 0D, message);
+        }
+    }
+
+    private record DepositLookup(boolean completed, VaultHook.DepositResult result,
+                                 String failureMessage) {
+        private static DepositLookup completed(VaultHook.DepositResult result) {
+            return new DepositLookup(true, result, "");
+        }
+
+        private static DepositLookup notInvoked(String message) {
+            return new DepositLookup(false, VaultHook.DepositResult.unavailable(0D, message), message);
+        }
+    }
+
+    private record DailyClaimOutcome(String message, boolean claimed, double amount) {
+        private static DailyClaimOutcome success(double amount) {
+            return new DailyClaimOutcome("", true, amount);
+        }
+
+        private static DailyClaimOutcome failure(String message) {
+            return new DailyClaimOutcome(message, false, 0D);
+        }
     }
 
     @FunctionalInterface
