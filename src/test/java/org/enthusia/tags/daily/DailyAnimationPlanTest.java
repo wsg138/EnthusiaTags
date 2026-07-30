@@ -33,6 +33,18 @@ class DailyAnimationPlanTest {
     }
 
     @Test
+    void minimumConfiguredAnimationStillRevealsAllRewards() {
+        DailyAnimationPlan.Frame finalFrame = DailyAnimationPlan.frame(13, 14);
+
+        assertAll(
+            () -> assertEquals(7, finalFrame.revealedDays()),
+            () -> assertEquals(7, finalFrame.progressSegments()),
+            () -> assertEquals(23, finalFrame.borderHead()),
+            () -> assertTrue(finalFrame.finalFrame())
+        );
+    }
+
+    @Test
     void revealAccentOnlyFiresWhenAnotherDayAppears() {
         DailyAnimationPlan.Frame beforeReveal = DailyAnimationPlan.frame(3, 20);
         DailyAnimationPlan.Frame reveal = DailyAnimationPlan.frame(4, 20);
