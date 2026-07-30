@@ -33,7 +33,7 @@ final class DailyMenuModel {
             days.add(new Day(dayNumber, DailyRules.payout(dayNumber, payouts), rolling, status));
         }
 
-        return new View(state.currentStreak(), state.highestStreak(), activeDay, claimIndex,
+        return new View(completedDays, state.highestStreak(), activeDay, claimIndex,
             List.copyOf(days));
     }
 
@@ -42,9 +42,9 @@ final class DailyMenuModel {
         if (lastClaim == null) {
             return 0;
         }
-        boolean streakStillVisible = lastClaim.equals(currentDate)
+        boolean streakStillActive = lastClaim.equals(currentDate)
             || lastClaim.plusDays(1).equals(currentDate);
-        return streakStillVisible ? Math.max(0, state.currentStreak()) : 0;
+        return streakStillActive ? Math.max(0, state.currentStreak()) : 0;
     }
 
     private static Status statusFor(int dayNumber, int nextDay, int completedDays,
