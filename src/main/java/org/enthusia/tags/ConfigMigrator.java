@@ -5,6 +5,7 @@ import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.plugin.java.JavaPlugin;
 
 import java.io.File;
+import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -65,7 +66,7 @@ public final class ConfigMigrator {
             if (changed) {
                 config.save(file);
             }
-        } catch (Exception ex) {
+        } catch (IOException | IllegalArgumentException | SecurityException ex) {
             report.warning(resourceName + ": migration failed: " + ex.getMessage());
         }
     }
@@ -142,7 +143,7 @@ public final class ConfigMigrator {
             return false;
         }
         config.set("rewards.starter_pack.rewards.r1.type", "ITEM");
-        config.set("rewards.starter_pack.rewards.r1.id", null);
+        clearPath(config, "rewards.starter_pack.rewards.r1.id");
         config.set("rewards.starter_pack.rewards.r1.material", "GOLDEN_APPLE");
         config.set("rewards.starter_pack.rewards.r1.amount", 2);
         report.migrated("rewards.yml: migrated unchanged starter_pack command to ITEM");
@@ -169,9 +170,15 @@ public final class ConfigMigrator {
 
     private boolean removeDeprecated(YamlConfiguration config, String path, MigrationReport report) {
         if (!config.contains(path)) return false;
-        config.set(path, null);
+        clearPath(config, path);
         report.migrated("config.yml: removed deprecated key " + path);
         return true;
+    }
+
+    @SuppressWarnings("PMD.NullAssignment")
+    private void clearPath(YamlConfiguration config, String path) {
+        // Bukkit's Configuration API removes a key by assigning null.
+        config.set(path, null);
     }
 
     private boolean replaceRewardMoneyAmount(YamlConfiguration config,
@@ -221,7 +228,7 @@ public final class ConfigMigrator {
         return "config.yml".equals(resourceName) && path.startsWith("tags.");
     }
 
-    private void backup(File file, String resourceName, MigrationReport report) throws Exception {
+    private void backup(File file, String resourceName, MigrationReport report) throws IOException {
         File backupDir = new File(plugin.getDataFolder(), "backups");
         if (!backupDir.exists() && !backupDir.mkdirs()) {
             report.warning(resourceName + ": failed to create backup directory");
