@@ -28,23 +28,6 @@ jobs:
       - name: Test and package
         run: mvn --batch-mode --no-transfer-progress clean test package
 
-      - name: Verify exact Codacy issue count
-        if: github.event_name == 'pull_request' && github.event.pull_request.number == 8
-        run: |
-          set -euo pipefail
-          API='https://api.codacy.com/api/v3/analysis/organizations/gh/wsg138/repositories/EnthusiaTags/pull-requests/8/issues?status=new&limit=100'
-          for attempt in $(seq 1 30); do
-            curl --fail --silent --show-error --location --header 'Accept: application/json' "$API" > /tmp/codacy.json
-            if [ "$(jq -r '.analyzed' /tmp/codacy.json)" = "true" ]; then
-              break
-            fi
-            sleep 10
-          done
-          jq '{analyzed, pagination}' /tmp/codacy.json
-          jq -r '.data[] | [(.commitIssue.patternInfo.id // .commitIssue.patternId // "unknown"), (.commitIssue.filePath // "unknown"), ((.commitIssue.lineNumber // .commitIssue.line // 0) | tostring), (.commitIssue.message // "")] | @tsv' /tmp/codacy.json
-          test "$(jq -r '.analyzed' /tmp/codacy.json)" = "true"
-          test "$(jq -r '.pagination.total' /tmp/codacy.json)" = "0"
-
       - name: Upload plugin JAR
         uses: actions/upload-artifact@v4
         with:
