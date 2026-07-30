@@ -62,6 +62,7 @@ debug:
 
 daily:
   timezone: "America/Indiana/Indianapolis"
+  currency-label: "Raw Gold"
   payouts: [5, 10, 15, 20, 30, 40, 50]
 
   # Plays when /daily is opened. This is a global server option, not a player GUI toggle.

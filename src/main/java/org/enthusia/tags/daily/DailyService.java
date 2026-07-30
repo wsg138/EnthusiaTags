@@ -551,7 +551,7 @@ public final class DailyService implements CommandExecutor, Listener {
             return reservationConflict(playerId, currentDate);
         }
 
-        BalanceLookup balance = lookupBalance(playerId, currentDate);
+        BalanceLookup balance = lookupBalance(playerId);
         if (!balance.available()) {
             failReservationSafely(playerId, currentDate,
                 "Player unavailable before Vault balance lookup");
@@ -569,7 +569,7 @@ public final class DailyService implements CommandExecutor, Listener {
         return finalizeDeposit(playerId, currentDate, old, streak, amount, deposit.result());
     }
 
-    private BalanceLookup lookupBalance(UUID playerId, LocalDate date) {
+    private BalanceLookup lookupBalance(UUID playerId) {
         try {
             return callOnMain(() -> onlinePlayer(playerId)
                 .map(player -> BalanceLookup.available(vault.getBalance(player)))
