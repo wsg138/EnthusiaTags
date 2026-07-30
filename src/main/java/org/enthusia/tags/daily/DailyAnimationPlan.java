@@ -11,7 +11,10 @@ final class DailyAnimationPlan {
             throw new IllegalArgumentException("Daily animation requires at least two frames");
         }
         int frame = Math.max(0, Math.min(totalFrames - 1, requestedFrame));
-        int revealedDays = Math.min(DailyMenuModel.TRACK_LENGTH, Math.max(0, frame / 2));
+        boolean finalFrame = frame == totalFrames - 1;
+        int revealedDays = finalFrame
+            ? DailyMenuModel.TRACK_LENGTH
+            : Math.min(DailyMenuModel.TRACK_LENGTH, Math.max(0, frame / 2));
         int previousRevealedDays = frame == 0
             ? 0 : Math.min(DailyMenuModel.TRACK_LENGTH, Math.max(0, (frame - 1) / 2));
         int progressSegments = Math.min(DailyMenuModel.TRACK_LENGTH,
@@ -21,7 +24,7 @@ final class DailyAnimationPlan {
 
         return new Frame(frame, borderHead, revealedDays, progressSegments,
             frame >= 5, frame >= 7, revealedDays > previousRevealedDays,
-            frame == totalFrames - 1, centerStage);
+            finalFrame, centerStage);
     }
 
     private static CenterStage centerStage(int frame, int totalFrames) {
