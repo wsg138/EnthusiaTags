@@ -12,10 +12,11 @@ final class DailyMenuModel {
     }
 
     static View build(DailyState state, LocalDate currentDate, List<Double> payouts,
-                      DailyStorage.TransactionStatus transactionStatus) {
+                      LedgerState ledgerState) {
         Objects.requireNonNull(state, "state");
         Objects.requireNonNull(currentDate, "currentDate");
         Objects.requireNonNull(payouts, "payouts");
+        Objects.requireNonNull(ledgerState, "ledgerState");
 
         int nextDay = DailyRules.nextStreak(state.lastClaimDate(), currentDate, state.currentStreak());
         int activeDay = nextDay == 0 ? Math.max(1, state.currentStreak()) : nextDay;
@@ -26,15 +27,29 @@ final class DailyMenuModel {
         for (int index = 0; index < TRACK_LENGTH; index++) {
             boolean rolling = index == TRACK_LENGTH - 1 && activeDay > TRACK_LENGTH;
             int dayNumber = rolling ? activeDay : index + 1;
-            Status status = statusFor(dayNumber, nextDay, completedDays, transactionStatus);
+            Status status = statusFor(dayNumber, nextDay, completedDays, ledgerState);
             if (status.claimable()) {
                 claimIndex = index;
             }
             days.add(new Day(dayNumber, DailyRules.payout(dayNumber, payouts), rolling, status));
         }
 
-        return new View(completedDays, state.highestStreak(), activeDay, claimIndex,
-            List.copyOf(days));
+        return new View(completedDays, state.highestStreak(), activeDay, claimIndex, days);
+    }
+
+    static LedgerState ledgerState(DailyStorage.Transaction transaction) {
+        if (transaction == null) {
+            return LedgerState.NONE;
+        }
+        return switch (transaction.status()) {
+            case PREPARED -> LedgerState.PREPARED;
+            case DEPOSITING -> LedgerState.DEPOSITING;
+            case DELIVERED -> LedgerState.DELIVERED;
+            case FAILED -> LedgerState.FAILED;
+            case UNCERTAIN -> LedgerState.UNCERTAIN;
+            case RECONCILED -> LedgerState.RECONCILED;
+            case CANCELLED -> LedgerState.CANCELLED;
+        };
     }
 
     private static int completedDays(DailyState state, LocalDate currentDate) {
@@ -48,17 +63,15 @@ final class DailyMenuModel {
     }
 
     private static Status statusFor(int dayNumber, int nextDay, int completedDays,
-                                    DailyStorage.TransactionStatus transactionStatus) {
+                                    LedgerState ledgerState) {
         if (dayNumber <= completedDays) {
             return Status.CLAIMED;
         }
         if (nextDay <= 0 || dayNumber != nextDay) {
             return Status.UPCOMING;
         }
-        if (transactionStatus == null) {
-            return Status.CLAIMABLE;
-        }
-        return switch (transactionStatus) {
+        return switch (ledgerState) {
+            case NONE -> Status.CLAIMABLE;
             case FAILED -> Status.RETRY;
             case PREPARED, DEPOSITING, RECONCILED -> Status.PROCESSING;
             case UNCERTAIN, DELIVERED, CANCELLED -> Status.RECONCILIATION;
@@ -84,6 +97,17 @@ final class DailyMenuModel {
             }
             Objects.requireNonNull(status, "status");
         }
+    }
+
+    enum LedgerState {
+        NONE,
+        PREPARED,
+        DEPOSITING,
+        DELIVERED,
+        FAILED,
+        UNCERTAIN,
+        RECONCILED,
+        CANCELLED
     }
 
     enum Status {
