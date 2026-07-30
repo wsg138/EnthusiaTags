@@ -17,6 +17,7 @@ class DailyAnimationPlanTest {
 
         assertAll(
             () -> assertEquals(DailyAnimationPlan.CenterStage.LOADING, first.centerStage()),
+            () -> assertEquals(0, first.borderHead()),
             () -> assertEquals(0, first.revealedDays()),
             () -> assertEquals(1, first.progressSegments()),
             () -> assertEquals(DailyAnimationPlan.CenterStage.DAY, middle.centerStage()),
@@ -24,6 +25,7 @@ class DailyAnimationPlanTest {
             () -> assertTrue(middle.showCurrentStreak()),
             () -> assertTrue(middle.showBestStreak()),
             () -> assertEquals(DailyAnimationPlan.CenterStage.READY, last.centerStage()),
+            () -> assertEquals(23, last.borderHead()),
             () -> assertEquals(7, last.revealedDays()),
             () -> assertEquals(7, last.progressSegments()),
             () -> assertTrue(last.finalFrame())
@@ -51,6 +53,7 @@ class DailyAnimationPlanTest {
         assertAll(
             () -> assertEquals(0, negative.number()),
             () -> assertEquals(17, excessive.number()),
+            () -> assertEquals(23, excessive.borderHead()),
             () -> assertTrue(excessive.finalFrame())
         );
     }
