@@ -35,8 +35,15 @@ Therefore exact-once recovery across a crash during the external deposit cannot 
 An uncertain entry must be reviewed and reconciled by an administrator after checking the economy
 provider's records and the player's balance.
 
-The daily GUI has a persistent per-player animation preference. The global animation switch can
-disable animations without overwriting individual preferences.
+The daily menu shows only the current streak, best streak, and seven payout slots. Days already
+completed are marked claimed, the next day is clickable, and later days are shown as upcoming.
+After day seven, the seventh slot becomes a distinct rolling item such as `Day 10` while retaining
+the configured day-seven-and-later payout.
+
+The opening animation is controlled globally under `daily.animation`; there is no player-facing
+animation toggle. It renders a configurable multi-frame GUI sequence with a sound on every frame.
+A successful claim only plays the separate sound configured under `daily.claim-sound` and then
+refreshes the seven-day menu.
 
 ## Unlock notifications
 
