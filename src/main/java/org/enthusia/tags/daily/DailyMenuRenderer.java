@@ -2,10 +2,11 @@ package org.enthusia.tags.daily;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.List;
+import java.util.Map;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
-import org.bukkit.Bukkit;
 import org.bukkit.Material;
 import org.bukkit.enchantments.Enchantment;
 import org.bukkit.inventory.Inventory;
@@ -15,30 +16,39 @@ import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.plugin.java.JavaPlugin;
 
 final class DailyMenuRenderer {
-    static final int[] DAY_SLOTS = {10, 11, 12, 13, 14, 15, 16};
     static final Component TITLE = Component.text("Daily Rewards", NamedTextColor.GOLD);
     private static final String CURRENCY_LABEL_PATH = "daily.currency-label";
+    private static final String DEFAULT_CURRENCY_LABEL = "Raw Gold";
+    private static final List<Integer> DAY_SLOTS = List.of(10, 11, 12, 13, 14, 15, 16);
 
     private final JavaPlugin plugin;
+    private final Map<Material, ItemStack> blankPanes = new EnumMap<>(Material.class);
 
     DailyMenuRenderer(JavaPlugin plugin) {
         this.plugin = plugin;
     }
 
     Inventory createMenu(DailyMenuModel.View view) {
-        int claimSlot = view.claimIndex() < 0 ? -1 : DAY_SLOTS[view.claimIndex()];
-        DailyInventoryHolder holder = DailyInventoryHolder.menu(claimSlot);
-        Inventory inventory = Bukkit.createInventory(holder, 27, TITLE);
-        holder.attach(inventory);
-
+        DailyInventoryHolder holder = DailyInventoryHolder.menu(claimSlot(view), TITLE);
+        Inventory inventory = holder.getInventory();
         inventory.setItem(3, statItem(Material.CLOCK, "Current Streak", view.currentStreak(),
             NamedTextColor.AQUA));
         inventory.setItem(5, statItem(Material.BEACON, "Best Streak", view.bestStreak(),
             NamedTextColor.GOLD));
-        for (int index = 0; index < view.days().size(); index++) {
-            inventory.setItem(DAY_SLOTS[index], dayItem(view.days().get(index)));
+
+        List<ItemStack> rewardItems = rewardItems(view);
+        for (int index = 0; index < rewardItems.size(); index++) {
+            inventory.setItem(DAY_SLOTS.get(index), rewardItems.get(index));
         }
         return inventory;
+    }
+
+    List<ItemStack> rewardItems(DailyMenuModel.View view) {
+        List<ItemStack> items = new ArrayList<>(DailyMenuModel.TRACK_LENGTH);
+        for (DailyMenuModel.Day day : view.days()) {
+            items.add(dayItem(day));
+        }
+        return List.copyOf(items);
     }
 
     ItemStack statItem(Material material, String label, int value, NamedTextColor color) {
@@ -67,7 +77,8 @@ final class DailyMenuRenderer {
     }
 
     ItemStack blankPane(Material material) {
-        return item(material, Component.text(" "), List.of(), false);
+        return blankPanes.computeIfAbsent(material,
+            paneMaterial -> item(paneMaterial, Component.text(" "), List.of(), false));
     }
 
     String rewardText(double amount) {
@@ -75,8 +86,12 @@ final class DailyMenuRenderer {
     }
 
     String currencyLabel() {
-        String configured = plugin.getConfig().getString(CURRENCY_LABEL_PATH, "Raw Gold");
-        return configured == null || configured.isBlank() ? "Raw Gold" : configured.trim();
+        String configured = plugin.getConfig().getString(CURRENCY_LABEL_PATH, DEFAULT_CURRENCY_LABEL);
+        return configured == null || configured.isBlank() ? DEFAULT_CURRENCY_LABEL : configured.trim();
+    }
+
+    private int claimSlot(DailyMenuModel.View view) {
+        return view.claimIndex() < 0 ? -1 : DAY_SLOTS.get(view.claimIndex());
     }
 
     private Material statusMaterial(DailyMenuModel.Status status) {
