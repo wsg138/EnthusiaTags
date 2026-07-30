@@ -28,6 +28,28 @@ jobs:
       - name: Test and package
         run: mvn --batch-mode --no-transfer-progress clean test package
 
+      - name: Diagnose Codacy PR issues
+        if: github.event_name == 'pull_request' && github.event.pull_request.number == 6
+        run: |
+          set -euo pipefail
+          API='https://api.codacy.com/api/v3/analysis/organizations/gh/wsg138/repositories/EnthusiaTags/pull-requests/6/issues?status=new&limit=100'
+          curl --fail --silent --show-error --location \
+            --header 'Accept: application/json' \
+            "$API" > /tmp/codacy-issues.json
+          echo '=== Codacy analysis metadata ==='
+          jq '{analyzed, pagination}' /tmp/codacy-issues.json
+          echo '=== Exact Codacy issues ==='
+          jq -r '.data[] | [
+            (.commitIssue.patternInfo.id // .commitIssue.patternId // "unknown-pattern"),
+            (.commitIssue.patternInfo.level // .commitIssue.level // "unknown-level"),
+            (.commitIssue.patternInfo.category // .commitIssue.category // "unknown-category"),
+            (.commitIssue.filePath // "unknown-file"),
+            ((.commitIssue.lineNumber // .commitIssue.line // 0) | tostring),
+            (.commitIssue.message // .commitIssue.patternInfo.title // "")
+          ] | @tsv' /tmp/codacy-issues.json
+          echo '=== Raw Codacy issue objects ==='
+          jq '.data' /tmp/codacy-issues.json
+
       - name: Upload plugin JAR
         uses: actions/upload-artifact@v4
         with:
