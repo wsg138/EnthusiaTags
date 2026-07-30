@@ -34,6 +34,9 @@ final class DailyAnimationRenderer {
     DailyAnimationRenderer(JavaPlugin plugin, DailyMenuRenderer menuRenderer) {
         this.plugin = plugin;
         this.menuRenderer = menuRenderer;
+        if (BORDER_SLOTS.size() != DailyAnimationPlan.BORDER_RING_LENGTH) {
+            throw new IllegalStateException("Daily animation border layout does not match its plan");
+        }
     }
 
     boolean enabled() {
@@ -79,8 +82,8 @@ final class DailyAnimationRenderer {
         );
     }
 
-    void renderFrame(Inventory inventory, Presentation presentation, int frame, int totalFrames) {
-        DailyAnimationPlan.Frame plan = DailyAnimationPlan.frame(frame, totalFrames);
+    void renderFrame(Inventory inventory, Presentation presentation,
+                     DailyAnimationPlan.Frame plan) {
         fillBackground(inventory, plan.finalFrame());
         renderBorderSweep(inventory, plan.borderHead());
         renderProgress(inventory, plan.progressSegments());
@@ -90,11 +93,10 @@ final class DailyAnimationRenderer {
         renderCenterPulse(inventory, plan.number());
     }
 
-    void playFrameSound(Player player, int frame, int totalFrames) {
+    void playFrameSound(Player player, DailyAnimationPlan.Frame plan) {
         if (!plugin.getConfig().getBoolean(SOUND_PATH + "enabled", true)) {
             return;
         }
-        DailyAnimationPlan.Frame plan = DailyAnimationPlan.frame(frame, totalFrames);
         if (plan.finalFrame()) {
             playConfiguredSound(player, SOUND_PATH + "final-sound", Sound.BLOCK_AMETHYST_BLOCK_CHIME,
                 SOUND_PATH + "final-volume", 0.55F, SOUND_PATH + "final-pitch", 1.25F);
@@ -112,7 +114,7 @@ final class DailyAnimationRenderer {
         float volume = Math.min(0.18F, configuredVolume * 0.5F);
         float startPitch = configuredFloat(SOUND_PATH + "starting-pitch", 0.68F, 0.5F, 2F);
         float pitchStep = configuredFloat(SOUND_PATH + "pitch-step", 0.055F, 0F, 0.2F);
-        float pitch = Math.min(2F, startPitch + frame * pitchStep);
+        float pitch = Math.min(2F, startPitch + plan.number() * pitchStep);
         player.playSound(player.getLocation(), sound, SoundCategory.PLAYERS, volume, pitch);
     }
 
