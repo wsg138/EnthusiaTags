@@ -457,6 +457,7 @@ public final class DailyService implements CommandExecutor, Listener {
             }, 1L);
         } catch (IllegalArgumentException | IllegalPluginAccessException ex) {
             plugin.getLogger().log(Level.WARNING, "Could not finish daily animation", ex);
+            openLoaded(playerId, false);
         }
     }
 
