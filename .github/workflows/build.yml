@@ -6,6 +6,75 @@ on:
     branches: [main]
 
 permissions:
+  contents: write
+
+concurrency:
+  group: enthusiatags-build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  apply-yaml-review-fixes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/reward-vault-rebalance-100
+          fetch-depth: 0
+
+      - name: Clean reward labels and section placement
+        shell: python
+        run: |
+          from pathlib import Path
+
+          def replace_once(text, old, new, label):
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"Expected exactly one {label}, found {count}")
+              return text.replace(old, new, 1)
+
+          rewards_path = Path("src/main/resources/rewards.yml")
+          rewards = rewards_path.read_text()
+          labels = {
+              "label: 8Deepslate Dedication bonus": "label: Deepslate Dedication bonus",
+              "label: 8Coal Miner bonus": "label: Coal Miner bonus",
+              "label: 8Deep Coal Miner bonus": "label: Deep Coal Miner bonus",
+              "label: 9Lapis Hoarder bonus": "label: Lapis Hoarder bonus",
+              "label: cRedstone Engineer bonus": "label: Redstone Engineer bonus",
+              "label: 4Deep Redstone Engineer bonus": "label: Deep Redstone Engineer bonus",
+              "label: aEmerald Hunter bonus": "label: Emerald Hunter bonus",
+              "label: 5Ancient Debris Hunter bonus": "label: Ancient Debris Hunter bonus",
+              "label: eQuarter Million bonus": "label: Quarter Million bonus",
+              "label: 6lMillionaire bonus": "label: Millionaire bonus",
+          }
+          for old, new in labels.items():
+              rewards = replace_once(rewards, old, new, old)
+
+          old_banner = '''
+  # ---------------------------------------------------------------------------
+  # Reward expansion: 48 new rewards. Existing reward IDs above are unchanged.
+  # ---------------------------------------------------------------------------
+    category: economy
+  getting_around:
+'''
+          new_banner = '''
+    category: economy
+
+  # ---------------------------------------------------------------------------
+  # Reward expansion: 48 new rewards. Existing reward IDs above are unchanged.
+  # ---------------------------------------------------------------------------
+  getting_around:
+'''
+          rewards = replace_once(rewards, old_banner, new_banner, "reward expansion banner")
+          rewards_path.write_text(rewards)
+
+          Path(".github/workflows/build.yml").write_text('''name: Build
+
+on:
+  push:
+  pull_request:
+    branches: [main]
+
+permissions:
   contents: read
 
 concurrency:
@@ -35,3 +104,12 @@ jobs:
           path: target/EnthusiaTags.jar
           if-no-files-found: error
           retention-days: 14
+''')
+
+      - name: Commit cleaned resources
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Clean reward labels and expansion section"
+          git push origin HEAD:agent/reward-vault-rebalance-100
