@@ -1,0 +1,38 @@
+name: Publish latest build
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: enthusiatags-latest-release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - name: Test and package
+        run: mvn --batch-mode --no-transfer-progress clean test package
+
+      - name: Update rolling prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view latest >/dev/null 2>&1; then
+            gh release upload latest target/EnthusiaTags.jar --clobber
+          else
+            gh release create latest target/EnthusiaTags.jar --prerelease --title "Latest development build" --notes "Automatically updated from main."
+          fi
