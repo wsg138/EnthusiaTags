@@ -1,15 +1,15 @@
 name: Apply reward version-5 wiring
 
 on:
-  pull_request:
-    branches: [main]
+  push:
+    branches: [agent/reward-vault-rebalance-100]
+    paths: [.github/workflows/apply-reward-v5-wiring.yml]
 
 permissions:
   contents: write
 
 jobs:
   apply:
-    if: github.head_ref == 'agent/reward-vault-rebalance-100'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
