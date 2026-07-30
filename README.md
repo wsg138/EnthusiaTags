@@ -23,7 +23,8 @@ present. Structural migrations create a timestamped backup in `plugins/EnthusiaT
 `/daily` uses calendar dates in `America/Indiana/Indianapolis` by default. The timezone, displayed
 currency label, and entire payout list are configurable under `daily`. The bundled schedule pays
 5, 10, 15, 20, 30, 40, then 50 raw gold for day seven and every consecutive day afterward.
-Missing a calendar day resets the next successful claim to day one.
+Missing a calendar day resets the next successful claim to day one. Invalid, negative, or non-finite
+payout values are rejected and replaced with the safe bundled schedule before Vault is called.
 
 The daily ledger persists `PREPARED`, `DEPOSITING`, `DELIVERED`, `FAILED`, and `UNCERTAIN`
 transaction states. It also records the requested and returned amounts, Vault response type and
@@ -46,6 +47,9 @@ animation toggle. It renders a configurable multi-frame GUI sequence with a soun
 A successful claim only plays the separate sound configured under `daily.claim-sound` and then
 refreshes the seven-day menu. If the animation completion task cannot be scheduled, the service
 falls back to opening the normal daily menu instead of leaving an unusable animation inventory.
+
+A reload pauses new daily claims while an in-flight claim finishes. It retries with a short backoff
+for up to 20 seconds and logs a warning instead of creating an unbounded every-tick retry loop.
 
 ## Unlock notifications
 
