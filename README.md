@@ -20,10 +20,10 @@ present. Structural migrations create a timestamped backup in `plugins/EnthusiaT
 
 ## Daily rewards
 
-`/daily` uses calendar dates in `America/Indiana/Indianapolis` by default. The timezone and the
-entire payout list are configurable under `daily`. The bundled schedule pays 5, 10, 15, 20, 30,
-40, then 50 raw gold for day seven and every consecutive day afterward. Missing a calendar day
-resets the next successful claim to day one.
+`/daily` uses calendar dates in `America/Indiana/Indianapolis` by default. The timezone, displayed
+currency label, and entire payout list are configurable under `daily`. The bundled schedule pays
+5, 10, 15, 20, 30, 40, then 50 raw gold for day seven and every consecutive day afterward.
+Missing a calendar day resets the next successful claim to day one.
 
 The daily ledger persists `PREPARED`, `DEPOSITING`, `DELIVERED`, `FAILED`, and `UNCERTAIN`
 transaction states. It also records the requested and returned amounts, Vault response type and
