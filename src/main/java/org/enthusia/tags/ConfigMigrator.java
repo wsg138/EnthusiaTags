@@ -15,7 +15,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 public final class ConfigMigrator {
-    public static final int CURRENT_CONFIG_VERSION = 3;
+    public static final int CURRENT_CONFIG_VERSION = 4;
     private static final int REWARDS_CONFIG_VERSION = 4;
     private static final DateTimeFormatter BACKUP_FORMAT = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
 
@@ -85,8 +85,14 @@ public final class ConfigMigrator {
                                        int existingVersion,
                                        MigrationReport report) {
         boolean changed = false;
-        if ("config.yml".equals(resourceName) && existingVersion < CURRENT_CONFIG_VERSION) {
-            changed |= migrateInvisibilityDefault(config, report);
+        if ("config.yml".equals(resourceName)) {
+            if (existingVersion < 3) {
+                changed |= migrateInvisibilityDefault(config, report);
+            }
+            if (existingVersion < 4) {
+                changed |= removeDeprecated(config, "daily.animation.default-player-preference", report);
+                changed |= removeDeprecated(config, "daily.animation.duration-ticks", report);
+            }
         }
         if ("rewards.yml".equals(resourceName) && existingVersion < REWARDS_CONFIG_VERSION) {
             changed |= replaceRewardMoneyAmount(config, "rewards.payday.rewards.r1.amount", 500.0, 200.0, report);
@@ -134,6 +140,13 @@ public final class ConfigMigrator {
         }
         config.set(path, true);
         report.migrated("config.yml: " + path + " false -> true");
+        return true;
+    }
+
+    private boolean removeDeprecated(YamlConfiguration config, String path, MigrationReport report) {
+        if (!config.contains(path)) return false;
+        config.set(path, null);
+        report.migrated("config.yml: removed deprecated key " + path);
         return true;
     }
 
@@ -218,12 +231,24 @@ public final class ConfigMigrator {
             warnings.add(line);
         }
 
-        public List<String> summaryLines() {
-            List<String> lines = new ArrayList<>();
-            lines.add("config backups=" + backups.size() + ", migrated=" + migrated.size()
-                + ", added=" + added.size() + ", warnings=" + warnings.size());
-            lines.addAll(warnings);
-            return lines;
+        public List<String> backups() {
+            return List.copyOf(backups);
+        }
+
+        public List<String> added() {
+            return List.copyOf(added);
+        }
+
+        public List<String> migrated() {
+            return List.copyOf(migrated);
+        }
+
+        public List<String> warnings() {
+            return List.copyOf(warnings);
+        }
+
+        public boolean hasChanges() {
+            return !backups.isEmpty() || !added.isEmpty() || !migrated.isEmpty();
         }
     }
 }
