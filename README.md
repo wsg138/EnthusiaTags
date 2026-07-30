@@ -44,7 +44,8 @@ the configured day-seven-and-later payout.
 The opening animation is controlled globally under `daily.animation`; there is no player-facing
 animation toggle. It renders a configurable multi-frame GUI sequence with a sound on every frame.
 A successful claim only plays the separate sound configured under `daily.claim-sound` and then
-refreshes the seven-day menu.
+refreshes the seven-day menu. If the animation completion task cannot be scheduled, the service
+falls back to opening the normal daily menu instead of leaving an unusable animation inventory.
 
 ## Unlock notifications
 
