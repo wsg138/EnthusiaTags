@@ -1,6 +1,7 @@
 package org.enthusia.tags.daily;
 
 import java.io.File;
+import java.math.BigDecimal;
 import java.sql.SQLException;
 import java.time.*;
 import java.util.*;
@@ -8,8 +9,10 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.*;
 import org.bukkit.command.*;
+import org.bukkit.enchantments.Enchantment;
 import org.bukkit.entity.Player;
 import org.bukkit.event.*;
 import org.bukkit.event.inventory.*;
@@ -17,10 +20,20 @@ import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.inventory.*;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.plugin.java.JavaPlugin;
+import org.bukkit.scheduler.BukkitRunnable;
 import org.bukkit.scheduler.BukkitTask;
 import org.enthusia.tags.rewards.VaultHook;
 
 public final class DailyService implements CommandExecutor, Listener {
+    private static final int[] DAY_SLOTS = {10, 11, 12, 13, 14, 15, 16};
+    private static final int[] ANIMATION_DAY_SLOTS = {28, 29, 30, 31, 32, 33, 34};
+    private static final int[] ANIMATION_BORDER = {
+        0, 1, 2, 3, 4, 5, 6, 7, 8,
+        17, 26, 35,
+        44, 43, 42, 41, 40, 39, 38, 37, 36,
+        27, 18, 9
+    };
+
     private final JavaPlugin plugin;
     private final VaultHook vault = new VaultHook();
     private final Set<UUID> claims = ConcurrentHashMap.newKeySet();
@@ -95,10 +108,6 @@ public final class DailyService implements CommandExecutor, Listener {
             sender.sendMessage("Only players can use /daily.");
             return true;
         }
-        if (args.length == 2 && args[0].equalsIgnoreCase("animation")) {
-            player.sendMessage("Use the animation toggle inside /daily.");
-            return true;
-        }
         open(player);
         return true;
     }
@@ -164,7 +173,7 @@ public final class DailyService implements CommandExecutor, Listener {
 
     private List<String> reconcileDaily(UUID playerId, LocalDate date, String decision,
                                         String administrator, String reason) throws SQLException {
-        DailyState old = storage.load(playerId, animationDefault());
+        DailyState old = storage.load(playerId, true);
         DailyStorage.Transaction transaction = storage.transaction(playerId, date);
         if (transaction == null) throw new SQLException("Daily transaction not found");
         boolean delivered = decision.equals("delivered");
@@ -187,7 +196,7 @@ public final class DailyService implements CommandExecutor, Listener {
 
     private List<String> inspect(UUID playerId, LocalDate date) throws SQLException {
         List<String> lines = new ArrayList<>();
-        DailyState state = storage.load(playerId, animationDefault());
+        DailyState state = storage.load(playerId, true);
         DailyStorage.Transaction tx = storage.transaction(playerId, date);
         lines.add("Daily inspection: " + playerId + " / " + date);
         lines.add("  state last=" + state.lastClaimDate() + " streak=" + state.currentStreak()
@@ -226,97 +235,259 @@ public final class DailyService implements CommandExecutor, Listener {
     }
 
     private void openLoaded(UUID playerId, boolean allowAnimation) {
-        submit(() -> new DailyView(storage.load(playerId, animationDefault()),
+        submit(() -> new DailyView(storage.load(playerId, true),
             storage.transaction(playerId, today()))).whenComplete((view, throwable) ->
             runMain(() -> {
                 Player live = onlinePlayer(playerId);
                 if (live == null) return;
                 if (throwable != null) {
                     live.sendMessage(Component.text("Daily rewards are temporarily unavailable."));
-                } else if (allowAnimation && plugin.getConfig().getBoolean("daily.animation.enabled", true)
-                    && view.state().animationEnabled()
-                    && DailyRules.nextStreak(view.state().lastClaimDate(), today(),
-                        view.state().currentStreak()) > 0) {
-                    openAnimation(live);
+                } else if (allowAnimation && animationEnabled()) {
+                    openAnimation(live, view);
                 } else {
-                    live.openInventory(menu(live, view.state(), view.transaction()));
+                    live.openInventory(menu(view.state(), view.transaction()));
                 }
             }));
     }
 
-    private void openAnimation(Player player) {
-        cancelAnimation(player.getUniqueId());
-        Inventory inventory = Bukkit.createInventory(new Holder(true), 27, Component.text("Daily Reward"));
-        ItemStack pane = named(Material.LIGHT_BLUE_STAINED_GLASS_PANE, " ");
-        for (int slot : List.of(0,1,2,3,4,5,6,7,8,9,17,18,19,20,21,22,23,24,25,26)) inventory.setItem(slot, pane);
-        inventory.setItem(13, named(Material.GOLD_INGOT, "Daily reward"));
+    private void openAnimation(Player player, DailyView view) {
+        UUID playerId = player.getUniqueId();
+        cancelAnimation(playerId);
+        Inventory inventory = Bukkit.createInventory(new Holder(true, -1), 45,
+            Component.text("Daily Rewards", NamedTextColor.GOLD));
         player.openInventory(inventory);
-        long duration = Math.max(12L, Math.min(18L, plugin.getConfig().getLong("daily.animation.duration-ticks", 15L)));
-        animations.put(player.getUniqueId(), Bukkit.getScheduler().runTaskLater(plugin, () -> {
-            animations.remove(player.getUniqueId());
-            Player live = onlinePlayer(player.getUniqueId());
-            if (live != null) openLoaded(live.getUniqueId(), false);
-        }, duration));
+
+        int frames = clamp(plugin.getConfig().getInt("daily.animation.frames", 18), 12, 30);
+        long frameTicks = clamp(plugin.getConfig().getLong("daily.animation.frame-ticks", 2L), 1L, 5L);
+
+        BukkitRunnable animation = new BukkitRunnable() {
+            private int frame;
+
+            @Override public void run() {
+                Player live = onlinePlayer(playerId);
+                if (live == null || live.getOpenInventory().getTopInventory() != inventory) {
+                    animations.remove(playerId);
+                    cancel();
+                    return;
+                }
+
+                renderAnimationFrame(inventory, view, frame, frames);
+                playAnimationSound(live, frame, frames);
+                frame++;
+
+                if (frame >= frames) {
+                    animations.remove(playerId);
+                    cancel();
+                    Bukkit.getScheduler().runTaskLater(plugin, () -> {
+                        Player current = onlinePlayer(playerId);
+                        if (current != null && current.getOpenInventory().getTopInventory() == inventory) {
+                            current.openInventory(menu(view.state(), view.transaction()));
+                        }
+                    }, 1L);
+                }
+            }
+        };
+        BukkitTask task = animation.runTaskTimer(plugin, 0L, frameTicks);
+        animations.put(playerId, task);
     }
 
-    private Inventory menu(Player player, DailyState state) {
-        return menu(player, state, null);
-    }
+    private void renderAnimationFrame(Inventory inventory, DailyView view, int frame, int frames) {
+        ItemStack background = named(Material.BLACK_STAINED_GLASS_PANE, " ");
+        ItemStack border = named(frame >= frames - 3
+            ? Material.YELLOW_STAINED_GLASS_PANE : Material.GRAY_STAINED_GLASS_PANE, " ");
+        for (int slot = 0; slot < inventory.getSize(); slot++) inventory.setItem(slot, background);
+        for (int slot : ANIMATION_BORDER) inventory.setItem(slot, border);
 
-    private Inventory menu(Player player, DailyState state, DailyStorage.Transaction transaction) {
-        Inventory inventory = Bukkit.createInventory(new Holder(false), 27, Component.text("Daily Reward"));
-        LocalDate today = today();
-        int next = DailyRules.nextStreak(state.lastClaimDate(), today, state.currentStreak());
-        int payoutDay = next == 0 ? state.currentStreak() : next;
-        inventory.setItem(11, named(Material.CLOCK, "Streak: " + state.currentStreak()
-            + " | Best: " + state.highestStreak() + " | Claims: " + state.totalClaims()));
-        Material claimMaterial = next == 0 ? Material.GRAY_DYE : Material.EMERALD;
-        String claimText = next == 0 ? "Already claimed today"
-            : "Claim $" + DailyRules.payout(payoutDay, payouts);
-        if (transaction != null && transaction.status() == DailyStorage.TransactionStatus.UNCERTAIN) {
-            claimMaterial = Material.REDSTONE;
-            claimText = "Daily deposit uncertain - contact staff";
-        } else if (transaction != null && transaction.status() == DailyStorage.TransactionStatus.FAILED) {
-            claimMaterial = Material.YELLOW_DYE;
-            claimText = "Previous deposit failed safely - click to retry";
-        } else if (transaction != null && (transaction.status() == DailyStorage.TransactionStatus.PREPARED
-            || transaction.status() == DailyStorage.TransactionStatus.DEPOSITING
-            || transaction.status() == DailyStorage.TransactionStatus.RECONCILED)) {
-            claimMaterial = Material.CLOCK;
-            claimText = "Daily claim is still being processed";
+        int head = frame % ANIMATION_BORDER.length;
+        setAnimationBorder(inventory, head, Material.WHITE_STAINED_GLASS_PANE);
+        setAnimationBorder(inventory, head - 1, Material.YELLOW_STAINED_GLASS_PANE);
+        setAnimationBorder(inventory, head - 2, Material.ORANGE_STAINED_GLASS_PANE);
+        setAnimationBorder(inventory, head - 3, Material.BROWN_STAINED_GLASS_PANE);
+
+        LocalDate currentDate = today();
+        int next = DailyRules.nextStreak(view.state().lastClaimDate(), currentDate,
+            view.state().currentStreak());
+        int activeDay = next == 0 ? Math.max(1, view.state().currentStreak()) : next;
+        int completed = activeCompletedDays(view.state(), currentDate);
+        int revealCount = Math.min(7, Math.max(0, frame - 2));
+        for (int index = 0; index < revealCount; index++) {
+            int day = displayedDay(index, activeDay);
+            DayStatus status = dayStatus(day, next, completed, view.transaction());
+            inventory.setItem(ANIMATION_DAY_SLOTS[index], dayItem(day, index == 6 && activeDay > 7, status));
         }
-        inventory.setItem(13, named(claimMaterial, claimText));
-        inventory.setItem(15, named(state.animationEnabled() ? Material.LIME_DYE : Material.RED_DYE,
-            "Animation: " + (state.animationEnabled() ? "ON" : "OFF")));
+
+        if (frame >= 5) {
+            inventory.setItem(20, statItem(Material.CLOCK, "Current Streak",
+                view.state().currentStreak()));
+            inventory.setItem(24, statItem(Material.BEACON, "Best Streak",
+                view.state().highestStreak()));
+        }
+
+        Material centerMaterial;
+        String centerName;
+        if (frame < 4) {
+            centerMaterial = Material.CLOCK;
+            centerName = "Loading your streak...";
+        } else if (frame < 8) {
+            centerMaterial = Material.GOLD_NUGGET;
+            centerName = "Finding Day " + activeDay + "...";
+        } else if (frame < frames - 3) {
+            centerMaterial = Material.GOLD_INGOT;
+            centerName = "Day " + activeDay + " • $" + formatAmount(DailyRules.payout(activeDay, payouts));
+        } else {
+            centerMaterial = Material.EMERALD;
+            centerName = "Daily Rewards Ready";
+        }
+        ItemStack center = named(centerMaterial, centerName);
+        if (frame >= frames - 3) addGlow(center);
+        inventory.setItem(22, center);
+    }
+
+    private void setAnimationBorder(Inventory inventory, int index, Material material) {
+        int normalized = Math.floorMod(index, ANIMATION_BORDER.length);
+        inventory.setItem(ANIMATION_BORDER[normalized], named(material, " "));
+    }
+
+    private Inventory menu(DailyState state) {
+        return menu(state, null);
+    }
+
+    private Inventory menu(DailyState state, DailyStorage.Transaction transaction) {
+        LocalDate currentDate = today();
+        int next = DailyRules.nextStreak(state.lastClaimDate(), currentDate, state.currentStreak());
+        int activeDay = next == 0 ? Math.max(1, state.currentStreak()) : next;
+        int completed = activeCompletedDays(state, currentDate);
+        int claimSlot = claimSlot(next, transaction);
+
+        Inventory inventory = Bukkit.createInventory(new Holder(false, claimSlot), 27,
+            Component.text("Daily Rewards", NamedTextColor.GOLD));
+        inventory.setItem(3, statItem(Material.CLOCK, "Current Streak", state.currentStreak()));
+        inventory.setItem(5, statItem(Material.BEACON, "Best Streak", state.highestStreak()));
+
+        for (int index = 0; index < DAY_SLOTS.length; index++) {
+            int day = displayedDay(index, activeDay);
+            DayStatus status = dayStatus(day, next, completed, transaction);
+            inventory.setItem(DAY_SLOTS[index], dayItem(day, index == 6 && activeDay > 7, status));
+        }
         return inventory;
+    }
+
+    private int displayedDay(int index, int activeDay) {
+        return index == 6 && activeDay > 7 ? activeDay : index + 1;
+    }
+
+    private int activeCompletedDays(DailyState state, LocalDate currentDate) {
+        if (state.lastClaimDate() == null) return 0;
+        if (state.lastClaimDate().equals(currentDate)
+            || state.lastClaimDate().plusDays(1).equals(currentDate)) {
+            return Math.max(0, state.currentStreak());
+        }
+        return 0;
+    }
+
+    private int claimSlot(int next, DailyStorage.Transaction transaction) {
+        if (next <= 0 || transactionBlocksClaim(transaction)) return -1;
+        return next >= 7 ? DAY_SLOTS[6] : DAY_SLOTS[next - 1];
+    }
+
+    private DayStatus dayStatus(int day, int next, int completed,
+                                DailyStorage.Transaction transaction) {
+        if (day <= completed) return DayStatus.CLAIMED;
+        if (next > 0 && day == next) {
+            if (transaction != null && transaction.status() == DailyStorage.TransactionStatus.UNCERTAIN) {
+                return DayStatus.RECONCILIATION;
+            }
+            if (transaction != null && transaction.status() == DailyStorage.TransactionStatus.FAILED) {
+                return DayStatus.RETRY;
+            }
+            if (transactionBlocksClaim(transaction)) return DayStatus.PROCESSING;
+            return DayStatus.CLAIMABLE;
+        }
+        return DayStatus.UPCOMING;
+    }
+
+    private boolean transactionBlocksClaim(DailyStorage.Transaction transaction) {
+        if (transaction == null) return false;
+        return transaction.status() == DailyStorage.TransactionStatus.UNCERTAIN
+            || transaction.status() == DailyStorage.TransactionStatus.PREPARED
+            || transaction.status() == DailyStorage.TransactionStatus.DEPOSITING
+            || transaction.status() == DailyStorage.TransactionStatus.RECONCILED;
+    }
+
+    private ItemStack statItem(Material material, String label, int value) {
+        return item(material, Component.text(label, NamedTextColor.GOLD), List.of(
+            Component.text(String.valueOf(value), NamedTextColor.WHITE)
+        ), false);
+    }
+
+    private ItemStack dayItem(int day, boolean rolling, DayStatus status) {
+        Material material;
+        NamedTextColor color;
+        String statusLine;
+        boolean glowing = false;
+
+        if (rolling) {
+            material = Material.NETHER_STAR;
+        } else if (status == DayStatus.CLAIMED) {
+            material = Material.LIME_STAINED_GLASS_PANE;
+        } else if (status == DayStatus.CLAIMABLE) {
+            material = Material.GOLD_INGOT;
+        } else if (status == DayStatus.RETRY) {
+            material = Material.YELLOW_DYE;
+        } else if (status == DayStatus.RECONCILIATION) {
+            material = Material.REDSTONE;
+        } else if (status == DayStatus.PROCESSING) {
+            material = Material.CLOCK;
+        } else {
+            material = Material.GRAY_STAINED_GLASS_PANE;
+        }
+
+        if (status == DayStatus.CLAIMED) {
+            color = NamedTextColor.GREEN;
+            statusLine = "Claimed";
+        } else if (status == DayStatus.CLAIMABLE) {
+            color = NamedTextColor.GOLD;
+            statusLine = "Available now — click to claim";
+            glowing = true;
+        } else if (status == DayStatus.RETRY) {
+            color = NamedTextColor.YELLOW;
+            statusLine = "Previous deposit failed — click to retry";
+            glowing = true;
+        } else if (status == DayStatus.RECONCILIATION) {
+            color = NamedTextColor.RED;
+            statusLine = "Uncertain deposit — contact staff";
+        } else if (status == DayStatus.PROCESSING) {
+            color = NamedTextColor.YELLOW;
+            statusLine = "Claim is still being processed";
+        } else {
+            color = NamedTextColor.GRAY;
+            statusLine = "Upcoming";
+        }
+
+        Component name = Component.text("Day " + day, color);
+        List<Component> lore = List.of(
+            Component.text("Amount: ", NamedTextColor.GRAY)
+                .append(Component.text("$" + formatAmount(DailyRules.payout(day, payouts)), NamedTextColor.GOLD)),
+            Component.text(statusLine, color)
+        );
+        return item(material, name, lore, glowing);
     }
 
     @EventHandler public void click(InventoryClickEvent event) {
         if (!(event.getView().getTopInventory().getHolder() instanceof Holder holder)) return;
         event.setCancelled(true);
         if (!(event.getWhoClicked() instanceof Player player) || holder.animation()) return;
-        if (event.getRawSlot() == 13) claim(player);
-        if (event.getRawSlot() == 15) {
-            UUID playerId = player.getUniqueId();
-            submit(() -> {
-                DailyState state = storage.load(playerId, animationDefault());
-                storage.saveAnimationPreference(playerId, !state.animationEnabled(), animationDefault());
-                return new DailyState(state.lastClaimDate(), state.currentStreak(),
-                    state.highestStreak(), state.totalClaims(), state.totalAwarded(), !state.animationEnabled());
-            }).whenComplete((state, throwable) -> runMain(() -> {
-                Player live = onlinePlayer(playerId);
-                if (live == null) return;
-                if (throwable != null) live.sendMessage(Component.text("Could not save the animation preference."));
-                else live.openInventory(menu(live, state));
-            }));
-        }
+        if (holder.claimSlot() >= 0 && event.getRawSlot() == holder.claimSlot()) claim(player);
     }
 
     @EventHandler public void drag(InventoryDragEvent event) {
         if (event.getView().getTopInventory().getHolder() instanceof Holder) event.setCancelled(true);
     }
 
-    @EventHandler public void quit(PlayerQuitEvent event) { cancelAnimation(event.getPlayer().getUniqueId()); }
+    @EventHandler public void quit(PlayerQuitEvent event) {
+        cancelAnimation(event.getPlayer().getUniqueId());
+    }
+
     @EventHandler public void close(InventoryCloseEvent event) {
         if (event.getInventory().getHolder() instanceof Holder holder && holder.animation()
             && event.getPlayer() instanceof Player player) cancelAnimation(player.getUniqueId());
@@ -344,60 +515,61 @@ public final class DailyService implements CommandExecutor, Listener {
                     return;
                 }
                 live.sendMessage(Component.text(outcome.message()));
-                if (outcome.state() != null) live.openInventory(menu(live, outcome.state()));
+                if (outcome.state() != null) {
+                    playClaimSound(live);
+                    live.openInventory(menu(outcome.state()));
+                } else {
+                    openLoaded(id, false);
+                }
             });
         });
     }
 
     private DailyClaimOutcome claimOffThread(UUID id) throws SQLException {
-        try {
-            LocalDate today = today();
-            DailyState old = storage.load(id, animationDefault());
-            int streak = DailyRules.nextStreak(old.lastClaimDate(), today, old.currentStreak());
-            if (streak == 0) {
-                return new DailyClaimOutcome("You already claimed today's reward.", null);
-            }
-            double amount = DailyRules.payout(streak, payouts);
-            if (!storage.reserve(id, today, amount)) {
-                DailyStorage.Transaction existing = storage.transaction(id, today);
-                String status = existing == null ? "unknown" : existing.status().name();
-                return new DailyClaimOutcome("Today's daily transaction is " + status
-                    + ". Contact staff if your reward or streak is missing.", null);
-            }
-            Player live = callOnMain(() -> onlinePlayer(id));
-            if (live == null) {
-                storage.fail(id, today, "Player disconnected before Vault invocation");
-                return new DailyClaimOutcome("Daily claim stopped before the economy was invoked; it may be retried.",
-                    null);
-            }
-            double before = callOnMain(() -> vault.getBalance(live));
-            storage.markDepositing(id, today, before);
-            VaultHook.DepositResult result = callOnMain(() -> {
-                Player current = onlinePlayer(id);
-                if (current == null) return null;
-                return vault.depositDetailed(current, amount);
-            });
-            if (result == null) {
-                storage.fail(id, today, "Player disconnected before Vault invocation");
-                return new DailyClaimOutcome("Daily claim stopped before the economy was invoked; it may be retried.",
-                    null);
-            }
-            DailyStorage.TransactionStatus resultStatus = classifyVaultResult(result);
-            storage.recordVaultResult(id, today, resultStatus,
-                result.balanceAfter(), result.responseAmount(), result.responseType(), result.errorMessage());
-            if (resultStatus != DailyStorage.TransactionStatus.DELIVERED) {
-                String message = resultStatus == DailyStorage.TransactionStatus.UNCERTAIN
-                    ? "The economy result was uncertain. Do not retry; contact staff for reconciliation."
-                    : "The economy rejected the deposit; your streak was not advanced and may be retried.";
-                return new DailyClaimOutcome(message, null);
-            }
-            DailyState next = new DailyState(today, streak, Math.max(old.highestStreak(), streak),
-                old.totalClaims() + 1, old.totalAwarded() + amount, old.animationEnabled());
-            storage.complete(id, today, next);
-            return new DailyClaimOutcome("Daily reward claimed: $" + amount, next);
-        } catch (SQLException ex) {
-            throw ex;
+        LocalDate currentDate = today();
+        DailyState old = storage.load(id, true);
+        int streak = DailyRules.nextStreak(old.lastClaimDate(), currentDate, old.currentStreak());
+        if (streak == 0) {
+            return new DailyClaimOutcome("You already claimed today's reward.", null);
         }
+        double amount = DailyRules.payout(streak, payouts);
+        if (!storage.reserve(id, currentDate, amount)) {
+            DailyStorage.Transaction existing = storage.transaction(id, currentDate);
+            String status = existing == null ? "unknown" : existing.status().name();
+            return new DailyClaimOutcome("Today's daily transaction is " + status
+                + ". Contact staff if your reward or streak is missing.", null);
+        }
+        Player live = callOnMain(() -> onlinePlayer(id));
+        if (live == null) {
+            storage.fail(id, currentDate, "Player disconnected before Vault invocation");
+            return new DailyClaimOutcome("Daily claim stopped before the economy was invoked; it may be retried.",
+                null);
+        }
+        double before = callOnMain(() -> vault.getBalance(live));
+        storage.markDepositing(id, currentDate, before);
+        VaultHook.DepositResult result = callOnMain(() -> {
+            Player current = onlinePlayer(id);
+            if (current == null) return null;
+            return vault.depositDetailed(current, amount);
+        });
+        if (result == null) {
+            storage.fail(id, currentDate, "Player disconnected before Vault invocation");
+            return new DailyClaimOutcome("Daily claim stopped before the economy was invoked; it may be retried.",
+                null);
+        }
+        DailyStorage.TransactionStatus resultStatus = classifyVaultResult(result);
+        storage.recordVaultResult(id, currentDate, resultStatus,
+            result.balanceAfter(), result.responseAmount(), result.responseType(), result.errorMessage());
+        if (resultStatus != DailyStorage.TransactionStatus.DELIVERED) {
+            String message = resultStatus == DailyStorage.TransactionStatus.UNCERTAIN
+                ? "The economy result was uncertain. Do not retry; contact staff for reconciliation."
+                : "The economy rejected the deposit; your streak was not advanced and may be retried.";
+            return new DailyClaimOutcome(message, null);
+        }
+        DailyState next = new DailyState(currentDate, streak, Math.max(old.highestStreak(), streak),
+            old.totalClaims() + 1, old.totalAwarded() + amount, old.animationEnabled());
+        storage.complete(id, currentDate, next);
+        return new DailyClaimOutcome("Daily reward claimed: $" + formatAmount(amount), next);
     }
 
     private DailyStorage.TransactionStatus classifyVaultResult(VaultHook.DepositResult result) {
@@ -480,28 +652,117 @@ public final class DailyService implements CommandExecutor, Listener {
         }));
     }
 
+    private boolean animationEnabled() {
+        return plugin.getConfig().getBoolean("daily.animation.enabled", true);
+    }
+
+    private void playAnimationSound(Player player, int frame, int frames) {
+        if (!plugin.getConfig().getBoolean("daily.animation.sound.enabled", true)) return;
+        if (frame >= frames - 1) {
+            playConfiguredSound(player, "daily.animation.sound.final-sound",
+                Sound.BLOCK_AMETHYST_BLOCK_CHIME,
+                "daily.animation.sound.final-volume", 0.65F,
+                "daily.animation.sound.final-pitch", 1.2F);
+            return;
+        }
+        boolean accent = frame > 0 && frame % 4 == 3;
+        String soundPath = accent
+            ? "daily.animation.sound.accent-sound" : "daily.animation.sound.step-sound";
+        Sound fallback = accent ? Sound.BLOCK_NOTE_BLOCK_CHIME : Sound.BLOCK_NOTE_BLOCK_HAT;
+        Sound sound = configuredSound(soundPath, fallback);
+        float volume = configuredFloat("daily.animation.sound.volume", 0.35F, 0F, 2F);
+        float startPitch = configuredFloat("daily.animation.sound.starting-pitch", 0.72F, 0.5F, 2F);
+        float pitchStep = configuredFloat("daily.animation.sound.pitch-step", 0.055F, 0F, 0.2F);
+        float pitch = Math.min(2F, startPitch + (frame * pitchStep) + (accent ? 0.08F : 0F));
+        player.playSound(player.getLocation(), sound, SoundCategory.MASTER, volume, pitch);
+    }
+
+    private void playClaimSound(Player player) {
+        if (!plugin.getConfig().getBoolean("daily.claim-sound.enabled", true)) return;
+        playConfiguredSound(player, "daily.claim-sound.sound", Sound.ENTITY_EXPERIENCE_ORB_PICKUP,
+            "daily.claim-sound.volume", 0.7F,
+            "daily.claim-sound.pitch", 1.25F);
+    }
+
+    private void playConfiguredSound(Player player, String soundPath, Sound fallback,
+                                     String volumePath, float defaultVolume,
+                                     String pitchPath, float defaultPitch) {
+        Sound sound = configuredSound(soundPath, fallback);
+        float volume = configuredFloat(volumePath, defaultVolume, 0F, 2F);
+        float pitch = configuredFloat(pitchPath, defaultPitch, 0.5F, 2F);
+        player.playSound(player.getLocation(), sound, SoundCategory.MASTER, volume, pitch);
+    }
+
+    private Sound configuredSound(String path, Sound fallback) {
+        String configured = plugin.getConfig().getString(path, fallback.name());
+        try {
+            return Sound.valueOf(configured.toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException ex) {
+            plugin.getLogger().warning("Invalid sound " + configured + " at " + path
+                + "; using " + fallback.name());
+            return fallback;
+        }
+    }
+
+    private float configuredFloat(String path, float fallback, float minimum, float maximum) {
+        return (float) Math.max(minimum, Math.min(maximum,
+            plugin.getConfig().getDouble(path, fallback)));
+    }
+
     private void cancelAnimation(UUID id) {
         BukkitTask task = animations.remove(id);
         if (task != null) task.cancel();
     }
+
     private LocalDate today() { return LocalDate.now(zone); }
-    private boolean animationDefault() {
-        return plugin.getConfig().getBoolean("daily.animation.default-player-preference", true);
-    }
+
     private ZoneId parseZone(String configured) {
-        try { return ZoneId.of(configured); } catch (DateTimeException ex) {
-            plugin.getLogger().warning("Invalid daily timezone " + configured + "; using America/Indiana/Indianapolis");
+        try {
+            return ZoneId.of(configured);
+        } catch (DateTimeException ex) {
+            plugin.getLogger().warning("Invalid daily timezone " + configured
+                + "; using America/Indiana/Indianapolis");
             return ZoneId.of("America/Indiana/Indianapolis");
         }
     }
+
     private ItemStack named(Material material, String name) {
+        return item(material, Component.text(name), List.of(), false);
+    }
+
+    private ItemStack item(Material material, Component name, List<Component> lore, boolean glowing) {
         ItemStack stack = new ItemStack(material);
         ItemMeta meta = stack.getItemMeta();
-        meta.displayName(Component.text(name));
+        meta.displayName(name);
+        if (!lore.isEmpty()) meta.lore(lore);
+        if (glowing) {
+            meta.addEnchant(Enchantment.UNBREAKING, 1, true);
+            meta.addItemFlags(ItemFlag.HIDE_ENCHANTS);
+        }
         stack.setItemMeta(meta);
         return stack;
     }
-    private record Holder(boolean animation) implements InventoryHolder {
+
+    private void addGlow(ItemStack stack) {
+        ItemMeta meta = stack.getItemMeta();
+        meta.addEnchant(Enchantment.UNBREAKING, 1, true);
+        meta.addItemFlags(ItemFlag.HIDE_ENCHANTS);
+        stack.setItemMeta(meta);
+    }
+
+    private String formatAmount(double amount) {
+        return BigDecimal.valueOf(amount).stripTrailingZeros().toPlainString();
+    }
+
+    private int clamp(int value, int minimum, int maximum) {
+        return Math.max(minimum, Math.min(maximum, value));
+    }
+
+    private long clamp(long value, long minimum, long maximum) {
+        return Math.max(minimum, Math.min(maximum, value));
+    }
+
+    private record Holder(boolean animation, int claimSlot) implements InventoryHolder {
         @Override public Inventory getInventory() { return null; }
     }
 
@@ -509,6 +770,15 @@ public final class DailyService implements CommandExecutor, Listener {
     }
 
     private record DailyView(DailyState state, DailyStorage.Transaction transaction) {
+    }
+
+    private enum DayStatus {
+        CLAIMED,
+        CLAIMABLE,
+        UPCOMING,
+        RETRY,
+        PROCESSING,
+        RECONCILIATION
     }
 
     @FunctionalInterface
