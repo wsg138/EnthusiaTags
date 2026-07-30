@@ -2,41 +2,37 @@ package org.enthusia.tags.daily;
 
 import java.util.Objects;
 import java.util.UUID;
+import net.kyori.adventure.text.Component;
+import org.bukkit.Bukkit;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.InventoryHolder;
 
 final class DailyInventoryHolder implements InventoryHolder {
-    enum Mode { MENU, ANIMATION }
+    private static final UUID MENU_SESSION = new UUID(0L, 0L);
 
-    private final Mode mode;
+    private final boolean animation;
     private final int claimSlot;
     private final UUID sessionId;
-    private Inventory inventory;
+    private final Inventory inventory;
 
-    private DailyInventoryHolder(Mode mode, int claimSlot, UUID sessionId) {
-        this.mode = Objects.requireNonNull(mode, "mode");
+    private DailyInventoryHolder(boolean animation, int claimSlot, UUID sessionId,
+                                 int size, Component title) {
+        this.animation = animation;
         this.claimSlot = claimSlot;
-        this.sessionId = sessionId;
+        this.sessionId = Objects.requireNonNull(sessionId, "sessionId");
+        inventory = Bukkit.createInventory(this, size, Objects.requireNonNull(title, "title"));
     }
 
-    static DailyInventoryHolder menu(int claimSlot) {
-        return new DailyInventoryHolder(Mode.MENU, claimSlot, null);
+    static DailyInventoryHolder menu(int claimSlot, Component title) {
+        return new DailyInventoryHolder(false, claimSlot, MENU_SESSION, 27, title);
     }
 
-    static DailyInventoryHolder animation(UUID sessionId) {
-        return new DailyInventoryHolder(Mode.ANIMATION, -1,
-            Objects.requireNonNull(sessionId, "sessionId"));
-    }
-
-    void attach(Inventory inventory) {
-        if (this.inventory != null) {
-            throw new IllegalStateException("Daily inventory holder is already attached");
-        }
-        this.inventory = Objects.requireNonNull(inventory, "inventory");
+    static DailyInventoryHolder animation(UUID sessionId, Component title) {
+        return new DailyInventoryHolder(true, -1, sessionId, 45, title);
     }
 
     boolean isAnimation() {
-        return mode == Mode.ANIMATION;
+        return animation;
     }
 
     int claimSlot() {
@@ -49,6 +45,6 @@ final class DailyInventoryHolder implements InventoryHolder {
 
     @Override
     public Inventory getInventory() {
-        return Objects.requireNonNull(inventory, "Daily inventory holder is not attached");
+        return inventory;
     }
 }
