@@ -14,7 +14,8 @@ class DailyMenuResetTest {
         DailyState stale = new DailyState(today.minusDays(2), 10, 12, 10, 0D, true);
 
         DailyMenuModel.View view = DailyMenuModel.build(stale, today,
-            List.of(5D, 10D, 15D, 20D, 30D, 40D, 50D), null);
+            List.of(5D, 10D, 15D, 20D, 30D, 40D, 50D),
+            DailyMenuModel.LedgerState.NONE);
 
         assertAll(
             () -> assertEquals(0, view.currentStreak()),
