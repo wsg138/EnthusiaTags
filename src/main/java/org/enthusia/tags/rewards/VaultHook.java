@@ -8,6 +8,9 @@ public final class VaultHook {
     public record DepositResult(boolean success, double requestedAmount, double responseAmount,
                                 String responseType, String errorMessage,
                                 double balanceBefore, double balanceAfter) {
+        public static DepositResult unavailable(double requestedAmount, String message) {
+            return new DepositResult(false, requestedAmount, 0D, "UNAVAILABLE", message, 0D, 0D);
+        }
     }
     private Object economy;
     private Class<?> economyClass;
