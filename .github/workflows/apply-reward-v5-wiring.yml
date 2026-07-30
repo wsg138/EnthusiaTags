@@ -80,3 +80,5 @@ jobs:
           git add -A
           git commit -m "Wire reward version-5 migration and payout limit"
           git push origin HEAD:agent/reward-vault-rebalance-100
+
+# Triggered after the workflow definition existed on the branch.
