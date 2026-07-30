@@ -57,7 +57,7 @@ public final class ConfigMigrator {
             boolean changed = false;
             if (existingVersion < targetVersion) {
                 backup(file, resourceName, report);
-                changed |= migrateKnownValues(resourceName, config, existingVersion, report);
+                changed |= migrateKnownValues(resourceName, config, defaults, existingVersion, report);
                 config.set("config-version", targetVersion);
                 report.migrated(resourceName + ": config-version " + existingVersion + " -> " + targetVersion);
                 changed = true;
@@ -82,14 +82,15 @@ public final class ConfigMigrator {
     }
 
     private boolean migrateKnownValues(String resourceName, YamlConfiguration config,
-                                       int existingVersion, MigrationReport report) {
+                                       YamlConfiguration defaults, int existingVersion,
+                                       MigrationReport report) {
         if ("config.yml".equals(resourceName)) {
             return migrateConfigValues(config, existingVersion, report);
         }
         if ("rewards.yml".equals(resourceName) && existingVersion < REWARDS_CONFIG_VERSION) {
             boolean changed = existingVersion < 4 && migrateRewardValues(config, report);
             if (existingVersion < 5) {
-                changed |= RewardConfigV5Migration.migrateRewards(config, report);
+                changed |= RewardConfigV5Migration.migrateRewards(config, defaults, report);
             }
             return changed;
         }
