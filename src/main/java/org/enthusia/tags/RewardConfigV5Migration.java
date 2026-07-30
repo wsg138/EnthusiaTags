@@ -1,6 +1,7 @@
 package org.enthusia.tags;
 
 import java.util.List;
+import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.YamlConfiguration;
 
 final class RewardConfigV5Migration {
@@ -63,7 +64,8 @@ final class RewardConfigV5Migration {
     private RewardConfigV5Migration() {
     }
 
-    static boolean migrateRewards(YamlConfiguration config, ConfigMigrator.MigrationReport report) {
+    static boolean migrateRewards(YamlConfiguration config, YamlConfiguration defaults,
+                                  ConfigMigrator.MigrationReport report) {
         boolean changed = false;
         for (MoneyMigration migration : MONEY_MIGRATIONS) {
             changed |= migrateMoneyAction(config, migration, report);
@@ -71,6 +73,7 @@ final class RewardConfigV5Migration {
         for (PhysicalGoldMigration migration : PHYSICAL_GOLD_MIGRATIONS) {
             changed |= removePhysicalGoldAction(config, migration, report);
         }
+        changed |= addMissingRewards(config, defaults, report);
         return changed;
     }
 
@@ -86,26 +89,17 @@ final class RewardConfigV5Migration {
 
     private static boolean migrateMoneyAction(YamlConfiguration config, MoneyMigration migration,
                                               ConfigMigrator.MigrationReport report) {
-        String typePath = migration.path() + ".type";
-        String type = config.getString(typePath, "");
+        String type = config.getString(migration.path() + ".type", "");
         boolean knownMoney = "MONEY".equalsIgnoreCase(type)
             && migration.oldAmounts().stream()
                 .anyMatch(oldAmount -> Double.compare(config.getDouble(migration.path() + ".amount"),
                     oldAmount) == 0);
-        boolean physicalGold = "ITEM".equalsIgnoreCase(type)
-            && isPhysicalGold(config.getString(migration.path() + ".material", ""));
-        if (!knownMoney && !physicalGold) {
+        if (!knownMoney) {
             return false;
         }
 
-        config.set(typePath, "MONEY");
         config.set(migration.path() + ".amount", migration.newAmount());
-        clear(config, migration.path() + ".id");
-        clear(config, migration.path() + ".material");
-        clear(config, migration.path() + ".label");
-        clear(config, migration.path() + ".display-name");
-        clear(config, migration.path() + ".lore");
-        report.migrated("rewards.yml: restored Vault raw-gold payout "
+        report.migrated("rewards.yml: updated Vault raw-gold payout "
             + migration.path() + " -> " + migration.newAmount());
         return true;
     }
@@ -122,16 +116,27 @@ final class RewardConfigV5Migration {
             return false;
         }
         clear(config, migration.path());
-        report.migrated("rewards.yml: removed physical gold item payout " + migration.path());
+        report.migrated("rewards.yml: removed unchanged physical gold payout " + migration.path());
         return true;
     }
 
-    private static boolean isPhysicalGold(String material) {
-        return "GOLD_NUGGET".equalsIgnoreCase(material)
-            || "GOLD_INGOT".equalsIgnoreCase(material)
-            || "GOLD_BLOCK".equalsIgnoreCase(material)
-            || "RAW_GOLD".equalsIgnoreCase(material)
-            || "RAW_GOLD_BLOCK".equalsIgnoreCase(material);
+    private static boolean addMissingRewards(YamlConfiguration config, YamlConfiguration defaults,
+                                             ConfigMigrator.MigrationReport report) {
+        ConfigurationSection bundledRewards = defaults.getConfigurationSection("rewards");
+        if (bundledRewards == null) {
+            return false;
+        }
+        boolean changed = false;
+        for (String rewardId : bundledRewards.getKeys(false)) {
+            String path = "rewards." + rewardId;
+            if (config.contains(path)) {
+                continue;
+            }
+            config.set(path, defaults.get(path));
+            report.added("rewards.yml: added missing bundled reward " + rewardId);
+            changed = true;
+        }
+        return changed;
     }
 
     @SuppressWarnings("PMD.NullAssignment")
