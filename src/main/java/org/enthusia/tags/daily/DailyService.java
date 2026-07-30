@@ -15,6 +15,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -53,16 +54,16 @@ public final class DailyService implements CommandExecutor, Listener {
     private static final List<Double> DEFAULT_PAYOUTS =
         List.of(5D, 10D, 15D, 20D, 30D, 40D, 50D);
     private static final boolean LEGACY_ANIMATION_DEFAULT = true;
+    private static final int MAX_RELOAD_RETRY_ATTEMPTS = 40;
+    private static final long RELOAD_RETRY_DELAY_TICKS = 10L;
 
     private final JavaPlugin plugin;
     private final VaultHook vault = new VaultHook();
     private final DailyMenuRenderer menuRenderer;
     private final DailyAnimationRenderer animationRenderer;
-    private final Set<UUID> claims = java.util.concurrent.ConcurrentHashMap.newKeySet();
-    private final Map<UUID, ActiveAnimation> animations =
-        new java.util.concurrent.ConcurrentHashMap<>();
-    private final Set<CompletableFuture<?>> activeWork =
-        java.util.concurrent.ConcurrentHashMap.newKeySet();
+    private final Set<UUID> claims = ConcurrentHashMap.newKeySet();
+    private final Map<UUID, ActiveAnimation> animations = new ConcurrentHashMap<>();
+    private final Set<CompletableFuture<?>> activeWork = ConcurrentHashMap.newKeySet();
     private final AtomicBoolean accepting = new AtomicBoolean(false);
     private final AtomicBoolean acceptingClaims = new AtomicBoolean(false);
 
@@ -70,6 +71,8 @@ public final class DailyService implements CommandExecutor, Listener {
     private ExecutorService executor;
     private volatile ZoneId zone;
     private volatile List<Double> payouts = DEFAULT_PAYOUTS;
+    private int reloadRetryAttempts;
+    private BukkitTask reloadRetryTask;
 
     public DailyService(JavaPlugin plugin) {
         this.plugin = plugin;
@@ -94,6 +97,7 @@ public final class DailyService implements CommandExecutor, Listener {
     public void disable() {
         accepting.set(false);
         acceptingClaims.set(false);
+        cancelReloadRetry();
         animations.values().forEach(active -> active.task().cancel());
         animations.clear();
 
@@ -113,6 +117,8 @@ public final class DailyService implements CommandExecutor, Listener {
             scheduleReloadRetry();
             return;
         }
+        cancelReloadRetry();
+        reloadRetryAttempts = 0;
         zone = configuredZone();
         payouts = configuredPayouts();
         vault.setup();
@@ -220,10 +226,31 @@ public final class DailyService implements CommandExecutor, Listener {
     }
 
     private void scheduleReloadRetry() {
+        if (reloadRetryTask != null) {
+            return;
+        }
+        if (reloadRetryAttempts >= MAX_RELOAD_RETRY_ATTEMPTS) {
+            plugin.getLogger().warning("Daily reload remained blocked by an active claim for "
+                + "20 seconds; claims remain paused until reload is run again.");
+            return;
+        }
+        reloadRetryAttempts++;
         try {
-            Bukkit.getScheduler().runTaskLater(plugin, this::reload, 1L);
+            reloadRetryTask = Bukkit.getScheduler().runTaskLater(plugin, () -> {
+                reloadRetryTask = null;
+                reload();
+            }, RELOAD_RETRY_DELAY_TICKS);
         } catch (IllegalArgumentException | IllegalPluginAccessException ex) {
+            reloadRetryTask = null;
             plugin.getLogger().log(Level.WARNING, "Could not reschedule daily reload", ex);
+        }
+    }
+
+    private void cancelReloadRetry() {
+        BukkitTask task = reloadRetryTask;
+        reloadRetryTask = null;
+        if (task != null) {
+            task.cancel();
         }
     }
 
@@ -436,8 +463,9 @@ public final class DailyService implements CommandExecutor, Listener {
                 }
 
                 Player player = online.orElseThrow();
-                animationRenderer.renderFrame(inventory, presentation, frame, frames);
-                animationRenderer.playFrameSound(player, frame, frames);
+                DailyAnimationPlan.Frame plan = DailyAnimationPlan.frame(frame, frames);
+                animationRenderer.renderFrame(inventory, presentation, plan);
+                animationRenderer.playFrameSound(player, plan);
                 frame++;
                 if (frame >= frames) {
                     finishAnimation(playerId, sessionId, this);
@@ -554,8 +582,7 @@ public final class DailyService implements CommandExecutor, Listener {
 
         BalanceLookup balance = lookupBalance(playerId);
         if (!balance.available()) {
-            failReservationSafely(playerId, currentDate,
-                "Player unavailable before Vault balance lookup");
+            failReservationSafely(playerId, currentDate, balance.failureMessage());
             return DailyClaimOutcome.failure(balance.failureMessage());
         }
         if (!markDepositing(playerId, currentDate, balance.amount())) {
@@ -785,7 +812,14 @@ public final class DailyService implements CommandExecutor, Listener {
 
     private List<Double> configuredPayouts() {
         List<Double> configured = plugin.getConfig().getDoubleList("daily.payouts");
-        return configured.isEmpty() ? DEFAULT_PAYOUTS : List.copyOf(configured);
+        if (configured.isEmpty()) {
+            return DEFAULT_PAYOUTS;
+        }
+        if (!DailyPayouts.valid(configured)) {
+            plugin.getLogger().warning("Invalid daily.payouts configuration; using safe defaults.");
+            return DEFAULT_PAYOUTS;
+        }
+        return List.copyOf(configured);
     }
 
     private LocalDate today() {
