@@ -553,6 +553,8 @@ public final class DailyService implements CommandExecutor, Listener {
 
         BalanceLookup balance = lookupBalance(playerId, currentDate);
         if (!balance.available()) {
+            failReservationSafely(playerId, currentDate,
+                "Player unavailable before Vault balance lookup");
             return DailyClaimOutcome.failure(balance.failureMessage());
         }
         if (!markDepositing(playerId, currentDate, balance.amount())) {
@@ -574,8 +576,6 @@ public final class DailyService implements CommandExecutor, Listener {
                 .orElseGet(() -> BalanceLookup.unavailable(
                     "Daily claim stopped before the economy was invoked; it may be retried.")));
         } catch (SQLException ex) {
-            failReservationSafely(playerId, date,
-                "Balance lookup failed before Vault deposit: " + ex.getMessage());
             return BalanceLookup.unavailable(
                 "The economy balance could not be checked safely; the claim may be retried.");
         }
