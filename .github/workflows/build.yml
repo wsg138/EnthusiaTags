@@ -20,25 +20,26 @@ jobs:
         run: |
           python3 - <<'PY'
           from pathlib import Path
+          import re
 
           service_path = Path('src/main/java/org/enthusia/tags/rewards/RewardService.java')
           source = service_path.read_text()
 
-          old_pending = '''        if (evaluation.status() == RewardStatus.CLAIM_PENDING) {
-              return CompletableFuture.completedFuture(RewardClaimResult.CLAIM_IN_PROGRESS);
-          }
-          '''
-          new_pending = '''        if (evaluation.status() == RewardStatus.CLAIM_PENDING) {
+          pending_pattern = re.compile(
+              r'(?m)^        if \(evaluation\.status\(\) == RewardStatus\.CLAIM_PENDING\) \{\n'
+              r'            return CompletableFuture\.completedFuture\(RewardClaimResult\.CLAIM_IN_PROGRESS\);\n'
+              r'        \}'
+          )
+          pending_replacement = '''        if (evaluation.status() == RewardStatus.CLAIM_PENDING) {
               String pendingClaimKey = player.getUniqueId() + ":" + rewardId;
               if (!inFlightClaims.add(pendingClaimKey)) {
                   return CompletableFuture.completedFuture(RewardClaimResult.CLAIM_IN_PROGRESS);
               }
               return recoverPendingClaimAsync(player, reward, pendingClaimKey);
-          }
-          '''
-          if old_pending not in source:
-              raise SystemExit('CLAIM_PENDING branch did not match expected source')
-          source = source.replace(old_pending, new_pending, 1)
+          }'''
+          source, replacements = pending_pattern.subn(pending_replacement, source, count=1)
+          if replacements != 1:
+              raise SystemExit(f'Expected one CLAIM_PENDING branch, replaced {replacements}')
 
           marker = '    private void resumeClaimAfterItem(UUID playerId, String rewardId) {'
           recovery_method = '''    private CompletableFuture<RewardClaimResult> recoverPendingClaimAsync(
@@ -85,8 +86,7 @@ jobs:
           source = source.replace(marker, recovery_method + marker, 1)
           service_path.write_text(source)
 
-          decision_path = Path('src/main/java/org/enthusia/tags/rewards/PendingClaimRecoveryDecision.java')
-          decision_path.write_text('''package org.enthusia.tags.rewards;
+          Path('src/main/java/org/enthusia/tags/rewards/PendingClaimRecoveryDecision.java').write_text('''package org.enthusia.tags.rewards;
 
           enum PendingClaimRecoveryDecision {
               RESUME,
