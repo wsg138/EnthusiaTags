@@ -1,0 +1,180 @@
+import org.bukkit.event.player.AsyncPlayerPreLoginEvent;
+import org.bukkit.event.player.PlayerJoinEvent;
+import org.bukkit.event.player.PlayerQuitEvent;
+import org.bukkit.event.player.PlayerStatisticIncrementEvent;
+import org.bukkit.plugin.java.JavaPlugin;
+import org.bukkit.scheduler.BukkitTask;
+
+public final class RewardTracker implements Listener {
+    private static final String KILL_CONFIG = "rewards.anti-farm.kills.";
+
+    private final JavaPlugin plugin;
+    private final RewardService rewardService;
+    private final Map<UUID, Map<UUID, Long>> firstHitTimes = new ConcurrentHashMap<>();
+    private final Map<UUID, Long> activeSampleTimes = new ConcurrentHashMap<>();
+    private BukkitTask playtimeTask;
+
+    public RewardTracker(JavaPlugin plugin, RewardService rewardService) {
+        this.plugin = plugin;
+        this.rewardService = rewardService;
+    }
+
+    public void start(JavaPlugin schedulingPlugin) {
+        if (playtimeTask != null) {
+            return;
+        }
+        playtimeTask = Bukkit.getScheduler().runTaskTimer(schedulingPlugin, this::tickPlaytime, 20L, 1200L);
+    }
+
+    public void stop() {
+        if (playtimeTask != null) {
+            playtimeTask.cancel();
+            playtimeTask = null;
+        }
+        firstHitTimes.clear();
+        activeSampleTimes.clear();
+    }
+
+    @EventHandler
+    public void onAsyncPreLogin(AsyncPlayerPreLoginEvent event) {
+        rewardService.preloadPlayerBlocking(event.getUniqueId());
+    }
+
+    @EventHandler
+    public void onJoin(PlayerJoinEvent event) {
+        Player player = event.getPlayer();
+        rewardService.loadPlayer(player);
+        initializeProtectedCounters(player);
+        Bukkit.getScheduler().runTaskLater(plugin, () -> {
+            if (player.isOnline()) {
+                initializeProtectedCounters(player);
+            }
+        }, 20L);
+        if (player.hasPermission("enthusia.tags.admin")) {
+            for (String warning : rewardService.getStaffWarnings()) {
+                player.sendMessage(LegacyComponentSerializer.legacyAmpersand().deserialize(warning));
+            }
+        }
+    }
+
+    @EventHandler
+    public void onQuit(PlayerQuitEvent event) {
+        UUID playerId = event.getPlayer().getUniqueId();
+        firstHitTimes.remove(playerId);
+        firstHitTimes.values().forEach(map -> map.remove(playerId));
+        activeSampleTimes.remove(playerId);
+        rewardService.setCounter(playerId, "consecutive_active_ms", 0L);
+        rewardService.setCounter(playerId, "consecutive_active", 0L);
+        rewardService.unloadPlayer(event.getPlayer());
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onDamage(EntityDamageByEntityEvent event) {
+        if (!(event.getEntity() instanceof Player victim)) {
+            return;
+        }
+        Player damager = resolveDamager(event);
+        if (damager == null) {
+            return;
+        }
+        long now = System.currentTimeMillis();
+        firstHitTimes.computeIfAbsent(damager.getUniqueId(), ignored -> new ConcurrentHashMap<>())
+            .compute(victim.getUniqueId(), (ignored, first) -> first == null || now - first > 10_000L ? now : first);
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onBlockBreak(BlockBreakEvent event) {
+        Material type = event.getBlock().getType();
+        if (type.name().endsWith("_LOG")) {
+            rewardService.incrementCounter(event.getPlayer().getUniqueId(), "logs_mined", 1);
+        }
+        if (type == Material.DIRT || type == Material.COARSE_DIRT || type == Material.ROOTED_DIRT) {
+            rewardService.incrementCounter(event.getPlayer().getUniqueId(), "dirt_mined", 1);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onStatisticIncrement(PlayerStatisticIncrementEvent event) {
+        rewardService.invalidateProgress(event.getPlayer().getUniqueId());
+        rewardService.queueUnlockCheck(event.getPlayer());
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onProjectileHit(ProjectileHitEvent event) {
+        if (!(event.getEntity().getShooter() instanceof Player player) || event.getHitEntity() == null) {
+            return;
+        }
+        rewardService.incrementCounter(player.getUniqueId(), "projectile_hits", 1);
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onDeath(PlayerDeathEvent event) {
+        Player victim = event.getEntity();
+        Player killer = victim.getKiller();
+
+        rewardService.setCounter(victim.getUniqueId(), "kill_streak", 0);
+        handleDeathCause(victim);
+
+        if (killer == null) {
+            rewardService.setCounter(victim.getUniqueId(), "death_streak_same", 0);
+            rewardService.setState(victim.getUniqueId(), "last_killer", "");
+            return;
+        }
+
+        boolean credited = creditKill(killer, victim);
+        if (!credited) {
+            cleanupHit(killer, victim);
+            return;
+        }
+
+        rewardService.incrementCounter(victim.getUniqueId(), "pvp_deaths", 1);
+        rewardService.incrementCounter(killer.getUniqueId(), KillFarmLimiter.TRUSTED_KILL_COUNTER, 1);
+        rewardService.incrementCounter(killer.getUniqueId(), "kill_streak", 1);
+        updateDeathStreakSame(victim, killer);
+        updateQuickKill(killer, victim);
+        updateFullArmorKill(killer, victim);
+        updateLowHealthKill(killer);
+        cleanupHit(killer, victim);
+    }
+
+    private boolean creditKill(Player killer, Player victim) {
+        if (!plugin.getConfig().getBoolean(KILL_CONFIG + "enabled", true)) {
+            return true;
+        }
+        long cooldownMinutes = clamp(plugin.getConfig().getLong(
+            KILL_CONFIG + "same-victim-cooldown-minutes", 30L), 0L, 1440L);
+        long windowHours = clamp(plugin.getConfig().getLong(
+            KILL_CONFIG + "victim-window-hours", 24L), 1L, 168L);
+        int maximum = (int) clamp(plugin.getConfig().getLong(
+            KILL_CONFIG + "max-counted-per-victim-window", 3L), 1L, 100L);
+        String stateKey = KillFarmLimiter.PAIR_STATE_PREFIX + victim.getUniqueId();
+        KillFarmLimiter.Decision decision = KillFarmLimiter.evaluate(
+            rewardService.getState(killer.getUniqueId(), stateKey),
+            System.currentTimeMillis(), cooldownMinutes * 60_000L,
+            windowHours * 3_600_000L, maximum);
+        if (decision.credited()) {
+            rewardService.setState(killer.getUniqueId(), stateKey, decision.nextState());
+        }
+        return decision.credited();
+    }
+
+    private void initializeProtectedCounters(Player player) {
+        UUID playerId = player.getUniqueId();
+        if (!"1".equals(rewardService.getState(playerId, KillFarmLimiter.INITIALIZED_STATE))) {
+            rewardService.setCounter(playerId, KillFarmLimiter.TRUSTED_KILL_COUNTER,
+                player.getStatistic(Statistic.PLAYER_KILLS));
+            rewardService.setState(playerId, KillFarmLimiter.INITIALIZED_STATE, "1");
+        }
+        for (Material material : NaturalBlockPolicy.trackedMaterials()) {
+            String marker = NaturalBlockPolicy.initializedState(material);
+            if ("1".equals(rewardService.getState(playerId, marker))) {
+                continue;
+            }
+            rewardService.setCounter(playerId, NaturalBlockPolicy.counterKey(material),
+                player.getStatistic(Statistic.MINE_BLOCK, material));
+            rewardService.setState(playerId, marker, "1");
+        }
+    }
+
+    private long clamp(long value, long minimum, long maximum) {
+        return Math.max(minimum, Math.min(maximum, value));
