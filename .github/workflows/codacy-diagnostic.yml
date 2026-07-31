@@ -1,0 +1,44 @@
+name: Exact Codacy diagnostic
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    if: github.head_ref == 'agent/anti-farm-natural-daily-ip'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch exact public Codacy issues
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL='https://api.codacy.com/api/v3/analysis/organizations/gh/wsg138/repositories/EnthusiaTags/pull-requests/11/issues?limit=100'
+          curl --fail --silent --show-error --location "$URL" --output /tmp/codacy.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          payload = json.loads(Path('/tmp/codacy.json').read_text())
+          print('=== Codacy payload metadata ===')
+          for key in ('pagination', 'meta', 'commit', 'commitSha', 'isUpToStandards', 'analyzed'):
+              if key in payload:
+                  print(f'{key}={payload[key]}')
+
+          issues = payload.get('data', payload.get('issues', []))
+          print(f'=== Exact Codacy issues: {len(issues)} ===')
+          for issue in issues:
+              pattern = issue.get('patternId') or issue.get('pattern', {}).get('id')
+              level = issue.get('level') or issue.get('severity')
+              category = issue.get('category')
+              path = issue.get('filePath') or issue.get('path') or issue.get('file', {}).get('path')
+              line = issue.get('lineNumber') or issue.get('line') or issue.get('location', {}).get('start', {}).get('line')
+              tool = issue.get('tool', {}).get('name') or issue.get('toolName')
+              message = issue.get('message') or issue.get('description')
+              print(f'tool={tool} level={level} category={category} pattern={pattern} file={path} line={line} message={message}')
+          print('=== Raw JSON ===')
+          print(json.dumps(payload, indent=2, sort_keys=True))
+          PY
