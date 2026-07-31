@@ -86,8 +86,18 @@ public final class DailyService implements CommandExecutor, Listener {
         zone = configuredZone();
         payouts = configuredPayouts();
         storage = new DailyStorage(new File(plugin.getDataFolder(), "daily.db"));
+    try {
         ipStorage = new DailyIpStorage(new File(plugin.getDataFolder(), "daily-ip.db"));
-        vault.setup();
+    } catch (SQLException ex) {
+        try {
+            storage.close();
+        } catch (SQLException closeFailure) {
+            ex.addSuppressed(closeFailure);
+        }
+        storage = null;
+        throw ex;
+    }
+    vault.setup();
         executor = Executors.newSingleThreadExecutor(runnable -> {
             Thread thread = new Thread(runnable, "enthusia-tags-daily");
             thread.setDaemon(true);
@@ -648,9 +658,16 @@ public final class DailyService implements CommandExecutor, Listener {
             return DailyClaimOutcome.failure(
                 "A daily reward has already been claimed from your IP today.");
         }
-        if (!storage.reserve(playerId, currentDate, amount)) {
-            return reservationConflict(playerId, currentDate);
-        }
+        boolean dailyReserved;
+    try {
+        dailyReserved = storage.reserve(playerId, currentDate, amount);
+    } catch (SQLException ex) {
+        releaseIpReservationSafely(playerId, currentDate, ipAddress, enforceIp);
+        throw ex;
+    }
+    if (!dailyReserved) {
+        return reservationConflict(playerId, currentDate);
+    }
 
         BalanceLookup balance = lookupBalance(playerId);
         if (!balance.available()) {

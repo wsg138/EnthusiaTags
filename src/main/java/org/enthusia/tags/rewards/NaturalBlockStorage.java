@@ -188,18 +188,24 @@ final class NaturalBlockStorage implements AutoCloseable {
     }
 
     @Override
-    public void close() throws SQLException {
-        executor.shutdown();
-        try {
-            if (!executor.awaitTermination(5, TimeUnit.SECONDS)) {
-                executor.shutdownNow();
-            }
-        } catch (InterruptedException ex) {
-            Thread.currentThread().interrupt();
+public void close() throws SQLException {
+    executor.shutdown();
+    boolean stopped = false;
+    try {
+        stopped = executor.awaitTermination(5, TimeUnit.SECONDS);
+        if (!stopped) {
             executor.shutdownNow();
+            stopped = executor.awaitTermination(5, TimeUnit.SECONDS);
         }
-        connection.close();
+    } catch (InterruptedException ex) {
+        Thread.currentThread().interrupt();
+        executor.shutdownNow();
     }
+    if (!stopped) {
+        throw new SQLException("Natural block storage worker did not stop safely");
+    }
+    connection.close();
+}
 
     record BlockKey(UUID worldId, int x, int y, int z) {
     }
