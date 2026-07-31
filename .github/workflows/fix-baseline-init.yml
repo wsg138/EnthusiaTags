@@ -23,62 +23,68 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
 
+          def block(lines):
+              return "\n".join(lines) + "\n"
+
           service = Path('src/main/java/org/enthusia/tags/rewards/RewardService.java')
           source = service.read_text()
-          anchor = '''    public long getCounter(UUID playerId, String key) {
-          '''
-          method = '''    public boolean isPlayerStateLoaded(UUID playerId) {
-              if (!isAvailable()) {
-                  return false;
-              }
-              RewardPlayerState state = getLoadedState(playerId);
-              return state != null && state.isLoaded();
-          }
-
-          '''
+          anchor = '    public long getCounter(UUID playerId, String key) {'
           if source.count(anchor) != 1:
               raise SystemExit('RewardService counter anchor mismatch')
+          method = block([
+              '    public boolean isPlayerStateLoaded(UUID playerId) {',
+              '        if (!isAvailable()) {',
+              '            return false;',
+              '        }',
+              '        RewardPlayerState state = getLoadedState(playerId);',
+              '        return state != null && state.isLoaded();',
+              '    }',
+              ''
+          ])
           service.write_text(source.replace(anchor, method + anchor, 1))
 
           tracker = Path('src/main/java/org/enthusia/tags/rewards/RewardTracker.java')
           source = tracker.read_text()
-          old = '''        rewardService.loadPlayer(player);
-              initializeProtectedCounters(player);
-              Bukkit.getScheduler().runTaskLater(plugin, () -> {
-                  if (player.isOnline()) {
-                      initializeProtectedCounters(player);
-                  }
-              }, 20L);
-          '''
-          new = '''        rewardService.loadPlayer(player);
-              initializeProtectedCountersWhenLoaded(player, 0);
-          '''
-          if source.count(old) != 1:
-              raise SystemExit('RewardTracker join initialization block mismatch')
-          source = source.replace(old, new, 1)
+          join_start = source.index('    @EventHandler\n    public void onJoin(PlayerJoinEvent event) {')
+          quit_start = source.index('    @EventHandler\n    public void onQuit(PlayerQuitEvent event) {', join_start)
+          join_method = block([
+              '    @EventHandler',
+              '    public void onJoin(PlayerJoinEvent event) {',
+              '        Player player = event.getPlayer();',
+              '        rewardService.loadPlayer(player);',
+              '        initializeProtectedCountersWhenLoaded(player, 0);',
+              '        if (player.hasPermission("enthusia.tags.admin")) {',
+              '            for (String warning : rewardService.getStaffWarnings()) {',
+              '                player.sendMessage(LegacyComponentSerializer.legacyAmpersand().deserialize(warning));',
+              '            }',
+              '        }',
+              '    }',
+              ''
+          ])
+          source = source[:join_start] + join_method + source[quit_start:]
 
-          anchor = '''    private void initializeProtectedCounters(Player player) {
-          '''
-          method = '''    private void initializeProtectedCountersWhenLoaded(Player player, int attempt) {
-              if (!player.isOnline()) {
-                  return;
-              }
-              if (rewardService.isPlayerStateLoaded(player.getUniqueId())) {
-                  initializeProtectedCounters(player);
-                  return;
-              }
-              if (attempt >= 20) {
-                  plugin.getLogger().warning("Could not initialize protected reward counters for "
-                      + player.getUniqueId() + " because reward state did not load within 20 seconds.");
-                  return;
-              }
-              Bukkit.getScheduler().runTaskLater(plugin,
-                  () -> initializeProtectedCountersWhenLoaded(player, attempt + 1), 20L);
-          }
-
-          '''
+          anchor = '    private void initializeProtectedCounters(Player player) {'
           if source.count(anchor) != 1:
               raise SystemExit('RewardTracker initialization method anchor mismatch')
+          method = block([
+              '    private void initializeProtectedCountersWhenLoaded(Player player, int attempt) {',
+              '        if (!player.isOnline()) {',
+              '            return;',
+              '        }',
+              '        if (rewardService.isPlayerStateLoaded(player.getUniqueId())) {',
+              '            initializeProtectedCounters(player);',
+              '            return;',
+              '        }',
+              '        if (attempt >= 20) {',
+              '            plugin.getLogger().warning("Could not initialize protected reward counters for "',
+              '                + player.getUniqueId() + " because reward state did not load within 20 seconds.");',
+              '            return;',
+              '        }',
+              '        Bukkit.getScheduler().runTaskLater(plugin,',
+              '            () -> initializeProtectedCountersWhenLoaded(player, attempt + 1), 20L);',
+              '    }',
+              ''
+          ])
           tracker.write_text(source.replace(anchor, method + anchor, 1))
 
           Path('.github/workflows/fix-baseline-init.yml').unlink()
