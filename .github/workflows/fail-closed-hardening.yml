@@ -23,166 +23,164 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
 
+          def block(lines):
+              return "\n".join(lines) + "\n"
+
           reward = Path('src/main/java/org/enthusia/tags/rewards/RewardService.java')
           source = reward.read_text()
           field_anchor = '    private long syncStaleStates;\n'
-          field = field_anchor + '    private volatile boolean naturalBlockTrackingAvailable;\n'
           if source.count(field_anchor) != 1:
               raise SystemExit('RewardService field anchor mismatch')
-          source = source.replace(field_anchor, field, 1)
+          source = source.replace(field_anchor,
+              field_anchor + '    private volatile boolean naturalBlockTrackingAvailable;\n', 1)
 
-          method_anchor = '''    public List<String> getStaffWarnings() {
-              return integrationStatus.warnings();
-          }
-          '''
-          method = method_anchor + '''
-              public void setNaturalBlockTrackingAvailable(boolean available) {
-                  naturalBlockTrackingAvailable = available;
-                  progressSnapshots.clear();
-              }
-          '''
-          if source.count(method_anchor) != 1:
-              raise SystemExit('RewardService availability method anchor mismatch')
-          source = source.replace(method_anchor, method, 1)
+          start = source.index('    public List<String> getStaffWarnings() {')
+          end = source.index('    public void preloadPlayer(UUID playerId) {', start)
+          replacement = block([
+              '    public List<String> getStaffWarnings() {',
+              '        return integrationStatus.warnings();',
+              '    }',
+              '',
+              '    public void setNaturalBlockTrackingAvailable(boolean available) {',
+              '        naturalBlockTrackingAvailable = available;',
+              '        progressSnapshots.clear();',
+              '    }',
+              ''
+          ])
+          source = source[:start] + replacement + source[end:]
 
-          criterion_anchor = '''    private boolean isCriterionAvailable(RewardCriterion criterion) {
-              if (criterion == null || !criterion.isValid()) {
-                  return false;
-              }
-          '''
-          criterion = criterion_anchor + '''        if (criterion.getType() == RewardCriterionType.BLOCK_MINED
-                  && NaturalBlockPolicy.isTracked(criterion.getMaterial())) {
-                  return naturalBlockTrackingAvailable;
-              }
-          '''
-          if source.count(criterion_anchor) != 1:
-              raise SystemExit('RewardService criterion availability anchor mismatch')
-          source = source.replace(criterion_anchor, criterion, 1)
+          start = source.index('    private boolean isCriterionAvailable(RewardCriterion criterion) {')
+          switch_at = source.index('        return switch (criterion.getSourceType()) {', start)
+          prefix = block([
+              '    private boolean isCriterionAvailable(RewardCriterion criterion) {',
+              '        if (criterion == null || !criterion.isValid()) {',
+              '            return false;',
+              '        }',
+              '        if (criterion.getType() == RewardCriterionType.BLOCK_MINED',
+              '            && NaturalBlockPolicy.isTracked(criterion.getMaterial())) {',
+              '            return naturalBlockTrackingAvailable;',
+              '        }'
+          ])
+          source = source[:start] + prefix + source[switch_at:]
           reward.write_text(source)
 
           plugin = Path('src/main/java/org/enthusia/tags/EnthusiaTagsPlugin.java')
           source = plugin.read_text()
-          old = '''            try {
-                      naturalBlockTracker = new NaturalBlockTracker(this, rewardService);
-                  } catch (java.sql.SQLException ex) {
-                      getLogger().severe("Natural ore tracking is disabled because storage failed: " + ex.getMessage());
-                  }
-          '''
-          new = '''            try {
-                      naturalBlockTracker = new NaturalBlockTracker(this, rewardService);
-                      rewardService.setNaturalBlockTrackingAvailable(true);
-                  } catch (java.sql.SQLException ex) {
-                      rewardService.setNaturalBlockTrackingAvailable(false);
-                      getLogger().severe("Natural ore rewards are locked because origin storage failed: "
-                          + ex.getMessage());
-                  }
-          '''
-          if source.count(old) != 1:
-              raise SystemExit('Plugin natural tracker initialization anchor mismatch')
-          plugin.write_text(source.replace(old, new, 1))
+          start = source.index('            try {\n                naturalBlockTracker = new NaturalBlockTracker')
+          end = source.index('        }\n        try {\n            dailyService.enable();', start) + len('        }\n')
+          replacement = block([
+              '            try {',
+              '                naturalBlockTracker = new NaturalBlockTracker(this, rewardService);',
+              '                rewardService.setNaturalBlockTrackingAvailable(true);',
+              '            } catch (java.sql.SQLException ex) {',
+              '                rewardService.setNaturalBlockTrackingAvailable(false);',
+              '                getLogger().severe("Natural ore rewards are locked because origin storage failed: "',
+              '                    + ex.getMessage());',
+              '            }'
+          ])
+          plugin.write_text(source[:start] + replacement + source[end:])
 
           tracker = Path('src/main/java/org/enthusia/tags/rewards/NaturalBlockTracker.java')
           source = tracker.read_text()
-          old = '''    private Void logFailure(String operation, Throwable throwable) {
-              plugin.getLogger().log(Level.WARNING, "Could not " + operation, throwable);
-              return null;
-          }
-          '''
-          new = '''    private Void logFailure(String operation, Throwable throwable) {
-              rewardService.setNaturalBlockTrackingAvailable(false);
-              plugin.getLogger().log(Level.SEVERE,
-                  "Could not " + operation + "; natural ore rewards are locked until restart", throwable);
-              return null;
-          }
-          '''
-          if source.count(old) != 1:
-              raise SystemExit('NaturalBlockTracker failure anchor mismatch')
-          tracker.write_text(source.replace(old, new, 1))
+          start = source.index('    private Void logFailure(String operation, Throwable throwable) {')
+          end = source.index('    @Override', start)
+          replacement = block([
+              '    private Void logFailure(String operation, Throwable throwable) {',
+              '        rewardService.setNaturalBlockTrackingAvailable(false);',
+              '        plugin.getLogger().log(Level.SEVERE,',
+              '            "Could not " + operation + "; natural ore rewards are locked until restart", throwable);',
+              '        return null;',
+              '    }',
+              ''
+          ])
+          tracker.write_text(source[:start] + replacement + source[end:])
 
           daily_ip = Path('src/main/java/org/enthusia/tags/daily/DailyIpStorage.java')
           source = daily_ip.read_text()
-          constructor_start = source.index('    DailyIpStorage(File file) throws SQLException {')
-          reserve_start = source.index('    synchronized boolean reserve(', constructor_start)
-          constructor = '''    DailyIpStorage(File file) throws SQLException {
-              connection = DriverManager.getConnection("jdbc:sqlite:" + file.getAbsolutePath());
-              try {
-                  try (Statement statement = connection.createStatement()) {
-                      statement.execute("PRAGMA journal_mode=WAL");
-                      statement.execute("PRAGMA synchronous=NORMAL");
-                      statement.execute("PRAGMA busy_timeout=5000");
-                      statement.executeUpdate("""
-                          CREATE TABLE IF NOT EXISTS daily_ip_claims (
-                            claim_date TEXT NOT NULL,
-                            ip_address TEXT NOT NULL,
-                            player_uuid TEXT NOT NULL,
-                            created_at INTEGER NOT NULL,
-                            PRIMARY KEY(claim_date, ip_address, player_uuid)
-                          )
-                          """);
-                      statement.executeUpdate("""
-                          CREATE INDEX IF NOT EXISTS daily_ip_claim_lookup
-                          ON daily_ip_claims(claim_date, ip_address)
-                          """);
-                      statement.executeUpdate("""
-                          CREATE TABLE IF NOT EXISTS daily_ip_siblings (
-                            first_uuid TEXT NOT NULL,
-                            second_uuid TEXT NOT NULL,
-                            administrator TEXT NOT NULL,
-                            created_at INTEGER NOT NULL,
-                            PRIMARY KEY(first_uuid, second_uuid)
-                          )
-                          """);
-                  }
-                  prune(LocalDate.now().minusDays(45));
-              } catch (SQLException ex) {
-                  try {
-                      connection.close();
-                  } catch (SQLException closeFailure) {
-                      ex.addSuppressed(closeFailure);
-                  }
-                  throw ex;
-              }
-          }
-
-          '''
-          daily_ip.write_text(source[:constructor_start] + constructor + source[reserve_start:])
+          start = source.index('    DailyIpStorage(File file) throws SQLException {')
+          end = source.index('    synchronized boolean reserve(', start)
+          replacement = block([
+              '    DailyIpStorage(File file) throws SQLException {',
+              '        connection = DriverManager.getConnection("jdbc:sqlite:" + file.getAbsolutePath());',
+              '        try {',
+              '            try (Statement statement = connection.createStatement()) {',
+              '                statement.execute("PRAGMA journal_mode=WAL");',
+              '                statement.execute("PRAGMA synchronous=NORMAL");',
+              '                statement.execute("PRAGMA busy_timeout=5000");',
+              '                statement.executeUpdate("""',
+              '                    CREATE TABLE IF NOT EXISTS daily_ip_claims (',
+              '                      claim_date TEXT NOT NULL,',
+              '                      ip_address TEXT NOT NULL,',
+              '                      player_uuid TEXT NOT NULL,',
+              '                      created_at INTEGER NOT NULL,',
+              '                      PRIMARY KEY(claim_date, ip_address, player_uuid)',
+              '                    )',
+              '                    """);',
+              '                statement.executeUpdate("""',
+              '                    CREATE INDEX IF NOT EXISTS daily_ip_claim_lookup',
+              '                    ON daily_ip_claims(claim_date, ip_address)',
+              '                    """);',
+              '                statement.executeUpdate("""',
+              '                    CREATE TABLE IF NOT EXISTS daily_ip_siblings (',
+              '                      first_uuid TEXT NOT NULL,',
+              '                      second_uuid TEXT NOT NULL,',
+              '                      administrator TEXT NOT NULL,',
+              '                      created_at INTEGER NOT NULL,',
+              '                      PRIMARY KEY(first_uuid, second_uuid)',
+              '                    )',
+              '                    """);',
+              '            }',
+              '            prune(LocalDate.now().minusDays(45));',
+              '        } catch (SQLException ex) {',
+              '            try {',
+              '                connection.close();',
+              '            } catch (SQLException closeFailure) {',
+              '                ex.addSuppressed(closeFailure);',
+              '            }',
+              '            throw ex;',
+              '        }',
+              '    }',
+              ''
+          ])
+          daily_ip.write_text(source[:start] + replacement + source[end:])
 
           natural = Path('src/main/java/org/enthusia/tags/rewards/NaturalBlockStorage.java')
           source = natural.read_text()
-          constructor_start = source.index('    NaturalBlockStorage(File file) throws SQLException {')
-          mark_start = source.index('    CompletableFuture<Void> markPlaced(', constructor_start)
-          constructor = '''    NaturalBlockStorage(File file) throws SQLException {
-              connection = DriverManager.getConnection("jdbc:sqlite:" + file.getAbsolutePath());
-              try {
-                  try (Statement statement = connection.createStatement()) {
-                      statement.execute("PRAGMA journal_mode=WAL");
-                      statement.execute("PRAGMA synchronous=NORMAL");
-                      statement.execute("PRAGMA busy_timeout=5000");
-                      statement.executeUpdate("""
-                          CREATE TABLE IF NOT EXISTS player_placed_natural_blocks (
-                            world_uuid TEXT NOT NULL,
-                            block_x INTEGER NOT NULL,
-                            block_y INTEGER NOT NULL,
-                            block_z INTEGER NOT NULL,
-                            material TEXT NOT NULL,
-                            placed_at INTEGER NOT NULL,
-                            PRIMARY KEY(world_uuid, block_x, block_y, block_z)
-                          )
-                          """);
-                  }
-              } catch (SQLException ex) {
-                  executor.shutdownNow();
-                  try {
-                      connection.close();
-                  } catch (SQLException closeFailure) {
-                      ex.addSuppressed(closeFailure);
-                  }
-                  throw ex;
-              }
-          }
-
-          '''
-          natural.write_text(source[:constructor_start] + constructor + source[mark_start:])
+          start = source.index('    NaturalBlockStorage(File file) throws SQLException {')
+          end = source.index('    CompletableFuture<Void> markPlaced(', start)
+          replacement = block([
+              '    NaturalBlockStorage(File file) throws SQLException {',
+              '        connection = DriverManager.getConnection("jdbc:sqlite:" + file.getAbsolutePath());',
+              '        try {',
+              '            try (Statement statement = connection.createStatement()) {',
+              '                statement.execute("PRAGMA journal_mode=WAL");',
+              '                statement.execute("PRAGMA synchronous=NORMAL");',
+              '                statement.execute("PRAGMA busy_timeout=5000");',
+              '                statement.executeUpdate("""',
+              '                    CREATE TABLE IF NOT EXISTS player_placed_natural_blocks (',
+              '                      world_uuid TEXT NOT NULL,',
+              '                      block_x INTEGER NOT NULL,',
+              '                      block_y INTEGER NOT NULL,',
+              '                      block_z INTEGER NOT NULL,',
+              '                      material TEXT NOT NULL,',
+              '                      placed_at INTEGER NOT NULL,',
+              '                      PRIMARY KEY(world_uuid, block_x, block_y, block_z)',
+              '                    )',
+              '                    """);',
+              '            }',
+              '        } catch (SQLException ex) {',
+              '            executor.shutdownNow();',
+              '            try {',
+              '                connection.close();',
+              '            } catch (SQLException closeFailure) {',
+              '                ex.addSuppressed(closeFailure);',
+              '            }',
+              '            throw ex;',
+              '        }',
+              '    }',
+              ''
+          ])
+          natural.write_text(source[:start] + replacement + source[end:])
 
           Path('.github/workflows/fail-closed-hardening.yml').unlink()
           PY
