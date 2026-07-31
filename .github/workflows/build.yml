@@ -1,4 +1,44 @@
-name: Build
+name: Apply reward storage executor integration
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: enthusiatags-build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  apply:
+    if: github.event.pull_request.number == 9
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/fix-reward-shutdown-deadlock
+          fetch-depth: 0
+
+      - name: Wire reentrant reward storage executor
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path("src/main/java/org/enthusia/tags/rewards/RewardStorage.java")
+          source = path.read_text()
+          old = '''        this.executor = Executors.newSingleThreadExecutor(new StorageThreadFactory("enthusia-tags-rewards-storage"));
+'''
+          new = '''        this.executor = new ReentrantSingleThreadExecutor("enthusia-tags-rewards-storage");
+'''
+          if source.count(old) != 1:
+              raise SystemExit(f"Expected one reward executor constructor, found {source.count(old)}")
+          path.write_text(source.replace(old, new, 1))
+
+          workflow = Path(".github/workflows/build.yml")
+          workflow.write_text('''name: Build
 
 on:
   push:
@@ -35,3 +75,12 @@ jobs:
           path: target/EnthusiaTags.jar
           if-no-files-found: error
           retention-days: 14
+''')
+
+      - name: Commit source integration
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/main/java/org/enthusia/tags/rewards/RewardStorage.java .github/workflows/build.yml
+          git commit -m "Wire reentrant reward storage executor"
+          git push origin HEAD:agent/fix-reward-shutdown-deadlock
