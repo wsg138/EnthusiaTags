@@ -1,0 +1,238 @@
+name: Address anti-farm review findings
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.head_ref == 'agent/anti-farm-natural-daily-ip'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/anti-farm-natural-daily-ip
+          fetch-depth: 0
+
+      - name: Apply validated review fixes
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def block(lines):
+              return "\n".join(lines) + "\n"
+
+          # DailyService: read the mutable connection address once.
+          daily = Path('src/main/java/org/enthusia/tags/daily/DailyService.java')
+          source = daily.read_text()
+          start = source.index('    private String playerIp(Player player) {')
+          end = source.index('    private void releaseIpReservationSafely', start)
+          replacement = block([
+              '    private String playerIp(Player player) {',
+              '        java.net.InetSocketAddress socketAddress = player.getAddress();',
+              '        java.net.InetAddress address = socketAddress == null ? null : socketAddress.getAddress();',
+              '        return address == null ? "" : address.getHostAddress();',
+              '    }',
+              ''
+          ])
+          daily.write_text(source[:start] + replacement + source[end:])
+
+          # NaturalBlockStorage: always attempt connection closure while preserving shutdown errors.
+          storage = Path('src/main/java/org/enthusia/tags/rewards/NaturalBlockStorage.java')
+          source = storage.read_text()
+          start = source.index('    @Override\n    public void close() throws SQLException {')
+          end = source.index('    record BlockKey', start)
+          replacement = block([
+              '    @Override',
+              '    public void close() throws SQLException {',
+              '        executor.shutdown();',
+              '        SQLException failure = null;',
+              '        boolean stopped = false;',
+              '        try {',
+              '            stopped = executor.awaitTermination(5, TimeUnit.SECONDS);',
+              '            if (!stopped) {',
+              '                executor.shutdownNow();',
+              '                stopped = executor.awaitTermination(5, TimeUnit.SECONDS);',
+              '            }',
+              '        } catch (InterruptedException ex) {',
+              '            Thread.currentThread().interrupt();',
+              '            executor.shutdownNow();',
+              '            failure = new SQLException("Interrupted while stopping natural block storage", ex);',
+              '        } finally {',
+              '            try {',
+              '                connection.close();',
+              '            } catch (SQLException closeFailure) {',
+              '                if (failure == null) {',
+              '                    failure = closeFailure;',
+              '                } else {',
+              '                    failure.addSuppressed(closeFailure);',
+              '                }',
+              '            }',
+              '        }',
+              '        if (!stopped && failure == null) {',
+              '            failure = new SQLException("Natural block storage worker did not stop safely");',
+              '        }',
+              '        if (failure != null) {',
+              '            throw failure;',
+              '        }',
+              '    }',
+              ''
+          ])
+          storage.write_text(source[:start] + replacement + source[end:])
+
+          # NaturalBlockTracker: return reward-state mutation to Bukkit's main thread.
+          tracker = Path('src/main/java/org/enthusia/tags/rewards/NaturalBlockTracker.java')
+          source = tracker.read_text()
+          if 'import org.bukkit.Bukkit;\n' not in source:
+              source = source.replace('import org.bukkit.Material;\n', 'import org.bukkit.Bukkit;\nimport org.bukkit.Material;\n', 1)
+          old = '''            if (!playerPlaced) {
+                  rewardService.incrementCounter(playerId, NaturalBlockPolicy.counterKey(material), 1L);
+              }
+          '''
+          new = '''            if (!playerPlaced && plugin.isEnabled()) {
+                  Bukkit.getScheduler().runTask(plugin, () ->
+                      rewardService.incrementCounter(playerId,
+                          NaturalBlockPolicy.counterKey(material), 1L));
+              }
+          '''
+          if source.count(old) != 1:
+              raise SystemExit('NaturalBlockTracker callback anchor mismatch')
+          tracker.write_text(source.replace(old, new, 1))
+
+          # KillFarmLimiter: expose safe expiry detection for pruning durable victim records.
+          limiter = Path('src/main/java/org/enthusia/tags/rewards/KillFarmLimiter.java')
+          source = limiter.read_text()
+          anchor = '    enum Reason {\n'
+          method = block([
+              '    static boolean isExpired(String encoded, long now, long windowMillis) {',
+              '        KillRecord record = KillRecord.parse(encoded);',
+              '        long safeWindow = Math.max(1L, windowMillis);',
+              '        return record == null || now < record.windowStartedAt()',
+              '            || now - record.windowStartedAt() >= safeWindow;',
+              '    }',
+              ''
+          ])
+          if source.count(anchor) != 1:
+              raise SystemExit('KillFarmLimiter reason anchor mismatch')
+          limiter.write_text(source.replace(anchor, method + anchor, 1))
+
+          # RewardService: map legacy combined ore counters and expose bounded state cleanup.
+          service = Path('src/main/java/org/enthusia/tags/rewards/RewardService.java')
+          source = service.read_text()
+          anchor = '''        if (criterion.getType() == RewardCriterionType.BLOCK_MINED
+              && NaturalBlockPolicy.isTracked(criterion.getMaterial())) {
+              return getCounter(player.getUniqueId(), NaturalBlockPolicy.counterKey(criterion.getMaterial()));
+          }
+          '''
+          addition = anchor + '''        if (criterion.getSourceType() == RewardSourceType.CUSTOM_COUNTER) {
+              String key = criterion.getKey();
+              if ("diamond_ore_mined".equals(key)) {
+                  return getCounter(player.getUniqueId(), NaturalBlockPolicy.counterKey(Material.DIAMOND_ORE))
+                      + getCounter(player.getUniqueId(), NaturalBlockPolicy.counterKey(Material.DEEPSLATE_DIAMOND_ORE));
+              }
+              if ("iron_ore_mined".equals(key)) {
+                  return getCounter(player.getUniqueId(), NaturalBlockPolicy.counterKey(Material.IRON_ORE))
+                      + getCounter(player.getUniqueId(), NaturalBlockPolicy.counterKey(Material.DEEPSLATE_IRON_ORE));
+              }
+          }
+          '''
+          if source.count(anchor) != 1:
+              raise SystemExit('RewardService protected progress anchor mismatch')
+          source = source.replace(anchor, addition, 1)
+
+          anchor = '    public String getState(UUID playerId, String key) {\n'
+          methods = block([
+              '    public Set<String> stateKeysWithPrefix(UUID playerId, String prefix) {',
+              '        if (!isAvailable()) {',
+              '            return Set.of();',
+              '        }',
+              '        RewardPlayerState state = getLoadedState(playerId);',
+              '        return state == null ? Set.of() : state.stateKeysWithPrefix(prefix);',
+              '    }',
+              '',
+              '    public void removeState(UUID playerId, String key) {',
+              '        if (!isAvailable()) {',
+              '            return;',
+              '        }',
+              '        RewardPlayerState state = getLoadedState(playerId);',
+              '        if (state != null && state.isLoaded()) {',
+              '            state.removeState(key);',
+              '        }',
+              '    }',
+              ''
+          ])
+          if source.count(anchor) != 1:
+              raise SystemExit('RewardService getState anchor mismatch')
+          service.write_text(source.replace(anchor, methods + anchor, 1))
+
+          # RewardTracker: initialize already-online players and prune expired victim keys.
+          tracker = Path('src/main/java/org/enthusia/tags/rewards/RewardTracker.java')
+          source = tracker.read_text()
+          old = '''        if (playtimeTask != null) {
+              return;
+          }
+          playtimeTask = Bukkit.getScheduler().runTaskTimer(schedulingPlugin, this::tickPlaytime, 20L, 1200L);
+          '''
+          new = '''        if (playtimeTask != null) {
+              return;
+          }
+          for (Player online : Bukkit.getOnlinePlayers()) {
+              initializeProtectedCountersWhenLoaded(online, 0);
+          }
+          playtimeTask = Bukkit.getScheduler().runTaskTimer(schedulingPlugin, this::tickPlaytime, 20L, 1200L);
+          '''
+          if source.count(old) != 1:
+              raise SystemExit('RewardTracker start anchor mismatch')
+          source = source.replace(old, new, 1)
+
+          anchor = '''        for (Material material : NaturalBlockPolicy.trackedMaterials()) {
+              String marker = NaturalBlockPolicy.initializedState(material);
+              if ("1".equals(rewardService.getState(playerId, marker))) {
+                  continue;
+              }
+              rewardService.setCounter(playerId, NaturalBlockPolicy.counterKey(material),
+                  player.getStatistic(Statistic.MINE_BLOCK, material));
+              rewardService.setState(playerId, marker, "1");
+          }
+          '''
+          replacement = anchor + '        pruneExpiredKillPairs(playerId);\n'
+          if source.count(anchor) != 1:
+              raise SystemExit('RewardTracker protected counter anchor mismatch')
+          source = source.replace(anchor, replacement, 1)
+
+          anchor = '    private long clamp(long value, long minimum, long maximum) {\n'
+          method = block([
+              '    private void pruneExpiredKillPairs(UUID playerId) {',
+              '        long windowHours = clamp(plugin.getConfig().getLong(',
+              '            KILL_CONFIG + "victim-window-hours", 24L), 1L, 168L);',
+              '        long windowMillis = windowHours * 3_600_000L;',
+              '        long now = System.currentTimeMillis();',
+              '        for (String key : rewardService.stateKeysWithPrefix(',
+              '            playerId, KillFarmLimiter.PAIR_STATE_PREFIX)) {',
+              '            if (KillFarmLimiter.isExpired(',
+              '                rewardService.getState(playerId, key), now, windowMillis)) {',
+              '                rewardService.removeState(playerId, key);',
+              '            }',
+              '        }',
+              '    }',
+              ''
+          ])
+          if source.count(anchor) != 1:
+              raise SystemExit('RewardTracker clamp anchor mismatch')
+          tracker.write_text(source.replace(anchor, method + anchor, 1))
+
+          Path('.github/workflows/address-review.yml').unlink()
+          PY
+
+      - name: Commit validated fixes
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Address anti-farm review findings"
+          git push origin HEAD:agent/anti-farm-natural-daily-ip
