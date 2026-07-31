@@ -12,24 +12,38 @@ jobs:
     if: github.head_ref == 'agent/anti-farm-natural-daily-ip'
     runs-on: ubuntu-latest
     steps:
-      - name: Fetch exact public Codacy issues
+      - name: Wait for and assert exact public Codacy issues
         shell: bash
         run: |
           set -euo pipefail
           URL='https://api.codacy.com/api/v3/analysis/organizations/gh/wsg138/repositories/EnthusiaTags/pull-requests/11/issues?limit=100'
-          curl --fail --silent --show-error --location "$URL" --output /tmp/codacy.json
+          for attempt in $(seq 1 60); do
+            curl --fail --silent --show-error --location "$URL" --output /tmp/codacy.json
+            if python3 - <<'PY'
+          import json
+          from pathlib import Path
+          payload = json.loads(Path('/tmp/codacy.json').read_text())
+          raise SystemExit(0 if payload.get('analyzed') is True else 1)
+          PY
+            then
+              break
+            fi
+            if [ "$attempt" -eq 60 ]; then
+              echo 'Codacy did not finish analysis within ten minutes.' >&2
+              cat /tmp/codacy.json
+              exit 1
+            fi
+            sleep 10
+          done
+
           python3 - <<'PY'
           import json
           from pathlib import Path
 
           payload = json.loads(Path('/tmp/codacy.json').read_text())
-          print('=== Codacy payload metadata ===')
-          for key in ('pagination', 'meta', 'commit', 'commitSha', 'isUpToStandards', 'analyzed'):
-              if key in payload:
-                  print(f'{key}={payload[key]}')
-
           issues = payload.get('data', payload.get('issues', []))
-          print(f'=== Exact Codacy issues: {len(issues)} ===')
+          total = payload.get('pagination', {}).get('total', len(issues))
+          print(f'analyzed={payload.get("analyzed")} total={total}')
           for issue in issues:
               pattern = issue.get('patternId') or issue.get('pattern', {}).get('id')
               level = issue.get('level') or issue.get('severity')
@@ -39,6 +53,6 @@ jobs:
               tool = issue.get('tool', {}).get('name') or issue.get('toolName')
               message = issue.get('message') or issue.get('description')
               print(f'tool={tool} level={level} category={category} pattern={pattern} file={path} line={line} message={message}')
-          print('=== Raw JSON ===')
-          print(json.dumps(payload, indent=2, sort_keys=True))
+          if total != 0:
+              raise SystemExit(f'Codacy reported {total} new issues')
           PY
