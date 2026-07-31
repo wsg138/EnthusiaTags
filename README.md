@@ -85,7 +85,7 @@ Every push to `main` also replaces the rolling `latest` prerelease asset used by
 - Ore and ancient-debris milestones use durable natural-block counters. Player-placed tracked blocks do not count, including after a restart or piston move.
 - Existing mining progress is snapshotted once before natural-only tracking takes over.
 
-The default anti-farm values are configured under `rewards.anti-farm.kills` in `config.yml`.
+The default anti-farm values are configured under `rewards.anti-farm.kills` in `config.yml`. Minecraft does not retain origin metadata for blocks placed before this update, so the one-time baseline preserves existing mining totals; strict natural-only tracking applies to blocks placed and mined after the upgrade.
 
 ## Daily IP limits
 
