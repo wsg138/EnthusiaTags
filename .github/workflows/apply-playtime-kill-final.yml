@@ -1,0 +1,120 @@
+name: Apply playtime and rolling kill finalization
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.head_ref == 'agent/fix-playtime-link-kill-window' && github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/fix-playtime-link-kill-window
+          fetch-depth: 0
+
+      - name: Apply final integration edits
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          tracker = Path('src/main/java/org/enthusia/tags/rewards/RewardTracker.java')
+          source = tracker.read_text()
+          old = '''        long cooldownMinutes = clamp(plugin.getConfig().getLong(
+              KILL_CONFIG + "same-victim-cooldown-minutes", 30L), 0L, 1440L);
+          long windowHours = clamp(plugin.getConfig().getLong(
+              KILL_CONFIG + "victim-window-hours", 24L), 1L, 168L);
+          int maximum = (int) clamp(plugin.getConfig().getLong(
+              KILL_CONFIG + "max-counted-per-victim-window", 3L), 1L, 100L);
+          String stateKey = KillFarmLimiter.PAIR_STATE_PREFIX + victim.getUniqueId();
+          KillFarmLimiter.Decision decision = KillFarmLimiter.evaluate(
+              rewardService.getState(killer.getUniqueId(), stateKey),
+              System.currentTimeMillis(), cooldownMinutes * 60_000L,
+              windowHours * 3_600_000L, maximum);
+          '''
+          new = '''        long windowMinutes = clamp(plugin.getConfig().getLong(
+              KILL_CONFIG + "rolling-window-minutes", 60L), 1L, 1440L);
+          int maximum = (int) clamp(plugin.getConfig().getLong(
+              KILL_CONFIG + "rolling-window-max-kills", 5L), 1L, 100L);
+          String stateKey = KillFarmLimiter.PAIR_STATE_PREFIX + victim.getUniqueId();
+          KillFarmLimiter.Decision decision = KillFarmLimiter.evaluate(
+              rewardService.getState(killer.getUniqueId(), stateKey),
+              System.currentTimeMillis(), windowMinutes * 60_000L, maximum);
+          '''
+          if source.count(old) != 1:
+              raise SystemExit('creditKill anchor mismatch')
+          source = source.replace(old, new, 1)
+
+          old = '''        long windowHours = clamp(plugin.getConfig().getLong(
+              KILL_CONFIG + "victim-window-hours", 24L), 1L, 168L);
+          long windowMillis = windowHours * 3_600_000L;
+          '''
+          new = '''        long windowMinutes = clamp(plugin.getConfig().getLong(
+              KILL_CONFIG + "rolling-window-minutes", 60L), 1L, 1440L);
+          long windowMillis = windowMinutes * 60_000L;
+          '''
+          if source.count(old) != 1:
+              raise SystemExit('prune window anchor mismatch')
+          tracker.write_text(source.replace(old, new, 1))
+
+          config = Path('src/main/resources/config.yml')
+          source = config.read_text()
+          old = '''      # Only this many kills of the same victim count during the rolling window.
+              enabled: true
+              same-victim-cooldown-minutes: 30
+              victim-window-hours: 24
+              max-counted-per-victim-window: 3
+          '''
+          new = '''      # Each killer/victim pair may receive five credits in a true rolling hour.
+              enabled: true
+              rolling-window-minutes: 60
+              rolling-window-max-kills: 5
+          '''
+          if source.count(old) != 1:
+              raise SystemExit('config anti-farm anchor mismatch')
+          config.write_text(source.replace(old, new, 1))
+
+          plugin = Path('src/main/resources/plugin.yml')
+          source = plugin.read_text()
+          if source.count('version: 2.2.0') != 1:
+              raise SystemExit('plugin version anchor mismatch')
+          plugin.write_text(source.replace('version: 2.2.0', 'version: 2.2.1', 1))
+
+          pom = Path('pom.xml')
+          source = pom.read_text()
+          if source.count('<version>2.2.0</version>') != 1:
+              raise SystemExit('pom version anchor mismatch')
+          pom.write_text(source.replace('<version>2.2.0</version>', '<version>2.2.1</version>', 1))
+
+          readme = Path('README.md')
+          source = readme.read_text()
+          source = source.replace('rolling `main` build (`2.2.0`)', 'rolling `main` build (`2.2.1`)', 1)
+          source = source.replace(
+              '- Player-kill reward credit is limited per killer/victim pair by a configurable cooldown and rolling-window cap.',
+              '- Player-kill reward credit is limited to five kills per killer/victim pair in a true rolling 60-minute window.',
+              1)
+          marker = 'The default anti-farm values are configured under `rewards.anti-farm.kills` in `config.yml`.'
+          replacement = marker + ' Active, AFK, and total playtime rewards link directly to the live `EnthusiaPlaytime` service exposed by the playtime plugin, with Bukkit service-registry fallback compatibility.'
+          if marker not in source:
+              raise SystemExit('README anti-farm marker mismatch')
+          readme.write_text(source.replace(marker, replacement, 1))
+
+          Path('.github/workflows/apply-playtime-kill-final.yml').unlink()
+          PY
+
+      - name: Test and package
+        run: mvn --batch-mode --no-transfer-progress clean test package
+
+      - name: Commit final source
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Finalize playtime link and rolling kill limit"
+          git push origin HEAD:agent/fix-playtime-link-kill-window
