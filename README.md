@@ -85,6 +85,8 @@ Every push to `main` also replaces the rolling `latest` prerelease asset used by
 - Ore and ancient-debris milestones use durable natural-block counters. Player-placed tracked blocks do not count, including after a restart or piston move.
 - Existing mining progress is snapshotted once before natural-only tracking takes over.
 
+The default anti-farm values are configured under `rewards.anti-farm.kills` in `config.yml`.
+
 ## Daily IP limits
 
 A successful or uncertain `/daily` transaction reserves the player's IP for that server date. Unrelated accounts on the same IP cannot claim another daily reward that day. Definite pre-Vault failures release the reservation safely.
