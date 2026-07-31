@@ -25,24 +25,12 @@ jobs:
 
           reward = Path('src/main/java/org/enthusia/tags/rewards/RewardService.java')
           source = reward.read_text()
-          old = '''    private long computeProgress(Player player, RewardCriterion criterion) {
-              if (criterion.getSourceType() != RewardSourceType.LEGACY) {
-                  return computeSourceProgress(player, criterion);
-              }
-              return computeLegacyProgress(player, criterion);
-          }
-
-          private long computeSourceProgress(Player player, RewardCriterion criterion) {
-              if (criterion.getType() == RewardCriterionType.KILLS_TOTAL) {
-                  return getCounter(player.getUniqueId(), KillFarmLimiter.TRUSTED_KILL_COUNTER);
-              }
-              if (criterion.getType() == RewardCriterionType.BLOCK_MINED
-                  && NaturalBlockPolicy.isTracked(criterion.getMaterial())) {
-                  return getCounter(player.getUniqueId(), NaturalBlockPolicy.counterKey(criterion.getMaterial()));
-              }
-              return switch (criterion.getSourceType()) {
-          '''
-          new = '''    private long computeProgress(Player player, RewardCriterion criterion) {
+          progress_start = source.index('    private long computeProgress(Player player, RewardCriterion criterion) {')
+          source_start = source.index('    private long computeSourceProgress(Player player, RewardCriterion criterion) {', progress_start)
+          legacy_start = source.index('    private long computeLegacyProgress(Player player, RewardCriterion criterion) {', source_start)
+          source_method = source[source_start:legacy_start]
+          switch_start = source_method.index('        return switch (criterion.getSourceType()) {')
+          replacement = '''    private long computeProgress(Player player, RewardCriterion criterion) {
               if (criterion.getType() == RewardCriterionType.KILLS_TOTAL) {
                   return getCounter(player.getUniqueId(), KillFarmLimiter.TRUSTED_KILL_COUNTER);
               }
@@ -57,19 +45,14 @@ jobs:
           }
 
           private long computeSourceProgress(Player player, RewardCriterion criterion) {
-              return switch (criterion.getSourceType()) {
-          '''
-          if source.count(old) != 1:
-              raise SystemExit('RewardService protected progress block mismatch')
-          reward.write_text(source.replace(old, new, 1))
+          ''' + source_method[switch_start:]
+          reward.write_text(source[:progress_start] + replacement + source[legacy_start:])
 
           daily = Path('src/main/java/org/enthusia/tags/daily/DailyService.java')
           source = daily.read_text()
-          old = '''        storage = new DailyStorage(new File(plugin.getDataFolder(), "daily.db"));
-              ipStorage = new DailyIpStorage(new File(plugin.getDataFolder(), "daily-ip.db"));
-              vault.setup();
-          '''
-          new = '''        storage = new DailyStorage(new File(plugin.getDataFolder(), "daily.db"));
+          enable_start = source.index('        storage = new DailyStorage(new File(plugin.getDataFolder(), "daily.db"));')
+          enable_end = source.index('        vault.setup();', enable_start) + len('        vault.setup();')
+          enable_replacement = '''        storage = new DailyStorage(new File(plugin.getDataFolder(), "daily.db"));
               try {
                   ipStorage = new DailyIpStorage(new File(plugin.getDataFolder(), "daily-ip.db"));
               } catch (SQLException ex) {
@@ -81,16 +64,12 @@ jobs:
                   storage = null;
                   throw ex;
               }
-              vault.setup();
-          '''
-          if source.count(old) != 1:
-              raise SystemExit('DailyService enable block mismatch')
-          source = source.replace(old, new, 1)
-          old = '''        if (!storage.reserve(playerId, currentDate, amount)) {
-              return reservationConflict(playerId, currentDate);
-          }
-          '''
-          new = '''        boolean dailyReserved;
+              vault.setup();'''
+          source = source[:enable_start] + enable_replacement + source[enable_end:]
+
+          reserve_start = source.index('        if (!storage.reserve(playerId, currentDate, amount)) {')
+          reserve_end = source.index('\n\n        BalanceLookup balance', reserve_start)
+          reserve_replacement = '''        boolean dailyReserved;
               try {
                   dailyReserved = storage.reserve(playerId, currentDate, amount);
               } catch (SQLException ex) {
@@ -99,26 +78,17 @@ jobs:
               }
               if (!dailyReserved) {
                   return reservationConflict(playerId, currentDate);
-              }
-          '''
-          if source.count(old) != 1:
-              raise SystemExit('DailyService reservation block mismatch')
-          daily.write_text(source.replace(old, new, 1))
+              }'''
+          source = source[:reserve_start] + reserve_replacement + source[reserve_end:]
+          daily.write_text(source)
 
           natural = Path('src/main/java/org/enthusia/tags/rewards/NaturalBlockStorage.java')
           source = natural.read_text()
-          old = '''        executor.shutdown();
-              try {
-                  if (!executor.awaitTermination(5, TimeUnit.SECONDS)) {
-                      executor.shutdownNow();
-                  }
-              } catch (InterruptedException ex) {
-                  Thread.currentThread().interrupt();
-                  executor.shutdownNow();
-              }
-              connection.close();
-          '''
-          new = '''        executor.shutdown();
+          close_start = source.index('    @Override\n    public void close() throws SQLException {')
+          record_start = source.index('    record BlockKey', close_start)
+          close_replacement = '''    @Override
+          public void close() throws SQLException {
+              executor.shutdown();
               boolean stopped = false;
               try {
                   stopped = executor.awaitTermination(5, TimeUnit.SECONDS);
@@ -134,10 +104,10 @@ jobs:
                   throw new SQLException("Natural block storage worker did not stop safely");
               }
               connection.close();
+          }
+
           '''
-          if source.count(old) != 1:
-              raise SystemExit('NaturalBlockStorage close block mismatch')
-          natural.write_text(source.replace(old, new, 1))
+          natural.write_text(source[:close_start] + close_replacement + source[record_start:])
 
           Path('.github/workflows/fix-hardening.yml').unlink()
           PY
