@@ -1,0 +1,152 @@
+name: Apply hardening audit fixes
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.head_ref == 'agent/anti-farm-natural-daily-ip'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/anti-farm-natural-daily-ip
+          fetch-depth: 0
+
+      - name: Apply audit fixes
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          reward = Path('src/main/java/org/enthusia/tags/rewards/RewardService.java')
+          source = reward.read_text()
+          old = '''    private long computeProgress(Player player, RewardCriterion criterion) {
+              if (criterion.getSourceType() != RewardSourceType.LEGACY) {
+                  return computeSourceProgress(player, criterion);
+              }
+              return computeLegacyProgress(player, criterion);
+          }
+
+          private long computeSourceProgress(Player player, RewardCriterion criterion) {
+              if (criterion.getType() == RewardCriterionType.KILLS_TOTAL) {
+                  return getCounter(player.getUniqueId(), KillFarmLimiter.TRUSTED_KILL_COUNTER);
+              }
+              if (criterion.getType() == RewardCriterionType.BLOCK_MINED
+                  && NaturalBlockPolicy.isTracked(criterion.getMaterial())) {
+                  return getCounter(player.getUniqueId(), NaturalBlockPolicy.counterKey(criterion.getMaterial()));
+              }
+              return switch (criterion.getSourceType()) {
+          '''
+          new = '''    private long computeProgress(Player player, RewardCriterion criterion) {
+              if (criterion.getType() == RewardCriterionType.KILLS_TOTAL) {
+                  return getCounter(player.getUniqueId(), KillFarmLimiter.TRUSTED_KILL_COUNTER);
+              }
+              if (criterion.getType() == RewardCriterionType.BLOCK_MINED
+                  && NaturalBlockPolicy.isTracked(criterion.getMaterial())) {
+                  return getCounter(player.getUniqueId(), NaturalBlockPolicy.counterKey(criterion.getMaterial()));
+              }
+              if (criterion.getSourceType() != RewardSourceType.LEGACY) {
+                  return computeSourceProgress(player, criterion);
+              }
+              return computeLegacyProgress(player, criterion);
+          }
+
+          private long computeSourceProgress(Player player, RewardCriterion criterion) {
+              return switch (criterion.getSourceType()) {
+          '''
+          if source.count(old) != 1:
+              raise SystemExit('RewardService protected progress block mismatch')
+          reward.write_text(source.replace(old, new, 1))
+
+          daily = Path('src/main/java/org/enthusia/tags/daily/DailyService.java')
+          source = daily.read_text()
+          old = '''        storage = new DailyStorage(new File(plugin.getDataFolder(), "daily.db"));
+              ipStorage = new DailyIpStorage(new File(plugin.getDataFolder(), "daily-ip.db"));
+              vault.setup();
+          '''
+          new = '''        storage = new DailyStorage(new File(plugin.getDataFolder(), "daily.db"));
+              try {
+                  ipStorage = new DailyIpStorage(new File(plugin.getDataFolder(), "daily-ip.db"));
+              } catch (SQLException ex) {
+                  try {
+                      storage.close();
+                  } catch (SQLException closeFailure) {
+                      ex.addSuppressed(closeFailure);
+                  }
+                  storage = null;
+                  throw ex;
+              }
+              vault.setup();
+          '''
+          if source.count(old) != 1:
+              raise SystemExit('DailyService enable block mismatch')
+          source = source.replace(old, new, 1)
+          old = '''        if (!storage.reserve(playerId, currentDate, amount)) {
+              return reservationConflict(playerId, currentDate);
+          }
+          '''
+          new = '''        boolean dailyReserved;
+              try {
+                  dailyReserved = storage.reserve(playerId, currentDate, amount);
+              } catch (SQLException ex) {
+                  releaseIpReservationSafely(playerId, currentDate, ipAddress, enforceIp);
+                  throw ex;
+              }
+              if (!dailyReserved) {
+                  return reservationConflict(playerId, currentDate);
+              }
+          '''
+          if source.count(old) != 1:
+              raise SystemExit('DailyService reservation block mismatch')
+          daily.write_text(source.replace(old, new, 1))
+
+          natural = Path('src/main/java/org/enthusia/tags/rewards/NaturalBlockStorage.java')
+          source = natural.read_text()
+          old = '''        executor.shutdown();
+              try {
+                  if (!executor.awaitTermination(5, TimeUnit.SECONDS)) {
+                      executor.shutdownNow();
+                  }
+              } catch (InterruptedException ex) {
+                  Thread.currentThread().interrupt();
+                  executor.shutdownNow();
+              }
+              connection.close();
+          '''
+          new = '''        executor.shutdown();
+              boolean stopped = false;
+              try {
+                  stopped = executor.awaitTermination(5, TimeUnit.SECONDS);
+                  if (!stopped) {
+                      executor.shutdownNow();
+                      stopped = executor.awaitTermination(5, TimeUnit.SECONDS);
+                  }
+              } catch (InterruptedException ex) {
+                  Thread.currentThread().interrupt();
+                  executor.shutdownNow();
+              }
+              if (!stopped) {
+                  throw new SQLException("Natural block storage worker did not stop safely");
+              }
+              connection.close();
+          '''
+          if source.count(old) != 1:
+              raise SystemExit('NaturalBlockStorage close block mismatch')
+          natural.write_text(source.replace(old, new, 1))
+
+          Path('.github/workflows/fix-hardening.yml').unlink()
+          PY
+
+      - name: Commit audit fixes
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Harden migration and reservation boundaries"
+          git push origin HEAD:agent/anti-farm-natural-daily-ip
