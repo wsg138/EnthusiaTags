@@ -101,8 +101,13 @@ jobs:
 
           natural = Path('src/main/java/org/enthusia/tags/rewards/NaturalBlockStorage.java')
           source = natural.read_text()
-          start = source.index('    @Override\n    public void close() throws SQLException {')
-          end = source.index('    record BlockKey', start)
+          record_start = source.index('    record BlockKey')
+          search_region = source[:record_start]
+          start = search_region.rfind('@Override')
+          if start < 0:
+              raise SystemExit('NaturalBlockStorage close method anchor not found')
+          while start > 0 and source[start - 1] == ' ':
+              start -= 1
           correct = block([
               '    @Override',
               '    public void close() throws SQLException {',
@@ -125,7 +130,7 @@ jobs:
               '    }',
               ''
           ])
-          natural.write_text(source[:start] + correct + source[end:])
+          natural.write_text(source[:start] + correct + source[record_start:])
 
           Path('.github/workflows/format-hardening.yml').unlink()
           Path('.github/workflows/fix-hardening.yml').unlink(missing_ok=True)
