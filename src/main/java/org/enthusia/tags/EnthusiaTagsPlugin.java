@@ -55,6 +55,7 @@ public final class EnthusiaTagsPlugin extends JavaPlugin {
                 getLogger().severe("Natural ore rewards are locked because origin storage failed: "
                     + ex.getMessage());
             }
+        }
         try {
             dailyService.enable();
         } catch (java.sql.SQLException ex) {
