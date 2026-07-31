@@ -936,6 +936,14 @@ public final class RewardService {
         queueUnlockCheck(playerId);
     }
 
+    public boolean isPlayerStateLoaded(UUID playerId) {
+        if (!isAvailable()) {
+            return false;
+        }
+        RewardPlayerState state = getLoadedState(playerId);
+        return state != null && state.isLoaded();
+    }
+
     public long getCounter(UUID playerId, String key) {
         if (!isAvailable()) return 0L;
         RewardPlayerState state = getLoadedState(playerId);

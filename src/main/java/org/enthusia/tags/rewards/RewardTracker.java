@@ -64,12 +64,7 @@ public final class RewardTracker implements Listener {
     public void onJoin(PlayerJoinEvent event) {
         Player player = event.getPlayer();
         rewardService.loadPlayer(player);
-        initializeProtectedCounters(player);
-        Bukkit.getScheduler().runTaskLater(plugin, () -> {
-            if (player.isOnline()) {
-                initializeProtectedCounters(player);
-            }
-        }, 20L);
+        initializeProtectedCountersWhenLoaded(player, 0);
         if (player.hasPermission("enthusia.tags.admin")) {
             for (String warning : rewardService.getStaffWarnings()) {
                 player.sendMessage(LegacyComponentSerializer.legacyAmpersand().deserialize(warning));
@@ -176,6 +171,23 @@ public final class RewardTracker implements Listener {
             rewardService.setState(killer.getUniqueId(), stateKey, decision.nextState());
         }
         return decision.credited();
+    }
+
+    private void initializeProtectedCountersWhenLoaded(Player player, int attempt) {
+        if (!player.isOnline()) {
+            return;
+        }
+        if (rewardService.isPlayerStateLoaded(player.getUniqueId())) {
+            initializeProtectedCounters(player);
+            return;
+        }
+        if (attempt >= 20) {
+            plugin.getLogger().warning("Could not initialize protected reward counters for "
+                + player.getUniqueId() + " because reward state did not load within 20 seconds.");
+            return;
+        }
+        Bukkit.getScheduler().runTaskLater(plugin,
+            () -> initializeProtectedCountersWhenLoaded(player, attempt + 1), 20L);
     }
 
     private void initializeProtectedCounters(Player player) {
