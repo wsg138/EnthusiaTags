@@ -1,0 +1,180 @@
+    }
+
+    private void cleanupHit(Player killer, Player victim) {
+        Map<UUID, Long> hits = firstHitTimes.get(killer.getUniqueId());
+        if (hits != null) {
+            hits.remove(victim.getUniqueId());
+        }
+    }
+
+    private void updateDeathStreakSame(Player victim, Player killer) {
+        String lastKiller = rewardService.getState(victim.getUniqueId(), "last_killer");
+        if (lastKiller != null && lastKiller.equalsIgnoreCase(killer.getUniqueId().toString())) {
+            rewardService.incrementCounter(victim.getUniqueId(), "death_streak_same", 1);
+            return;
+        }
+        rewardService.setCounter(victim.getUniqueId(), "death_streak_same", 1);
+        rewardService.setState(victim.getUniqueId(), "last_killer", killer.getUniqueId().toString());
+    }
+
+    private void updateQuickKill(Player killer, Player victim) {
+        Map<UUID, Long> victimMap = firstHitTimes.get(killer.getUniqueId());
+        if (victimMap == null) {
+            return;
+        }
+        Long firstHit = victimMap.get(victim.getUniqueId());
+        if (firstHit != null && System.currentTimeMillis() - firstHit <= 10_000L) {
+            rewardService.incrementCounter(killer.getUniqueId(), "quick_kill", 1);
+        }
+    }
+
+    private void updateFullArmorKill(Player killer, Player victim) {
+        var inv = victim.getInventory();
+        if (inv.getHelmet() == null || inv.getChestplate() == null
+            || inv.getLeggings() == null || inv.getBoots() == null) {
+            return;
+        }
+        if (inv.getHelmet().getType().isAir()
+            || inv.getChestplate().getType().isAir()
+            || inv.getLeggings().getType().isAir()
+            || inv.getBoots().getType().isAir()) {
+            return;
+        }
+        rewardService.incrementCounter(killer.getUniqueId(), "kill_full_armor", 1);
+    }
+
+    private void updateLowHealthKill(Player killer) {
+        if (killer.getHealth() <= 6.0) {
+            rewardService.incrementCounter(killer.getUniqueId(), "kill_low_health", 1);
+        }
+    }
+
+    private void handleDeathCause(Player victim) {
+        EntityDamageEvent last = victim.getLastDamageCause();
+        if (last == null) {
+            return;
+        }
+        EntityDamageEvent.DamageCause cause = last.getCause();
+        if (cause == EntityDamageEvent.DamageCause.FALL) {
+            rewardService.incrementCounter(victim.getUniqueId(), "death_cause:fall", 1);
+        } else if (cause == EntityDamageEvent.DamageCause.LAVA) {
+            rewardService.incrementCounter(victim.getUniqueId(), "death_cause:lava", 1);
+        } else if (cause == EntityDamageEvent.DamageCause.BLOCK_EXPLOSION
+            || cause == EntityDamageEvent.DamageCause.ENTITY_EXPLOSION) {
+            rewardService.incrementCounter(victim.getUniqueId(), "death_cause:explosion", 1);
+        }
+        if (last instanceof EntityDamageByEntityEvent byEntity && byEntity.getDamager() instanceof Chicken) {
+            rewardService.incrementCounter(victim.getUniqueId(), "death_cause:chicken", 1);
+        }
+    }
+
+    private void tickPlaytime() {
+        long now = System.currentTimeMillis();
+        for (Player player : Bukkit.getOnlinePlayers()) {
+            UUID playerId = player.getUniqueId();
+            long oldMaxPing = rewardService.getCounter(playerId, "max_ping_ms");
+            if (player.getPing() > oldMaxPing) {
+                rewardService.setCounter(playerId, "max_ping_ms", player.getPing());
+            }
+            String state = rewardService.getLivePlaytimeState(player);
+            if ("ACTIVE".equalsIgnoreCase(state)) {
+                Long previous = activeSampleTimes.put(playerId, now);
+                long elapsed = previous == null ? 0L : Math.min(90_000L, Math.max(0L, now - previous));
+                long streakMs = rewardService.incrementCounter(playerId, "consecutive_active_ms", elapsed);
+                long streakMinutes = streakMs / 60_000L;
+                rewardService.setCounter(playerId, "consecutive_active", streakMinutes);
+                rewardService.setCounter(playerId, "max_consecutive_active",
+                    Math.max(streakMinutes, rewardService.getCounter(playerId, "max_consecutive_active")));
+                int maxY = rewardService.getConfig().undergroundMaxY();
+                if (player.getLocation().getY() <= maxY) {
+                    long undergroundMs = rewardService.incrementCounter(playerId, "underground_active_ms", elapsed);
+                    rewardService.setCounter(playerId, "underground_active", undergroundMs / 60_000L);
+                }
+            } else {
+                activeSampleTimes.remove(playerId);
+                rewardService.setCounter(playerId, "consecutive_active_ms", 0L);
+                rewardService.setCounter(playerId, "consecutive_active", 0L);
+            }
+        }
+    }
+
+    private Player resolveDamager(EntityDamageByEntityEvent event) {
+        if (event.getDamager() instanceof Player player) {
+            return player;
+        }
+        if (event.getDamager() instanceof Projectile projectile
+            && projectile.getShooter() instanceof Player shooter) {
+            return shooter;
+        }
+        return null;
+    }
+}
+''')
+
+write('src/main/java/org/enthusia/tags/daily/DailyInventoryHolder.java', r'''
+package org.enthusia.tags.daily;
+
+import java.util.Objects;
+import java.util.UUID;
+import net.kyori.adventure.text.Component;
+import org.bukkit.Bukkit;
+import org.bukkit.inventory.Inventory;
+import org.bukkit.inventory.InventoryHolder;
+
+final class DailyInventoryHolder implements InventoryHolder {
+    private static final UUID MENU_SESSION = new UUID(0L, 0L);
+
+    private final boolean animation;
+    private final int claimSlot;
+    private final UUID sessionId;
+    private final Inventory inventory;
+
+    private DailyInventoryHolder(boolean animation, int claimSlot, UUID sessionId,
+                                 int size, Component title) {
+        this.animation = animation;
+        this.claimSlot = claimSlot;
+        this.sessionId = Objects.requireNonNull(sessionId, "sessionId");
+        inventory = Bukkit.createInventory(this, size, Objects.requireNonNull(title, "title"));
+    }
+
+    static DailyInventoryHolder menu(int claimSlot, Component title) {
+        return new DailyInventoryHolder(false, claimSlot, MENU_SESSION, 27, title);
+    }
+
+    static DailyInventoryHolder animation(UUID sessionId, Component title) {
+        return new DailyInventoryHolder(true, -1, sessionId, 27, title);
+    }
+
+    boolean isAnimation() {
+        return animation;
+    }
+
+    int claimSlot() {
+        return claimSlot;
+    }
+
+    UUID sessionId() {
+        return sessionId;
+    }
+
+    @Override
+    public Inventory getInventory() {
+        return inventory;
+    }
+}
+''')
+
+write('src/main/java/org/enthusia/tags/daily/DailyAnimationPlan.java', r'''
+package org.enthusia.tags.daily;
+
+final class DailyAnimationPlan {
+    static final int BORDER_RING_LENGTH = 20;
+
+    private DailyAnimationPlan() {
+    }
+
+    static Frame frame(int requestedFrame, int totalFrames) {
+        if (totalFrames < 2) {
+            throw new IllegalArgumentException("Daily animation requires at least two frames");
+        }
+        int frame = Math.max(0, Math.min(totalFrames - 1, requestedFrame));
