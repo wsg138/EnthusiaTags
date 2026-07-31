@@ -40,6 +40,16 @@ class KillFarmLimiterTest {
     }
 
     @Test
+    void expiredRecordsCanBePrunedWithoutRemovingActiveWindows() {
+        long window = 24 * 3_600_000L;
+        KillFarmLimiter.Decision first = KillFarmLimiter.evaluate(null, 100L, 0L, window, 3);
+
+        assertFalse(KillFarmLimiter.isExpired(first.nextState(), 100L + window - 1L, window));
+        assertTrue(KillFarmLimiter.isExpired(first.nextState(), 100L + window, window));
+        assertTrue(KillFarmLimiter.isExpired("bad-data", 500L, window));
+    }
+
+    @Test
     void malformedStateFailsOpenAsAResetRecord() {
         assertTrue(KillFarmLimiter.evaluate("bad-data", 500L, 0L, 1000L, 1).credited());
     }
