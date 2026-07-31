@@ -1,40 +1,28 @@
 package org.enthusia.tags.rewards;
 
-import org.bukkit.Bukkit;
-import org.bukkit.plugin.RegisteredServiceProvider;
-
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.Optional;
 import java.util.UUID;
+import org.bukkit.Bukkit;
+import org.bukkit.plugin.Plugin;
 
 public final class PlaytimeHook {
-    private Class<?> serviceClass;
+    private static final String PLAYTIME_PLUGIN_NAME = "EnthusiaPlaytime";
+    private static final String PLAYTIME_SERVICE_CLASS = "org.enthusia.playtime.api.PlaytimeService";
+
     private Object service;
     private Method getLifetime;
     private Method getLiveState;
+    private Class<?> snapshotClass;
     private Field activeMinutesField;
     private Field afkMinutesField;
     private Field totalMinutesField;
 
     public void setup() {
         try {
-            serviceClass = Class.forName("org.enthusia.playtime.api.PlaytimeService");
-            Object loaded = Bukkit.getServicesManager().load(serviceClass);
-            if (loaded == null) {
-                clear();
-                return;
-            }
-            Method lifetimeMethod = serviceClass.getMethod("getLifetime", UUID.class);
-            Method liveStateMethod = serviceClass.getMethod("getLiveState", UUID.class);
-            Class<?> snapshotClass = Class.forName("org.enthusia.playtime.data.model.PlaytimeSnapshot");
-            activeMinutesField = snapshotClass.getField("activeMinutes");
-            afkMinutesField = snapshotClass.getField("afkMinutes");
-            totalMinutesField = snapshotClass.getField("totalMinutes");
-            service = loaded;
-            getLifetime = lifetimeMethod;
-            getLiveState = liveStateMethod;
-        } catch (ReflectiveOperationException ex) {
+            bind(resolveService());
+        } catch (ReflectiveOperationException | RuntimeException ex) {
             clear();
         }
     }
@@ -50,13 +38,14 @@ public final class PlaytimeHook {
         }
         try {
             Object result = getLifetime.invoke(service, playerId);
-            if (!(result instanceof Optional<?> opt)) {
+            if (!(result instanceof Optional<?> optional)) {
                 return 0L;
             }
-            Object snapshot = opt.orElse(null);
+            Object snapshot = optional.orElse(null);
             if (snapshot == null) {
                 return 0L;
             }
+            bindSnapshot(snapshot);
             return switch (type) {
                 case PLAYTIME_ACTIVE_MINUTES -> activeMinutesField.getLong(snapshot);
                 case PLAYTIME_AFK_MINUTES -> afkMinutesField.getLong(snapshot);
@@ -82,21 +71,76 @@ public final class PlaytimeHook {
         }
     }
 
+    private Object resolveService() {
+        Plugin playtimePlugin = Bukkit.getPluginManager().getPlugin(PLAYTIME_PLUGIN_NAME);
+        if (playtimePlugin != null && playtimePlugin.isEnabled()) {
+            try {
+                Method accessor = playtimePlugin.getClass().getMethod("getPlaytimeService");
+                Object direct = accessor.invoke(playtimePlugin);
+                if (direct != null) {
+                    return direct;
+                }
+            } catch (ReflectiveOperationException | RuntimeException ignored) {
+                // Fall through to Bukkit's service registry for compatibility.
+            }
+        }
+
+        try {
+            ClassLoader loader = playtimePlugin == null
+                ? getClass().getClassLoader()
+                : playtimePlugin.getClass().getClassLoader();
+            Class<?> apiClass = Class.forName(PLAYTIME_SERVICE_CLASS, false, loader);
+            return Bukkit.getServicesManager().load(apiClass);
+        } catch (ClassNotFoundException | RuntimeException ex) {
+            return null;
+        }
+    }
+
     private void refreshProvider() {
-        if (serviceClass == null) {
+        try {
+            Object current = resolveService();
+            if (current != service || getLifetime == null) {
+                bind(current);
+            }
+        } catch (ReflectiveOperationException | RuntimeException ex) {
+            clear();
+        }
+    }
+
+    private void bind(Object loaded) throws ReflectiveOperationException {
+        if (loaded == null) {
+            clear();
             return;
         }
-        RegisteredServiceProvider<?> registration = Bukkit.getServicesManager().getRegistration(serviceClass);
-        Object current = registration == null ? null : registration.getProvider();
-        if (current != service) {
-            setup();
+        Class<?> implementationClass = loaded.getClass();
+        Method lifetimeMethod = implementationClass.getMethod("getLifetime", UUID.class);
+        Method liveStateMethod = implementationClass.getMethod("getLiveState", UUID.class);
+        service = loaded;
+        getLifetime = lifetimeMethod;
+        getLiveState = liveStateMethod;
+        clearSnapshotBinding();
+    }
+
+    private void bindSnapshot(Object snapshot) throws NoSuchFieldException {
+        Class<?> currentClass = snapshot.getClass();
+        if (currentClass == snapshotClass) {
+            return;
         }
+        activeMinutesField = currentClass.getField("activeMinutes");
+        afkMinutesField = currentClass.getField("afkMinutes");
+        totalMinutesField = currentClass.getField("totalMinutes");
+        snapshotClass = currentClass;
     }
 
     private void clear() {
         service = null;
         getLifetime = null;
         getLiveState = null;
+        clearSnapshotBinding();
+    }
+
+    private void clearSnapshotBinding() {
+        snapshotClass = null;
         activeMinutesField = null;
         afkMinutesField = null;
         totalMinutesField = null;
