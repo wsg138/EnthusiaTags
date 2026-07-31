@@ -1,0 +1,180 @@
+write('src/main/java/org/enthusia/tags/rewards/NaturalBlockTracker.java', r'''
+package org.enthusia.tags.rewards;
+
+import java.io.File;
+import java.sql.SQLException;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.logging.Level;
+import org.bukkit.Material;
+import org.bukkit.block.Block;
+import org.bukkit.block.BlockFace;
+import org.bukkit.event.EventHandler;
+import org.bukkit.event.EventPriority;
+import org.bukkit.event.Listener;
+import org.bukkit.event.block.BlockBreakEvent;
+import org.bukkit.event.block.BlockExplodeEvent;
+import org.bukkit.event.block.BlockPistonExtendEvent;
+import org.bukkit.event.block.BlockPistonRetractEvent;
+import org.bukkit.event.block.BlockPlaceEvent;
+import org.bukkit.event.entity.EntityExplodeEvent;
+import org.bukkit.plugin.java.JavaPlugin;
+
+public final class NaturalBlockTracker implements Listener, AutoCloseable {
+    private final JavaPlugin plugin;
+    private final RewardService rewardService;
+    private final NaturalBlockStorage storage;
+
+    public NaturalBlockTracker(JavaPlugin plugin, RewardService rewardService) throws SQLException {
+        this.plugin = plugin;
+        this.rewardService = rewardService;
+        storage = new NaturalBlockStorage(new File(plugin.getDataFolder(), "natural-blocks.db"));
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onPlace(BlockPlaceEvent event) {
+        Material material = event.getBlockPlaced().getType();
+        if (!NaturalBlockPolicy.isTracked(material)) {
+            return;
+        }
+        storage.markPlaced(key(event.getBlockPlaced()), material)
+            .exceptionally(throwable -> logFailure("record placed natural block", throwable));
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onBreak(BlockBreakEvent event) {
+        Block block = event.getBlock();
+        Material material = block.getType();
+        if (!NaturalBlockPolicy.isTracked(material)) {
+            return;
+        }
+        var playerId = event.getPlayer().getUniqueId();
+        storage.consumePlaced(key(block), material).whenComplete((playerPlaced, throwable) -> {
+            if (throwable != null) {
+                logFailure("check natural block origin", throwable);
+                return;
+            }
+            if (!playerPlaced) {
+                rewardService.incrementCounter(playerId, NaturalBlockPolicy.counterKey(material), 1L);
+            }
+        });
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onPistonExtend(BlockPistonExtendEvent event) {
+        move(event.getBlocks(), event.getDirection());
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onPistonRetract(BlockPistonRetractEvent event) {
+        move(event.getBlocks(), event.getDirection().getOppositeFace());
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onBlockExplode(BlockExplodeEvent event) {
+        removeDestroyed(event.blockList());
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onEntityExplode(EntityExplodeEvent event) {
+        removeDestroyed(event.blockList());
+    }
+
+    private void move(List<Block> blocks, BlockFace direction) {
+        List<NaturalBlockStorage.BlockMove> moves = new ArrayList<>();
+        for (Block block : blocks) {
+            Material material = block.getType();
+            if (NaturalBlockPolicy.isTracked(material)) {
+                moves.add(new NaturalBlockStorage.BlockMove(key(block),
+                    key(block.getRelative(direction)), material));
+            }
+        }
+        storage.movePlaced(moves)
+            .exceptionally(throwable -> logFailure("move natural block markers", throwable));
+    }
+
+    private void removeDestroyed(List<Block> blocks) {
+        List<NaturalBlockStorage.BlockKey> keys = blocks.stream()
+            .filter(block -> NaturalBlockPolicy.isTracked(block.getType()))
+            .map(this::key)
+            .toList();
+        storage.remove(keys)
+            .exceptionally(throwable -> logFailure("remove destroyed natural block markers", throwable));
+    }
+
+    private NaturalBlockStorage.BlockKey key(Block block) {
+        return new NaturalBlockStorage.BlockKey(block.getWorld().getUID(),
+            block.getX(), block.getY(), block.getZ());
+    }
+
+    private Void logFailure(String operation, Throwable throwable) {
+        plugin.getLogger().log(Level.WARNING, "Could not " + operation, throwable);
+        return null;
+    }
+
+    @Override
+    public void close() throws SQLException {
+        storage.close();
+    }
+}
+''')
+
+write('src/main/java/org/enthusia/tags/daily/DailyIpStorage.java', r'''
+package org.enthusia.tags.daily;
+
+import java.io.File;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Statement;
+import java.time.LocalDate;
+import java.util.ArrayDeque;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
+import java.util.Set;
+import java.util.UUID;
+
+final class DailyIpStorage implements AutoCloseable {
+    private final Connection connection;
+
+    DailyIpStorage(File file) throws SQLException {
+        connection = DriverManager.getConnection("jdbc:sqlite:" + file.getAbsolutePath());
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("PRAGMA journal_mode=WAL");
+            statement.execute("PRAGMA synchronous=NORMAL");
+            statement.execute("PRAGMA busy_timeout=5000");
+            statement.executeUpdate("""
+                CREATE TABLE IF NOT EXISTS daily_ip_claims (
+                  claim_date TEXT NOT NULL,
+                  ip_address TEXT NOT NULL,
+                  player_uuid TEXT NOT NULL,
+                  created_at INTEGER NOT NULL,
+                  PRIMARY KEY(claim_date, ip_address, player_uuid)
+                )
+                """);
+            statement.executeUpdate("""
+                CREATE INDEX IF NOT EXISTS daily_ip_claim_lookup
+                ON daily_ip_claims(claim_date, ip_address)
+                """);
+            statement.executeUpdate("""
+                CREATE TABLE IF NOT EXISTS daily_ip_siblings (
+                  first_uuid TEXT NOT NULL,
+                  second_uuid TEXT NOT NULL,
+                  administrator TEXT NOT NULL,
+                  created_at INTEGER NOT NULL,
+                  PRIMARY KEY(first_uuid, second_uuid)
+                )
+                """);
+        }
+        prune(LocalDate.now().minusDays(45));
+    }
+
+    synchronized boolean reserve(UUID playerId, LocalDate date, String ipAddress) throws SQLException {
+        String normalizedIp = normalizeIp(ipAddress);
+        if (normalizedIp.isBlank()) {
+            return true;
+        }
+        connection.setAutoCommit(false);
+        try {
