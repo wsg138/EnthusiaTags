@@ -32,12 +32,12 @@ final class ReentrantSingleThreadExecutor extends AbstractExecutorService {
         if (command == null) {
             throw new NullPointerException("command");
         }
-        if (isShutdown()) {
-            throw new RejectedExecutionException("Reward storage executor is shut down");
-        }
         if (Thread.currentThread() == worker.get()) {
             command.run();
             return;
+        }
+        if (isShutdown()) {
+            throw new RejectedExecutionException("Reward storage executor is shut down");
         }
         delegate.execute(command);
     }
