@@ -1,0 +1,180 @@
+            inventory.setItem(DAY_SLOTS.get(index), presentation.rewardItems().get(index));
+        }
+    }
+
+    private void fillBackground(Inventory inventory) {
+        ItemStack background = menuRenderer.blankPane(Material.BLACK_STAINED_GLASS_PANE);
+        for (int slot = 0; slot < inventory.getSize(); slot++) {
+            inventory.setItem(slot, background);
+        }
+        ItemStack border = menuRenderer.blankPane(Material.BLUE_STAINED_GLASS_PANE);
+        for (int slot : BORDER_SLOTS) {
+            inventory.setItem(slot, border);
+        }
+    }
+
+    private void renderDualBorderSweep(Inventory inventory, int head) {
+        renderTrail(inventory, head, Material.WHITE_STAINED_GLASS_PANE,
+            Material.CYAN_STAINED_GLASS_PANE, Material.LIGHT_BLUE_STAINED_GLASS_PANE);
+        renderTrail(inventory, head + BORDER_SLOTS.size() / 2,
+            Material.YELLOW_STAINED_GLASS_PANE,
+            Material.LIGHT_BLUE_STAINED_GLASS_PANE, Material.BLUE_STAINED_GLASS_PANE);
+    }
+
+    private void renderTrail(Inventory inventory, int head, Material first,
+                             Material second, Material third) {
+        setBorder(inventory, head, first);
+        setBorder(inventory, head - 1, second);
+        setBorder(inventory, head - 2, third);
+    }
+
+    private void renderDayTrack(Inventory inventory, List<ItemStack> rewardItems,
+                                DailyAnimationPlan.Frame plan) {
+        for (int index = 0; index < DAY_SLOTS.size(); index++) {
+            if (index < plan.revealedDays()) {
+                inventory.setItem(DAY_SLOTS.get(index), rewardItems.get(index));
+                continue;
+            }
+            int distance = index - plan.progressSegments() + 1;
+            Material material = switch (Math.floorMod(plan.number() + index, 4)) {
+                case 0 -> Material.BLUE_STAINED_GLASS_PANE;
+                case 1 -> Material.LIGHT_BLUE_STAINED_GLASS_PANE;
+                case 2 -> Material.CYAN_STAINED_GLASS_PANE;
+                default -> Material.WHITE_STAINED_GLASS_PANE;
+            };
+            if (distance > 1) {
+                material = Material.GRAY_STAINED_GLASS_PANE;
+            }
+            inventory.setItem(DAY_SLOTS.get(index), menuRenderer.blankPane(material));
+        }
+    }
+
+    private void renderStatistics(Inventory inventory, Presentation presentation,
+                                  DailyAnimationPlan.Frame plan) {
+        if (plan.showCurrentStreak()) {
+            inventory.setItem(3, presentation.currentStreak());
+        }
+        if (plan.showBestStreak()) {
+            inventory.setItem(5, presentation.bestStreak());
+        }
+    }
+
+    private void renderCenter(Inventory inventory, Presentation presentation,
+                              DailyAnimationPlan.CenterStage stage) {
+        ItemStack center = switch (stage) {
+            case LOADING -> presentation.loading();
+            case ALIGNING -> presentation.aligning();
+            case DAY -> presentation.day();
+            case REWARD -> presentation.reward();
+            case READY -> presentation.ready();
+        };
+        inventory.setItem(4, center);
+    }
+
+    private void setBorder(Inventory inventory, int index, Material material) {
+        int normalized = Math.floorMod(index, BORDER_SLOTS.size());
+        inventory.setItem(BORDER_SLOTS.get(normalized), menuRenderer.blankPane(material));
+    }
+
+    private void playConfiguredSound(Player player, String soundPath, Sound fallback,
+                                     String volumePath, float defaultVolume,
+                                     String pitchPath, float defaultPitch) {
+        Sound sound = configuredSound(soundPath, fallback);
+        float volume = configuredFloat(volumePath, defaultVolume, 0F, 2F);
+        float pitch = configuredFloat(pitchPath, defaultPitch, 0.5F, 2F);
+        player.playSound(player.getLocation(), sound, SoundCategory.PLAYERS, volume, pitch);
+    }
+
+    private Sound configuredSound(String path, Sound fallback) {
+        String configured = plugin.getConfig().getString(path);
+        if (configured == null || configured.isBlank()) {
+            return fallback;
+        }
+        try {
+            return Sound.valueOf(configured.toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException ex) {
+            warnInvalidSoundOnce(path, configured, fallback);
+            return fallback;
+        }
+    }
+
+    private void warnInvalidSoundOnce(String path, String configured, Sound fallback) {
+        String warningKey = path + '=' + configured;
+        if (warnedInvalidSounds.add(warningKey)) {
+            plugin.getLogger().warning("Invalid sound " + configured + " at " + path
+                + "; using " + fallback.name());
+        }
+    }
+
+    private float configuredFloat(String path, float fallback, float minimum, float maximum) {
+        double configured = plugin.getConfig().getDouble(path, fallback);
+        return (float) Math.max(minimum, Math.min(maximum, configured));
+    }
+
+    private int clamp(int value, int minimum, int maximum) {
+        return Math.max(minimum, Math.min(maximum, value));
+    }
+
+    private long clamp(long value, long minimum, long maximum) {
+        return Math.max(minimum, Math.min(maximum, value));
+    }
+
+    record Presentation(List<ItemStack> rewardItems, ItemStack currentStreak, ItemStack bestStreak,
+                        ItemStack loading, ItemStack aligning, ItemStack day,
+                        ItemStack reward, ItemStack ready) {
+        Presentation {
+            rewardItems = List.copyOf(rewardItems);
+        }
+    }
+}
+''')
+
+# RewardService: force filtered counters for kill totals and tracked ores regardless of old YAML source.
+reward_service = Path('src/main/java/org/enthusia/tags/rewards/RewardService.java')
+source = reward_service.read_text(encoding='utf-8')
+needle = '''    private long computeSourceProgress(Player player, RewardCriterion criterion) {
+        return switch (criterion.getSourceType()) {
+'''
+replacement = '''    private long computeSourceProgress(Player player, RewardCriterion criterion) {
+        if (criterion.getType() == RewardCriterionType.KILLS_TOTAL) {
+            return getCounter(player.getUniqueId(), KillFarmLimiter.TRUSTED_KILL_COUNTER);
+        }
+        if (criterion.getType() == RewardCriterionType.BLOCK_MINED
+            && NaturalBlockPolicy.isTracked(criterion.getMaterial())) {
+            return getCounter(player.getUniqueId(), NaturalBlockPolicy.counterKey(criterion.getMaterial()));
+        }
+        return switch (criterion.getSourceType()) {
+'''
+if source.count(needle) != 1:
+    raise SystemExit('RewardService computeSourceProgress anchor mismatch')
+reward_service.write_text(source.replace(needle, replacement, 1), encoding='utf-8')
+
+# DailyService targeted integration.
+daily = Path('src/main/java/org/enthusia/tags/daily/DailyService.java')
+source = daily.read_text(encoding='utf-8')
+source = source.replace('import org.bukkit.event.player.PlayerQuitEvent;\n',
+                        'import org.bukkit.event.player.PlayerJoinEvent;\nimport org.bukkit.event.player.PlayerQuitEvent;\n', 1)
+source = source.replace('    private DailyStorage storage;\n',
+                        '    private DailyStorage storage;\n    private DailyIpStorage ipStorage;\n', 1)
+source = source.replace(
+    '        storage = new DailyStorage(new File(plugin.getDataFolder(), "daily.db"));\n',
+    '        storage = new DailyStorage(new File(plugin.getDataFolder(), "daily.db"));\n'
+    '        ipStorage = new DailyIpStorage(new File(plugin.getDataFolder(), "daily-ip.db"));\n', 1)
+source = source.replace('        closeStorage();\n', '        closeStorage();\n        closeIpStorage();\n', 1)
+source = source.replace('''    public boolean handleAdminCommand(CommandSender sender, String[] args) {
+        if (!isValidAdminOperation(args)) {
+''', '''    public boolean handleAdminCommand(CommandSender sender, String[] args) {
+        if (args.length > 0 && args[0].equalsIgnoreCase("sibling")) {
+            return handleSiblingCommand(sender, args);
+        }
+        if (!isValidAdminOperation(args)) {
+''', 1)
+source = source.replace('''    public void open(Player player) {
+        openLoaded(player.getUniqueId(), true);
+    }
+''', '''    public void open(Player player) {
+        backfillClaimedIp(player);
+        openLoaded(player.getUniqueId(), true);
+    }
+
+    @EventHandler
