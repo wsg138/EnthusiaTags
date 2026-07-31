@@ -1,0 +1,42 @@
+name: Finalize 2.2.0 metadata
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    if: github.head_ref == 'agent/anti-farm-natural-daily-ip'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/anti-farm-natural-daily-ip
+          fetch-depth: 0
+
+      - name: Update README release version
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('README.md')
+          source = path.read_text()
+          old = 'rolling `main` build (`2.1.0`)'
+          new = 'rolling `main` build (`2.2.0`)'
+          if source.count(old) != 1:
+              raise SystemExit(f'Expected one README version marker, found {source.count(old)}')
+          path.write_text(source.replace(old, new, 1))
+          Path('.github/workflows/finalize-version.yml').unlink()
+          PY
+
+      - name: Commit metadata update
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Finalize EnthusiaTags 2.2.0 metadata"
+          git push origin HEAD:agent/anti-farm-natural-daily-ip
