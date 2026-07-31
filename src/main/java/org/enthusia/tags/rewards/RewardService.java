@@ -332,7 +332,11 @@ public final class RewardService {
             return CompletableFuture.completedFuture(RewardClaimResult.RECONCILIATION_REQUIRED);
         }
         if (evaluation.status() == RewardStatus.CLAIM_PENDING) {
-            return CompletableFuture.completedFuture(RewardClaimResult.CLAIM_IN_PROGRESS);
+            String pendingClaimKey = player.getUniqueId() + ":" + rewardId;
+            if (!inFlightClaims.add(pendingClaimKey)) {
+                return CompletableFuture.completedFuture(RewardClaimResult.CLAIM_IN_PROGRESS);
+            }
+            return recoverPendingClaimAsync(player, reward, pendingClaimKey);
         }
         if (!evaluation.claimable()) {
             return CompletableFuture.completedFuture(RewardClaimResult.NOT_READY);
@@ -352,6 +356,44 @@ public final class RewardService {
                     future.complete(claimInternal(playerId, playerName, reward, ipAddress));
                 } catch (Throwable throwable) {
                     future.completeExceptionally(throwable);
+                }
+            });
+        } catch (RuntimeException ex) {
+            activeOperations.remove(future);
+            inFlightClaims.remove(claimKey);
+            return CompletableFuture.completedFuture(RewardClaimResult.SERVICE_UNAVAILABLE);
+        }
+        future.whenComplete((ignored, throwable) -> {
+            activeOperations.remove(future);
+            if (lifecycle.get() == ServiceLifecycle.RELOADING && activeOperations.isEmpty()
+                && reloadQueued.compareAndSet(false, true)) {
+                Bukkit.getScheduler().runTask(plugin, this::reloadNow);
+            }
+        });
+        return future;
+    }
+
+    private CompletableFuture<RewardClaimResult> recoverPendingClaimAsync(
+        Player player, RewardDefinition reward, String claimKey) {
+        UUID playerId = player.getUniqueId();
+        String playerName = player.getName();
+        String ipAddress = getPlayerIpAddress(player);
+        String rewardId = reward.getId().toLowerCase(Locale.ROOT);
+        CompletableFuture<RewardClaimResult> future = new CompletableFuture<>();
+        activeOperations.add(future);
+        try {
+            claimExecutor.execute(() -> {
+                try {
+                    RewardStatus refreshed = refreshOverallAfterReconciliation(playerId, rewardId);
+                    PendingClaimRecoveryDecision decision = PendingClaimRecoveryDecision.from(refreshed);
+                    RewardClaimResult result = decision == PendingClaimRecoveryDecision.RESUME
+                        ? claimInternal(playerId, playerName, reward, ipAddress)
+                        : decision.result();
+                    future.complete(result);
+                } catch (Throwable throwable) {
+                    future.completeExceptionally(throwable);
+                } finally {
+                    inFlightClaims.remove(claimKey);
                 }
             });
         } catch (RuntimeException ex) {
