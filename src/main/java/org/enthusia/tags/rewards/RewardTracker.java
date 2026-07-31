@@ -1,8 +1,12 @@
 package org.enthusia.tags.rewards;
 
+import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
+import org.bukkit.Statistic;
 import org.bukkit.entity.Chicken;
 import org.bukkit.entity.Player;
 import org.bukkit.entity.Projectile;
@@ -12,8 +16,8 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.entity.EntityDamageEvent;
-import org.bukkit.event.entity.ProjectileHitEvent;
 import org.bukkit.event.entity.PlayerDeathEvent;
+import org.bukkit.event.entity.ProjectileHitEvent;
 import org.bukkit.event.player.AsyncPlayerPreLoginEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
@@ -21,25 +25,29 @@ import org.bukkit.event.player.PlayerStatisticIncrementEvent;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitTask;
 
-import java.util.Map;
-import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
-
 public final class RewardTracker implements Listener {
+    private static final String KILL_CONFIG = "rewards.anti-farm.kills.";
+
+    private final JavaPlugin plugin;
     private final RewardService rewardService;
     private final Map<UUID, Map<UUID, Long>> firstHitTimes = new ConcurrentHashMap<>();
     private final Map<UUID, Long> activeSampleTimes = new ConcurrentHashMap<>();
     private BukkitTask playtimeTask;
 
-    public RewardTracker(RewardService rewardService) {
+    public RewardTracker(JavaPlugin plugin, RewardService rewardService) {
+        this.plugin = plugin;
         this.rewardService = rewardService;
     }
 
-    public void start(JavaPlugin plugin) {
+    public void start(JavaPlugin schedulingPlugin) {
         if (playtimeTask != null) {
             return;
         }
-        playtimeTask = Bukkit.getScheduler().runTaskTimer(plugin, this::tickPlaytime, 20L, 1200L);
+        for (Player online : Bukkit.getOnlinePlayers()) {
+            initializeProtectedCountersWhenLoaded(online, 0);
+        }
+        playtimeTask = Bukkit.getScheduler().runTaskTimer(
+            schedulingPlugin, this::tickPlaytime, 20L, 1200L);
     }
 
     public void stop() {
@@ -58,10 +66,12 @@ public final class RewardTracker implements Listener {
 
     @EventHandler
     public void onJoin(PlayerJoinEvent event) {
-        rewardService.loadPlayer(event.getPlayer());
-        if (event.getPlayer().hasPermission("enthusia.tags.admin")) {
+        Player player = event.getPlayer();
+        rewardService.loadPlayer(player);
+        initializeProtectedCountersWhenLoaded(player, 0);
+        if (player.hasPermission("enthusia.tags.admin")) {
             for (String warning : rewardService.getStaffWarnings()) {
-                event.getPlayer().sendMessage(LegacyComponentSerializer.legacyAmpersand().deserialize(warning));
+                player.sendMessage(LegacyComponentSerializer.legacyAmpersand().deserialize(warning));
             }
         }
     }
@@ -100,9 +110,6 @@ public final class RewardTracker implements Listener {
         if (type == Material.DIRT || type == Material.COARSE_DIRT || type == Material.ROOTED_DIRT) {
             rewardService.incrementCounter(event.getPlayer().getUniqueId(), "dirt_mined", 1);
         }
-        if (type == Material.DIAMOND_ORE || type == Material.DEEPSLATE_DIAMOND_ORE) {
-            rewardService.incrementCounter(event.getPlayer().getUniqueId(), "diamond_ore_mined", 1);
-        }
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
@@ -113,7 +120,9 @@ public final class RewardTracker implements Listener {
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onProjectileHit(ProjectileHitEvent event) {
-        if (!(event.getEntity().getShooter() instanceof Player player) || event.getHitEntity() == null) return;
+        if (!(event.getEntity().getShooter() instanceof Player player) || event.getHitEntity() == null) {
+            return;
+        }
         rewardService.incrementCounter(player.getUniqueId(), "projectile_hits", 1);
     }
 
@@ -131,13 +140,98 @@ public final class RewardTracker implements Listener {
             return;
         }
 
+        boolean credited = creditKill(killer, victim);
+        if (!credited) {
+            cleanupHit(killer, victim);
+            return;
+        }
+
         rewardService.incrementCounter(victim.getUniqueId(), "pvp_deaths", 1);
+        rewardService.incrementCounter(killer.getUniqueId(), KillFarmLimiter.TRUSTED_KILL_COUNTER, 1);
         rewardService.incrementCounter(killer.getUniqueId(), "kill_streak", 1);
         updateDeathStreakSame(victim, killer);
         updateQuickKill(killer, victim);
         updateFullArmorKill(killer, victim);
         updateLowHealthKill(killer);
+        cleanupHit(killer, victim);
+    }
 
+    private boolean creditKill(Player killer, Player victim) {
+        if (!plugin.getConfig().getBoolean(KILL_CONFIG + "enabled", true)) {
+            return true;
+        }
+        long cooldownMinutes = clamp(plugin.getConfig().getLong(
+            KILL_CONFIG + "same-victim-cooldown-minutes", 30L), 0L, 1440L);
+        long windowHours = clamp(plugin.getConfig().getLong(
+            KILL_CONFIG + "victim-window-hours", 24L), 1L, 168L);
+        int maximum = (int) clamp(plugin.getConfig().getLong(
+            KILL_CONFIG + "max-counted-per-victim-window", 3L), 1L, 100L);
+        String stateKey = KillFarmLimiter.PAIR_STATE_PREFIX + victim.getUniqueId();
+        KillFarmLimiter.Decision decision = KillFarmLimiter.evaluate(
+            rewardService.getState(killer.getUniqueId(), stateKey),
+            System.currentTimeMillis(), cooldownMinutes * 60_000L,
+            windowHours * 3_600_000L, maximum);
+        if (decision.credited()) {
+            rewardService.setState(killer.getUniqueId(), stateKey, decision.nextState());
+        }
+        return decision.credited();
+    }
+
+    private void initializeProtectedCountersWhenLoaded(Player player, int attempt) {
+        if (!player.isOnline()) {
+            return;
+        }
+        if (rewardService.isPlayerStateLoaded(player.getUniqueId())) {
+            initializeProtectedCounters(player);
+            return;
+        }
+        if (attempt >= 20) {
+            plugin.getLogger().warning("Could not initialize protected reward counters for "
+                + player.getUniqueId() + " because reward state did not load within 20 seconds.");
+            return;
+        }
+        Bukkit.getScheduler().runTaskLater(plugin,
+            () -> initializeProtectedCountersWhenLoaded(player, attempt + 1), 20L);
+    }
+
+    private void initializeProtectedCounters(Player player) {
+        UUID playerId = player.getUniqueId();
+        if (!"1".equals(rewardService.getState(playerId, KillFarmLimiter.INITIALIZED_STATE))) {
+            rewardService.setCounter(playerId, KillFarmLimiter.TRUSTED_KILL_COUNTER,
+                player.getStatistic(Statistic.PLAYER_KILLS));
+            rewardService.setState(playerId, KillFarmLimiter.INITIALIZED_STATE, "1");
+        }
+        for (Material material : NaturalBlockPolicy.trackedMaterials()) {
+            String marker = NaturalBlockPolicy.initializedState(material);
+            if ("1".equals(rewardService.getState(playerId, marker))) {
+                continue;
+            }
+            rewardService.setCounter(playerId, NaturalBlockPolicy.counterKey(material),
+                player.getStatistic(Statistic.MINE_BLOCK, material));
+            rewardService.setState(playerId, marker, "1");
+        }
+        pruneExpiredKillPairs(playerId);
+    }
+
+    private void pruneExpiredKillPairs(UUID playerId) {
+        long windowHours = clamp(plugin.getConfig().getLong(
+            KILL_CONFIG + "victim-window-hours", 24L), 1L, 168L);
+        long windowMillis = windowHours * 3_600_000L;
+        long now = System.currentTimeMillis();
+        for (String key : rewardService.stateKeysWithPrefix(
+            playerId, KillFarmLimiter.PAIR_STATE_PREFIX)) {
+            if (KillFarmLimiter.isExpired(
+                rewardService.getState(playerId, key), now, windowMillis)) {
+                rewardService.removeState(playerId, key);
+            }
+        }
+    }
+
+    private long clamp(long value, long minimum, long maximum) {
+        return Math.max(minimum, Math.min(maximum, value));
+    }
+
+    private void cleanupHit(Player killer, Player victim) {
         Map<UUID, Long> hits = firstHitTimes.get(killer.getUniqueId());
         if (hits != null) {
             hits.remove(victim.getUniqueId());
@@ -239,7 +333,8 @@ public final class RewardTracker implements Listener {
         if (event.getDamager() instanceof Player player) {
             return player;
         }
-        if (event.getDamager() instanceof Projectile projectile && projectile.getShooter() instanceof Player shooter) {
+        if (event.getDamager() instanceof Projectile projectile
+            && projectile.getShooter() instanceof Player shooter) {
             return shooter;
         }
         return null;

@@ -108,6 +108,7 @@ public final class RewardService {
     private long syncLastDurationMillis;
     private long syncRepairedStates;
     private long syncStaleStates;
+    private volatile boolean naturalBlockTrackingAvailable;
 
     public RewardService(JavaPlugin plugin, TagService tagService, Messages messages, PerformanceMonitor performanceMonitor) {
         this.plugin = plugin;
@@ -234,6 +235,11 @@ public final class RewardService {
 
     public List<String> getStaffWarnings() {
         return integrationStatus.warnings();
+    }
+
+    public void setNaturalBlockTrackingAvailable(boolean available) {
+        naturalBlockTrackingAvailable = available;
+        progressSnapshots.clear();
     }
 
     public void preloadPlayer(UUID playerId) {
@@ -773,6 +779,24 @@ public final class RewardService {
     }
 
     private long computeProgress(Player player, RewardCriterion criterion) {
+        if (criterion.getType() == RewardCriterionType.KILLS_TOTAL) {
+            return getCounter(player.getUniqueId(), KillFarmLimiter.TRUSTED_KILL_COUNTER);
+        }
+        if (criterion.getType() == RewardCriterionType.BLOCK_MINED
+            && NaturalBlockPolicy.isTracked(criterion.getMaterial())) {
+            return getCounter(player.getUniqueId(), NaturalBlockPolicy.counterKey(criterion.getMaterial()));
+        }
+        if (criterion.getSourceType() == RewardSourceType.CUSTOM_COUNTER) {
+            String key = criterion.getKey();
+            if ("diamond_ore_mined".equals(key)) {
+                return getCounter(player.getUniqueId(), NaturalBlockPolicy.counterKey(Material.DIAMOND_ORE))
+                    + getCounter(player.getUniqueId(), NaturalBlockPolicy.counterKey(Material.DEEPSLATE_DIAMOND_ORE));
+            }
+            if ("iron_ore_mined".equals(key)) {
+                return getCounter(player.getUniqueId(), NaturalBlockPolicy.counterKey(Material.IRON_ORE))
+                    + getCounter(player.getUniqueId(), NaturalBlockPolicy.counterKey(Material.DEEPSLATE_IRON_ORE));
+            }
+        }
         if (criterion.getSourceType() != RewardSourceType.LEGACY) {
             return computeSourceProgress(player, criterion);
         }
@@ -923,6 +947,14 @@ public final class RewardService {
         queueUnlockCheck(playerId);
     }
 
+    public boolean isPlayerStateLoaded(UUID playerId) {
+        if (!isAvailable()) {
+            return false;
+        }
+        RewardPlayerState state = getLoadedState(playerId);
+        return state != null && state.isLoaded();
+    }
+
     public long getCounter(UUID playerId, String key) {
         if (!isAvailable()) return 0L;
         RewardPlayerState state = getLoadedState(playerId);
@@ -930,6 +962,24 @@ public final class RewardService {
             return 0L;
         }
         return state.getCounter(key);
+    }
+
+    public Set<String> stateKeysWithPrefix(UUID playerId, String prefix) {
+        if (!isAvailable()) {
+            return Set.of();
+        }
+        RewardPlayerState state = getLoadedState(playerId);
+        return state == null ? Set.of() : state.stateKeysWithPrefix(prefix);
+    }
+
+    public void removeState(UUID playerId, String key) {
+        if (!isAvailable()) {
+            return;
+        }
+        RewardPlayerState state = getLoadedState(playerId);
+        if (state != null && state.isLoaded()) {
+            state.removeState(key);
+        }
     }
 
     public String getState(UUID playerId, String key) {
@@ -1895,6 +1945,10 @@ public final class RewardService {
     private boolean isCriterionAvailable(RewardCriterion criterion) {
         if (criterion == null || !criterion.isValid()) {
             return false;
+        }
+        if (criterion.getType() == RewardCriterionType.BLOCK_MINED
+            && NaturalBlockPolicy.isTracked(criterion.getMaterial())) {
+            return naturalBlockTrackingAvailable;
         }
         return switch (criterion.getSourceType()) {
             case VAULT_BALANCE -> vaultHook.isAvailable();

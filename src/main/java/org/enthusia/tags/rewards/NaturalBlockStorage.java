@@ -1,0 +1,244 @@
+package org.enthusia.tags.rewards;
+
+import java.io.File;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Statement;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.TimeUnit;
+import org.bukkit.Material;
+
+final class NaturalBlockStorage implements AutoCloseable {
+    private final Connection connection;
+    private final ExecutorService executor =
+        new ReentrantSingleThreadExecutor("enthusia-tags-natural-blocks");
+
+    NaturalBlockStorage(File file) throws SQLException {
+        connection = DriverManager.getConnection("jdbc:sqlite:" + file.getAbsolutePath());
+        try {
+            try (Statement statement = connection.createStatement()) {
+                statement.execute("PRAGMA journal_mode=WAL");
+                statement.execute("PRAGMA synchronous=NORMAL");
+                statement.execute("PRAGMA busy_timeout=5000");
+                statement.executeUpdate("""
+                    CREATE TABLE IF NOT EXISTS player_placed_natural_blocks (
+                      world_uuid TEXT NOT NULL,
+                      block_x INTEGER NOT NULL,
+                      block_y INTEGER NOT NULL,
+                      block_z INTEGER NOT NULL,
+                      material TEXT NOT NULL,
+                      placed_at INTEGER NOT NULL,
+                      PRIMARY KEY(world_uuid, block_x, block_y, block_z)
+                    )
+                    """);
+            }
+        } catch (SQLException ex) {
+            executor.shutdownNow();
+            try {
+                connection.close();
+            } catch (SQLException closeFailure) {
+                ex.addSuppressed(closeFailure);
+            }
+            throw ex;
+        }
+    }
+
+    CompletableFuture<Void> markPlaced(BlockKey key, Material material) {
+        return submit(() -> {
+            try (PreparedStatement statement = connection.prepareStatement("""
+                INSERT INTO player_placed_natural_blocks(
+                  world_uuid,block_x,block_y,block_z,material,placed_at)
+                VALUES(?,?,?,?,?,?) ON CONFLICT(world_uuid,block_x,block_y,block_z)
+                DO UPDATE SET material=excluded.material,placed_at=excluded.placed_at
+                """)) {
+                bindKey(statement, key);
+                statement.setString(5, material.name());
+                statement.setLong(6, System.currentTimeMillis());
+                statement.executeUpdate();
+            }
+            return null;
+        });
+    }
+
+    CompletableFuture<Boolean> consumePlaced(BlockKey key, Material material) {
+        return submit(() -> {
+            try (PreparedStatement statement = connection.prepareStatement("""
+                DELETE FROM player_placed_natural_blocks
+                WHERE world_uuid=? AND block_x=? AND block_y=? AND block_z=? AND material=?
+                """)) {
+                bindKey(statement, key);
+                statement.setString(5, material.name());
+                return statement.executeUpdate() == 1;
+            }
+        });
+    }
+
+    CompletableFuture<Void> movePlaced(List<BlockMove> moves) {
+        if (moves.isEmpty()) {
+            return CompletableFuture.completedFuture(null);
+        }
+        return submit(() -> {
+            connection.setAutoCommit(false);
+            try {
+                List<BlockMove> marked = new ArrayList<>();
+                for (BlockMove move : moves) {
+                    if (isMarked(move.from(), move.material())) {
+                        marked.add(move);
+                    }
+                }
+                for (BlockMove move : marked) {
+                    delete(move.from());
+                }
+                for (BlockMove move : marked) {
+                    insert(move.to(), move.material());
+                }
+                connection.commit();
+            } catch (SQLException ex) {
+                connection.rollback();
+                throw ex;
+            } finally {
+                connection.setAutoCommit(true);
+            }
+            return null;
+        });
+    }
+
+    CompletableFuture<Void> remove(List<BlockKey> keys) {
+        if (keys.isEmpty()) {
+            return CompletableFuture.completedFuture(null);
+        }
+        return submit(() -> {
+            try (PreparedStatement statement = connection.prepareStatement("""
+                DELETE FROM player_placed_natural_blocks
+                WHERE world_uuid=? AND block_x=? AND block_y=? AND block_z=?
+                """)) {
+                for (BlockKey key : keys) {
+                    bindKey(statement, key);
+                    statement.addBatch();
+                }
+                statement.executeBatch();
+            }
+            return null;
+        });
+    }
+
+    boolean isMarkedNow(BlockKey key, Material material) throws SQLException {
+        try {
+            return submit(() -> isMarked(key, material)).get();
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            throw new SQLException("Interrupted while reading natural block marker", ex);
+        } catch (ExecutionException ex) {
+            throw new SQLException("Failed to read natural block marker", ex.getCause());
+        }
+    }
+
+    private boolean isMarked(BlockKey key, Material material) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+            SELECT 1 FROM player_placed_natural_blocks
+            WHERE world_uuid=? AND block_x=? AND block_y=? AND block_z=? AND material=?
+            """)) {
+            bindKey(statement, key);
+            statement.setString(5, material.name());
+            try (ResultSet result = statement.executeQuery()) {
+                return result.next();
+            }
+        }
+    }
+
+    private void insert(BlockKey key, Material material) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+            INSERT INTO player_placed_natural_blocks(
+              world_uuid,block_x,block_y,block_z,material,placed_at)
+            VALUES(?,?,?,?,?,?) ON CONFLICT(world_uuid,block_x,block_y,block_z)
+            DO UPDATE SET material=excluded.material,placed_at=excluded.placed_at
+            """)) {
+            bindKey(statement, key);
+            statement.setString(5, material.name());
+            statement.setLong(6, System.currentTimeMillis());
+            statement.executeUpdate();
+        }
+    }
+
+    private void delete(BlockKey key) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+            DELETE FROM player_placed_natural_blocks
+            WHERE world_uuid=? AND block_x=? AND block_y=? AND block_z=?
+            """)) {
+            bindKey(statement, key);
+            statement.executeUpdate();
+        }
+    }
+
+    private void bindKey(PreparedStatement statement, BlockKey key) throws SQLException {
+        statement.setString(1, key.worldId().toString());
+        statement.setInt(2, key.x());
+        statement.setInt(3, key.y());
+        statement.setInt(4, key.z());
+    }
+
+    private <T> CompletableFuture<T> submit(SqlOperation<T> operation) {
+        CompletableFuture<T> future = new CompletableFuture<>();
+        executor.execute(() -> {
+            try {
+                future.complete(operation.run());
+            } catch (Throwable throwable) {
+                future.completeExceptionally(throwable);
+            }
+        });
+        return future;
+    }
+
+    @Override
+    public void close() throws SQLException {
+        executor.shutdown();
+        SQLException failure = null;
+        boolean stopped = false;
+        try {
+            stopped = executor.awaitTermination(5, TimeUnit.SECONDS);
+            if (!stopped) {
+                executor.shutdownNow();
+                stopped = executor.awaitTermination(5, TimeUnit.SECONDS);
+            }
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            executor.shutdownNow();
+            failure = new SQLException("Interrupted while stopping natural block storage", ex);
+        } finally {
+            try {
+                connection.close();
+            } catch (SQLException closeFailure) {
+                if (failure == null) {
+                    failure = closeFailure;
+                } else {
+                    failure.addSuppressed(closeFailure);
+                }
+            }
+        }
+        if (!stopped && failure == null) {
+            failure = new SQLException("Natural block storage worker did not stop safely");
+        }
+        if (failure != null) {
+            throw failure;
+        }
+    }
+
+    record BlockKey(UUID worldId, int x, int y, int z) {
+    }
+
+    record BlockMove(BlockKey from, BlockKey to, Material material) {
+    }
+
+    @FunctionalInterface
+    private interface SqlOperation<T> {
+        T run() throws Exception;
+    }
+}

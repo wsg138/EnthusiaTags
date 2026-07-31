@@ -20,12 +20,9 @@ final class DailyAnimationRenderer {
     private static final String CLAIM_SOUND_PATH = "daily.claim-sound.";
     private static final List<Integer> BORDER_SLOTS = List.of(
         0, 1, 2, 3, 4, 5, 6, 7, 8,
-        17, 26, 35,
-        44, 43, 42, 41, 40, 39, 38, 37, 36,
-        27, 18, 9
+        17, 26, 25, 24, 23, 22, 21, 20, 19, 18, 9
     );
-    private static final List<Integer> PROGRESS_SLOTS = List.of(10, 11, 12, 13, 14, 15, 16);
-    private static final List<Integer> REWARD_SLOTS = List.of(28, 29, 30, 31, 32, 33, 34);
+    private static final List<Integer> DAY_SLOTS = List.of(10, 11, 12, 13, 14, 15, 16);
 
     private final JavaPlugin plugin;
     private final DailyMenuRenderer menuRenderer;
@@ -44,7 +41,7 @@ final class DailyAnimationRenderer {
     }
 
     int frameCount() {
-        return clamp(plugin.getConfig().getInt(ANIMATION_PATH + "frames", 18), 14, 30);
+        return clamp(plugin.getConfig().getInt(ANIMATION_PATH + "frames", 20), 14, 30);
     }
 
     long frameTicks() {
@@ -65,32 +62,30 @@ final class DailyAnimationRenderer {
             ? view.days().get(view.activeDay() - 1)
             : view.days().get(view.days().size() - 1);
 
-        return new Presentation(
-            rewardItems,
-            currentStreak,
-            bestStreak,
+        return new Presentation(rewardItems, currentStreak, bestStreak,
             menuRenderer.decorativeItem(Material.CLOCK, "Reading your streak...",
                 NamedTextColor.AQUA, false),
-            menuRenderer.decorativeItem(Material.COMPASS, "Building your reward track...",
+            menuRenderer.decorativeItem(Material.COMPASS, "Aligning seven-day track...",
                 NamedTextColor.BLUE, false),
             menuRenderer.decorativeItem(Material.GOLD_NUGGET,
                 "Current target: Day " + view.activeDay(), NamedTextColor.YELLOW, false),
             menuRenderer.decorativeItem(Material.GOLD_INGOT,
                 menuRenderer.rewardText(activeReward.amount()), NamedTextColor.GOLD, false),
             menuRenderer.decorativeItem(Material.EMERALD, "Daily rewards ready",
-                NamedTextColor.GREEN, true)
-        );
+                NamedTextColor.GREEN, true));
     }
 
     void renderFrame(Inventory inventory, Presentation presentation,
                      DailyAnimationPlan.Frame plan) {
-        fillBackground(inventory, plan.finalFrame());
-        renderBorderSweep(inventory, plan.borderHead());
-        renderProgress(inventory, plan.progressSegments());
-        renderRewards(inventory, presentation.rewardItems(), plan.revealedDays());
+        if (plan.finalFrame()) {
+            renderFinalLayout(inventory, presentation);
+            return;
+        }
+        fillBackground(inventory);
+        renderDualBorderSweep(inventory, plan.borderHead());
+        renderDayTrack(inventory, presentation.rewardItems(), plan);
         renderStatistics(inventory, presentation, plan);
         renderCenter(inventory, presentation, plan.centerStage());
-        renderCenterPulse(inventory, plan.number());
     }
 
     void playFrameSound(Player player, DailyAnimationPlan.Frame plan) {
@@ -108,10 +103,9 @@ final class DailyAnimationRenderer {
             player.playSound(player.getLocation(), sound, SoundCategory.PLAYERS, volume, 1.15F);
             return;
         }
-
         Sound sound = configuredSound(SOUND_PATH + "step-sound", Sound.BLOCK_NOTE_BLOCK_HAT);
         float configuredVolume = configuredFloat(SOUND_PATH + "volume", 0.35F, 0F, 2F);
-        float volume = Math.min(0.18F, configuredVolume * 0.5F);
+        float volume = Math.min(0.16F, configuredVolume * 0.45F);
         float startPitch = configuredFloat(SOUND_PATH + "starting-pitch", 0.68F, 0.5F, 2F);
         float pitchStep = configuredFloat(SOUND_PATH + "pitch-step", 0.055F, 0F, 0.2F);
         float pitch = Math.min(2F, startPitch + plan.number() * pitchStep);
@@ -126,51 +120,69 @@ final class DailyAnimationRenderer {
             CLAIM_SOUND_PATH + "volume", 0.65F, CLAIM_SOUND_PATH + "pitch", 1.25F);
     }
 
-    private void fillBackground(Inventory inventory, boolean finalFrame) {
+    private void renderFinalLayout(Inventory inventory, Presentation presentation) {
+        inventory.clear();
+        inventory.setItem(3, presentation.currentStreak());
+        inventory.setItem(5, presentation.bestStreak());
+        for (int index = 0; index < DAY_SLOTS.size(); index++) {
+            inventory.setItem(DAY_SLOTS.get(index), presentation.rewardItems().get(index));
+        }
+    }
+
+    private void fillBackground(Inventory inventory) {
         ItemStack background = menuRenderer.blankPane(Material.BLACK_STAINED_GLASS_PANE);
         for (int slot = 0; slot < inventory.getSize(); slot++) {
             inventory.setItem(slot, background);
         }
-
-        Material borderMaterial = finalFrame
-            ? Material.YELLOW_STAINED_GLASS_PANE : Material.BLUE_STAINED_GLASS_PANE;
-        ItemStack border = menuRenderer.blankPane(borderMaterial);
+        ItemStack border = menuRenderer.blankPane(Material.BLUE_STAINED_GLASS_PANE);
         for (int slot : BORDER_SLOTS) {
             inventory.setItem(slot, border);
         }
     }
 
-    private void renderBorderSweep(Inventory inventory, int head) {
-        setBorder(inventory, head, Material.WHITE_STAINED_GLASS_PANE);
-        setBorder(inventory, head - 1, Material.CYAN_STAINED_GLASS_PANE);
-        setBorder(inventory, head - 2, Material.LIGHT_BLUE_STAINED_GLASS_PANE);
-        setBorder(inventory, head - 3, Material.BLUE_STAINED_GLASS_PANE);
+    private void renderDualBorderSweep(Inventory inventory, int head) {
+        renderTrail(inventory, head, Material.WHITE_STAINED_GLASS_PANE,
+            Material.CYAN_STAINED_GLASS_PANE, Material.LIGHT_BLUE_STAINED_GLASS_PANE);
+        renderTrail(inventory, head + BORDER_SLOTS.size() / 2,
+            Material.YELLOW_STAINED_GLASS_PANE,
+            Material.LIGHT_BLUE_STAINED_GLASS_PANE, Material.BLUE_STAINED_GLASS_PANE);
     }
 
-    private void renderProgress(Inventory inventory, int progressSegments) {
-        ItemStack complete = menuRenderer.blankPane(Material.CYAN_STAINED_GLASS_PANE);
-        ItemStack active = menuRenderer.blankPane(Material.WHITE_STAINED_GLASS_PANE);
-        ItemStack upcoming = menuRenderer.blankPane(Material.GRAY_STAINED_GLASS_PANE);
-        for (int index = 0; index < PROGRESS_SLOTS.size(); index++) {
-            ItemStack item = index < progressSegments - 1
-                ? complete : index == progressSegments - 1 ? active : upcoming;
-            inventory.setItem(PROGRESS_SLOTS.get(index), item);
-        }
+    private void renderTrail(Inventory inventory, int head, Material first,
+                             Material second, Material third) {
+        setBorder(inventory, head, first);
+        setBorder(inventory, head - 1, second);
+        setBorder(inventory, head - 2, third);
     }
 
-    private void renderRewards(Inventory inventory, List<ItemStack> rewardItems, int revealedDays) {
-        for (int index = 0; index < revealedDays; index++) {
-            inventory.setItem(REWARD_SLOTS.get(index), rewardItems.get(index));
+    private void renderDayTrack(Inventory inventory, List<ItemStack> rewardItems,
+                                DailyAnimationPlan.Frame plan) {
+        for (int index = 0; index < DAY_SLOTS.size(); index++) {
+            if (index < plan.revealedDays()) {
+                inventory.setItem(DAY_SLOTS.get(index), rewardItems.get(index));
+                continue;
+            }
+            int distance = index - plan.progressSegments() + 1;
+            Material material = switch (Math.floorMod(plan.number() + index, 4)) {
+                case 0 -> Material.BLUE_STAINED_GLASS_PANE;
+                case 1 -> Material.LIGHT_BLUE_STAINED_GLASS_PANE;
+                case 2 -> Material.CYAN_STAINED_GLASS_PANE;
+                default -> Material.WHITE_STAINED_GLASS_PANE;
+            };
+            if (distance > 1) {
+                material = Material.GRAY_STAINED_GLASS_PANE;
+            }
+            inventory.setItem(DAY_SLOTS.get(index), menuRenderer.blankPane(material));
         }
     }
 
     private void renderStatistics(Inventory inventory, Presentation presentation,
                                   DailyAnimationPlan.Frame plan) {
         if (plan.showCurrentStreak()) {
-            inventory.setItem(20, presentation.currentStreak());
+            inventory.setItem(3, presentation.currentStreak());
         }
         if (plan.showBestStreak()) {
-            inventory.setItem(24, presentation.bestStreak());
+            inventory.setItem(5, presentation.bestStreak());
         }
     }
 
@@ -183,19 +195,7 @@ final class DailyAnimationRenderer {
             case REWARD -> presentation.reward();
             case READY -> presentation.ready();
         };
-        inventory.setItem(22, center);
-    }
-
-    private void renderCenterPulse(Inventory inventory, int frame) {
-        Material material = switch (frame % 4) {
-            case 0 -> Material.BLUE_STAINED_GLASS_PANE;
-            case 1 -> Material.LIGHT_BLUE_STAINED_GLASS_PANE;
-            case 2 -> Material.CYAN_STAINED_GLASS_PANE;
-            default -> Material.WHITE_STAINED_GLASS_PANE;
-        };
-        ItemStack pulse = menuRenderer.blankPane(material);
-        inventory.setItem(21, pulse);
-        inventory.setItem(23, pulse);
+        inventory.setItem(4, center);
     }
 
     private void setBorder(Inventory inventory, int index, Material material) {

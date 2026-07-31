@@ -37,6 +37,7 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryCloseEvent;
 import org.bukkit.event.inventory.InventoryDragEvent;
+import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.InventoryHolder;
@@ -68,6 +69,7 @@ public final class DailyService implements CommandExecutor, Listener {
     private final AtomicBoolean acceptingClaims = new AtomicBoolean(false);
 
     private DailyStorage storage;
+    private DailyIpStorage ipStorage;
     private ExecutorService executor;
     private volatile ZoneId zone;
     private volatile List<Double> payouts = DEFAULT_PAYOUTS;
@@ -84,6 +86,17 @@ public final class DailyService implements CommandExecutor, Listener {
         zone = configuredZone();
         payouts = configuredPayouts();
         storage = new DailyStorage(new File(plugin.getDataFolder(), "daily.db"));
+        try {
+            ipStorage = new DailyIpStorage(new File(plugin.getDataFolder(), "daily-ip.db"));
+        } catch (SQLException ex) {
+            try {
+                storage.close();
+            } catch (SQLException closeFailure) {
+                ex.addSuppressed(closeFailure);
+            }
+            storage = null;
+            throw ex;
+        }
         vault.setup();
         executor = Executors.newSingleThreadExecutor(runnable -> {
             Thread thread = new Thread(runnable, "enthusia-tags-daily");
@@ -109,6 +122,7 @@ public final class DailyService implements CommandExecutor, Listener {
             return;
         }
         closeStorage();
+        closeIpStorage();
     }
 
     public void reload() {
@@ -136,6 +150,9 @@ public final class DailyService implements CommandExecutor, Listener {
     }
 
     public boolean handleAdminCommand(CommandSender sender, String[] args) {
+        if (args.length > 0 && args[0].equalsIgnoreCase("sibling")) {
+            return handleSiblingCommand(sender, args);
+        }
         if (!isValidAdminOperation(args)) {
             sendAdminUsage(sender);
             return true;
@@ -157,7 +174,13 @@ public final class DailyService implements CommandExecutor, Listener {
     }
 
     public void open(Player player) {
+        backfillClaimedIp(player);
         openLoaded(player.getUniqueId(), true);
+    }
+
+    @EventHandler
+    public void join(PlayerJoinEvent event) {
+        backfillClaimedIp(event.getPlayer());
     }
 
     @EventHandler
@@ -222,6 +245,17 @@ public final class DailyService implements CommandExecutor, Listener {
             storage.close();
         } catch (SQLException ex) {
             plugin.getLogger().log(Level.WARNING, "Failed to close daily storage", ex);
+        }
+    }
+
+    private void closeIpStorage() {
+        if (ipStorage == null) {
+            return;
+        }
+        try {
+            ipStorage.close();
+        } catch (SQLException ex) {
+            plugin.getLogger().log(Level.WARNING, "Failed to close daily IP storage", ex);
         }
     }
 
@@ -392,6 +426,47 @@ public final class DailyService implements CommandExecutor, Listener {
         sender.sendMessage("Usage: /enthusiatags daily inspect <player> [YYYY-MM-DD]");
         sender.sendMessage(
             "       /enthusiatags daily reconcile <player> <delivered|retry> <reason> [YYYY-MM-DD]");
+        sender.sendMessage("       /enthusiatags daily sibling <add|remove> <player1> <player2>");
+        sender.sendMessage("       /enthusiatags daily sibling list <player>");
+    }
+
+    private boolean handleSiblingCommand(CommandSender sender, String[] args) {
+        if (args.length < 3) {
+            sendAdminUsage(sender);
+            return true;
+        }
+        String operation = args[1].toLowerCase(Locale.ROOT);
+        Optional<OfflinePlayer> first = resolveTarget(sender, args[2]);
+        if (first.isEmpty()) {
+            return true;
+        }
+        if (operation.equals("list")) {
+            completeToSender(sender, submit(() -> {
+                Set<UUID> group = ipStorage.siblingGroup(first.orElseThrow().getUniqueId());
+                return List.of("Daily IP sibling group: " + group);
+            }));
+            return true;
+        }
+        if (args.length < 4 || (!operation.equals("add") && !operation.equals("remove"))) {
+            sendAdminUsage(sender);
+            return true;
+        }
+        Optional<OfflinePlayer> second = resolveTarget(sender, args[3]);
+        if (second.isEmpty()) {
+            return true;
+        }
+        UUID firstId = first.orElseThrow().getUniqueId();
+        UUID secondId = second.orElseThrow().getUniqueId();
+        String administrator = sender instanceof Player player
+            ? player.getName() + "/" + player.getUniqueId() : "console";
+        completeToSender(sender, submit(() -> {
+            boolean changed = operation.equals("add")
+                ? ipStorage.addSibling(firstId, secondId, administrator)
+                : ipStorage.removeSibling(firstId, secondId);
+            return List.of("Daily IP sibling " + operation + " "
+                + (changed ? "completed" : "made no change") + " for " + firstId + " and " + secondId + ".");
+        }));
+        return true;
     }
 
     private void openLoaded(UUID playerId, boolean allowAnimation) {
@@ -537,7 +612,8 @@ public final class DailyService implements CommandExecutor, Listener {
 
         LocalDate currentDate = today();
         List<Double> payoutSnapshot = payouts;
-        submit(() -> claimOffThread(playerId, currentDate, payoutSnapshot))
+        String ipAddress = playerIp(player);
+        submit(() -> claimOffThread(playerId, currentDate, payoutSnapshot, ipAddress))
             .whenComplete((outcome, throwable) -> {
                 claims.remove(playerId);
                 runMain(() -> finishClaim(playerId, outcome, throwable));
@@ -568,7 +644,8 @@ public final class DailyService implements CommandExecutor, Listener {
     }
 
     private DailyClaimOutcome claimOffThread(UUID playerId, LocalDate currentDate,
-                                             List<Double> payoutSnapshot) throws SQLException {
+                                             List<Double> payoutSnapshot,
+                                             String ipAddress) throws SQLException {
         DailyState old = storage.load(playerId, LEGACY_ANIMATION_DEFAULT);
         int streak = DailyRules.nextStreak(old.lastClaimDate(), currentDate, old.currentStreak());
         if (streak == 0) {
@@ -576,25 +653,43 @@ public final class DailyService implements CommandExecutor, Listener {
         }
 
         double amount = DailyRules.payout(streak, payoutSnapshot);
-        if (!storage.reserve(playerId, currentDate, amount)) {
+        boolean enforceIp = ipLimitEnabled() && !ipAddress.isBlank();
+        if (enforceIp && !ipStorage.reserve(playerId, currentDate, ipAddress)) {
+            return DailyClaimOutcome.failure(
+                "A daily reward has already been claimed from your IP today.");
+        }
+        boolean dailyReserved;
+        try {
+            dailyReserved = storage.reserve(playerId, currentDate, amount);
+        } catch (SQLException ex) {
+            releaseIpReservationSafely(playerId, currentDate, ipAddress, enforceIp);
+            throw ex;
+        }
+        if (!dailyReserved) {
             return reservationConflict(playerId, currentDate);
         }
 
         BalanceLookup balance = lookupBalance(playerId);
         if (!balance.available()) {
             failReservationSafely(playerId, currentDate, balance.failureMessage());
+            releaseIpReservationSafely(playerId, currentDate, ipAddress, enforceIp);
             return DailyClaimOutcome.failure(balance.failureMessage());
         }
         if (!markDepositing(playerId, currentDate, balance.amount())) {
+            releaseIpReservationSafely(playerId, currentDate, ipAddress, enforceIp);
             return DailyClaimOutcome.failure(
                 "The daily claim could not be prepared safely and may be retried.");
         }
 
         DepositLookup deposit = invokeDeposit(playerId, currentDate, amount, balance.amount());
         if (!deposit.completed()) {
+            if (deposit.safeToReleaseIp()) {
+                releaseIpReservationSafely(playerId, currentDate, ipAddress, enforceIp);
+            }
             return DailyClaimOutcome.failure(deposit.failureMessage());
         }
-        return finalizeDeposit(playerId, currentDate, old, streak, amount, deposit.result());
+        return finalizeDeposit(playerId, currentDate, old, streak, amount,
+            deposit.result(), ipAddress, enforceIp);
     }
 
     private BalanceLookup lookupBalance(UUID playerId) {
@@ -628,7 +723,7 @@ public final class DailyService implements CommandExecutor, Listener {
             DepositLookup lookup = callOnMain(() -> onlinePlayer(playerId)
                 .map(player -> DepositLookup.completed(vault.depositDetailed(player, amount)))
                 .orElseGet(() -> DepositLookup.notInvoked(
-                    "Daily claim stopped before the economy was invoked; it may be retried.")));
+                    "Daily claim stopped before the economy was invoked; it may be retried.", true)));
             if (!lookup.completed()) {
                 failReservationSafely(playerId, date, DISCONNECTED_BEFORE_VAULT);
             }
@@ -636,17 +731,21 @@ public final class DailyService implements CommandExecutor, Listener {
         } catch (SQLException ex) {
             markInvocationUncertain(playerId, date, balanceBefore, ex);
             return DepositLookup.notInvoked(
-                "The economy result was uncertain. Do not retry; contact staff for reconciliation.");
+                "The economy result was uncertain. Do not retry; contact staff for reconciliation.", false);
         }
     }
 
     private DailyClaimOutcome finalizeDeposit(UUID playerId, LocalDate date, DailyState old,
                                               int streak, double amount,
-                                              VaultHook.DepositResult result) throws SQLException {
+                                              VaultHook.DepositResult result,
+                                              String ipAddress, boolean enforceIp) throws SQLException {
         DailyStorage.TransactionStatus status = classifyVaultResult(result);
         storage.recordVaultResult(playerId, date, status, result.balanceAfter(),
             result.responseAmount(), result.responseType(), result.errorMessage());
         if (status != DailyStorage.TransactionStatus.DELIVERED) {
+            if (status == DailyStorage.TransactionStatus.FAILED) {
+                releaseIpReservationSafely(playerId, date, ipAddress, enforceIp);
+            }
             return unsuccessfulDeposit(status);
         }
 
@@ -796,6 +895,54 @@ public final class DailyService implements CommandExecutor, Listener {
         return throwable;
     }
 
+    private boolean ipLimitEnabled() {
+        return plugin.getConfig().getBoolean("daily.ip-limit.enabled", true);
+    }
+
+    private String playerIp(Player player) {
+        java.net.InetSocketAddress socketAddress = player.getAddress();
+        java.net.InetAddress address = socketAddress == null ? null : socketAddress.getAddress();
+        return address == null ? "" : address.getHostAddress();
+    }
+
+    private void releaseIpReservationSafely(UUID playerId, LocalDate date,
+                                            String ipAddress, boolean enforceIp) {
+        if (!enforceIp) {
+            return;
+        }
+        try {
+            ipStorage.release(playerId, date, ipAddress);
+        } catch (SQLException ex) {
+            plugin.getLogger().log(Level.SEVERE,
+                "Could not release safe daily IP reservation for " + playerId, ex);
+        }
+    }
+
+    private void backfillClaimedIp(Player player) {
+        if (!ipLimitEnabled()) {
+            return;
+        }
+        UUID playerId = player.getUniqueId();
+        String ipAddress = playerIp(player);
+        LocalDate date = today();
+        if (ipAddress.isBlank()) {
+            return;
+        }
+        submit(() -> {
+            DailyState state = storage.load(playerId, LEGACY_ANIMATION_DEFAULT);
+            if (date.equals(state.lastClaimDate()) && !ipStorage.reserve(playerId, date, ipAddress)) {
+                plugin.getLogger().warning("Could not backfill daily IP ownership for " + playerId
+                    + " because the IP is already owned by a non-sibling account.");
+            }
+            return null;
+        }).exceptionally(throwable -> {
+            plugin.getLogger().log(Level.WARNING,
+                "Could not backfill daily IP ownership for " + playerId,
+                unwrapCompletionException(throwable));
+            return null;
+        });
+    }
+
     private ZoneId configuredZone() {
         String configured = plugin.getConfig().getString("daily.timezone", DEFAULT_TIMEZONE);
         if (configured == null || configured.isBlank()) {
@@ -843,13 +990,14 @@ public final class DailyService implements CommandExecutor, Listener {
     }
 
     private record DepositLookup(boolean completed, VaultHook.DepositResult result,
-                                 String failureMessage) {
+                                 String failureMessage, boolean safeToReleaseIp) {
         private static DepositLookup completed(VaultHook.DepositResult result) {
-            return new DepositLookup(true, result, "");
+            return new DepositLookup(true, result, "", false);
         }
 
-        private static DepositLookup notInvoked(String message) {
-            return new DepositLookup(false, VaultHook.DepositResult.unavailable(0D, message), message);
+        private static DepositLookup notInvoked(String message, boolean safeToReleaseIp) {
+            return new DepositLookup(false, VaultHook.DepositResult.unavailable(0D, message),
+                message, safeToReleaseIp);
         }
     }
 

@@ -7,7 +7,7 @@ Tags, rewards, cosmetics, and daily-reward plugin with PlaceholderAPI and Vault 
 
 | Download | Version | Runtime |
 | --- | --- | --- |
-| [EnthusiaTags.jar](https://github.com/wsg138/EnthusiaTags/releases/download/latest/EnthusiaTags.jar) | rolling `main` build (`2.1.0`) | Java 21, Paper/Leaf 1.21.11 |
+| [EnthusiaTags.jar](https://github.com/wsg138/EnthusiaTags/releases/download/latest/EnthusiaTags.jar) | rolling `main` build (`2.2.0`) | Java 21, Paper/Leaf 1.21.11 |
 
 The `latest` download is rebuilt from `main` after every merged commit. Pull requests and branch pushes also run the full Maven test/package workflow and retain a downloadable Actions artifact.
 
@@ -75,3 +75,28 @@ The server-ready output is `target/EnthusiaTags.jar`.
 
 Every push and pull request runs the build workflow and uploads the JAR as a GitHub Actions artifact.
 Every push to `main` also replaces the rolling `latest` prerelease asset used by the download table.
+
+
+## Reward anti-farming and natural ores
+
+- Player-kill reward credit is limited per killer/victim pair by a configurable cooldown and rolling-window cap.
+- The same filter applies to kill totals, kill streaks, quick kills, armored kills, low-health kills, and PvP death-streak rewards.
+- Existing kill progress is snapshotted once when a player first joins after the update.
+- Ore and ancient-debris milestones use durable natural-block counters. Player-placed tracked blocks do not count, including after a restart or piston move.
+- Existing mining progress is snapshotted once before natural-only tracking takes over.
+
+The default anti-farm values are configured under `rewards.anti-farm.kills` in `config.yml`. Minecraft does not retain origin metadata for blocks placed before this update, so the one-time baseline preserves existing mining totals; strict natural-only tracking applies to blocks placed and mined after the upgrade.
+
+## Daily IP limits
+
+A successful or uncertain `/daily` transaction reserves the player's IP for that server date. Unrelated accounts on the same IP cannot claim another daily reward that day. Definite pre-Vault failures release the reservation safely.
+
+Shared-household exceptions are managed with:
+
+```text
+/enthusiatags daily sibling add <player1> <player2>
+/enthusiatags daily sibling remove <player1> <player2>
+/enthusiatags daily sibling list <player>
+```
+
+Sibling relationships are transitive, so a connected household group may all claim from the same IP.
