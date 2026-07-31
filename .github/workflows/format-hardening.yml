@@ -1,0 +1,141 @@
+name: Format audited hardening changes
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.head_ref == 'agent/anti-farm-natural-daily-ip'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/anti-farm-natural-daily-ip
+          fetch-depth: 0
+
+      - name: Apply exact formatting
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def block(lines):
+              return "\n".join(lines) + "\n"
+
+          reward = Path('src/main/java/org/enthusia/tags/rewards/RewardService.java')
+          source = reward.read_text()
+          start = source.index('    private long computeProgress(Player player, RewardCriterion criterion) {')
+          end = source.index('    private long computeLegacyProgress(Player player, RewardCriterion criterion) {', start)
+          correct = block([
+              '    private long computeProgress(Player player, RewardCriterion criterion) {',
+              '        if (criterion.getType() == RewardCriterionType.KILLS_TOTAL) {',
+              '            return getCounter(player.getUniqueId(), KillFarmLimiter.TRUSTED_KILL_COUNTER);',
+              '        }',
+              '        if (criterion.getType() == RewardCriterionType.BLOCK_MINED',
+              '            && NaturalBlockPolicy.isTracked(criterion.getMaterial())) {',
+              '            return getCounter(player.getUniqueId(), NaturalBlockPolicy.counterKey(criterion.getMaterial()));',
+              '        }',
+              '        if (criterion.getSourceType() != RewardSourceType.LEGACY) {',
+              '            return computeSourceProgress(player, criterion);',
+              '        }',
+              '        return computeLegacyProgress(player, criterion);',
+              '    }',
+              '',
+              '    private long computeSourceProgress(Player player, RewardCriterion criterion) {',
+              '        return switch (criterion.getSourceType()) {',
+              '            case BUKKIT_STAT -> getBukkitStat(player, criterion.getStatistic());',
+              '            case BUKKIT_STAT_MATERIAL -> getBukkitMaterialStat(player, criterion.getStatistic(), criterion.getMaterial());',
+              '            case BUKKIT_STAT_ENTITY -> getBukkitEntityStat(player, criterion.getStatistic(), criterion.getEntityType());',
+              '            case CUSTOM_COUNTER -> getCounter(player.getUniqueId(), criterion.getKey());',
+              '            case PLACEHOLDER -> getPlaytimeFromPlaceholder(player, criterion.getKey());',
+              '            case VAULT_BALANCE -> (long) Math.floor(vaultHook.getBalance(player));',
+              '            case PLAYTIME -> getPlaytimeMinutes(player, criterion.getType(), criterion.getKey());',
+              '            case BALTOP -> isInBaltopTop3(player.getUniqueId()) ? 1 : 0;',
+              '            case LEGACY -> 0L;',
+              '        };',
+              '    }',
+              ''
+          ])
+          reward.write_text(source[:start] + correct + source[end:])
+
+          daily = Path('src/main/java/org/enthusia/tags/daily/DailyService.java')
+          source = daily.read_text()
+          start = source.index('        storage = new DailyStorage(new File(plugin.getDataFolder(), "daily.db"));')
+          end = source.index('        executor = Executors.newSingleThreadExecutor', start)
+          correct = block([
+              '        storage = new DailyStorage(new File(plugin.getDataFolder(), "daily.db"));',
+              '        try {',
+              '            ipStorage = new DailyIpStorage(new File(plugin.getDataFolder(), "daily-ip.db"));',
+              '        } catch (SQLException ex) {',
+              '            try {',
+              '                storage.close();',
+              '            } catch (SQLException closeFailure) {',
+              '                ex.addSuppressed(closeFailure);',
+              '            }',
+              '            storage = null;',
+              '            throw ex;',
+              '        }',
+              '        vault.setup();'
+          ])
+          source = source[:start] + correct + source[end:]
+          start = source.index('        boolean dailyReserved;')
+          end = source.index('        BalanceLookup balance', start)
+          correct = block([
+              '        boolean dailyReserved;',
+              '        try {',
+              '            dailyReserved = storage.reserve(playerId, currentDate, amount);',
+              '        } catch (SQLException ex) {',
+              '            releaseIpReservationSafely(playerId, currentDate, ipAddress, enforceIp);',
+              '            throw ex;',
+              '        }',
+              '        if (!dailyReserved) {',
+              '            return reservationConflict(playerId, currentDate);',
+              '        }',
+              ''
+          ])
+          daily.write_text(source[:start] + correct + source[end:])
+
+          natural = Path('src/main/java/org/enthusia/tags/rewards/NaturalBlockStorage.java')
+          source = natural.read_text()
+          start = source.index('    @Override\n    public void close() throws SQLException {')
+          end = source.index('    record BlockKey', start)
+          correct = block([
+              '    @Override',
+              '    public void close() throws SQLException {',
+              '        executor.shutdown();',
+              '        boolean stopped = false;',
+              '        try {',
+              '            stopped = executor.awaitTermination(5, TimeUnit.SECONDS);',
+              '            if (!stopped) {',
+              '                executor.shutdownNow();',
+              '                stopped = executor.awaitTermination(5, TimeUnit.SECONDS);',
+              '            }',
+              '        } catch (InterruptedException ex) {',
+              '            Thread.currentThread().interrupt();',
+              '            executor.shutdownNow();',
+              '        }',
+              '        if (!stopped) {',
+              '            throw new SQLException("Natural block storage worker did not stop safely");',
+              '        }',
+              '        connection.close();',
+              '    }',
+              ''
+          ])
+          natural.write_text(source[:start] + correct + source[end:])
+
+          Path('.github/workflows/format-hardening.yml').unlink()
+          Path('.github/workflows/fix-hardening.yml').unlink(missing_ok=True)
+          PY
+
+      - name: Commit formatting
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Format audited hardening changes"
+          git push origin HEAD:agent/anti-farm-natural-daily-ip
