@@ -1,6 +1,6 @@
 name: EnthusiaTags
 main: org.enthusia.tags.EnthusiaTagsPlugin
-version: 2.1.0
+version: 2.2.0
 api-version: 1.21
 author: Enthusia
 softdepend:
@@ -27,7 +27,7 @@ commands:
     permission: enthusia.cosmetics.use
   enthusiatags:
     description: Main EnthusiaTags admin command.
-    usage: /enthusiatags <reload|performance|rewards>
+    usage: /enthusiatags <reload|performance|rewards|daily>
     aliases: [etags]
     permission: enthusia.tags.admin
   daily:
