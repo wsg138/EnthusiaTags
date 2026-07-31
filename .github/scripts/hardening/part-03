@@ -1,0 +1,180 @@
+            Set<UUID> owners = owners(date, normalizedIp);
+            if (owners.contains(playerId)) {
+                connection.commit();
+                return true;
+            }
+            if (!owners.isEmpty()) {
+                Set<UUID> allowedGroup = siblingGroup(playerId);
+                if (!allowedGroup.containsAll(owners)) {
+                    connection.rollback();
+                    return false;
+                }
+            }
+            try (PreparedStatement insert = connection.prepareStatement("""
+                INSERT OR IGNORE INTO daily_ip_claims(claim_date,ip_address,player_uuid,created_at)
+                VALUES(?,?,?,?)
+                """)) {
+                insert.setString(1, date.toString());
+                insert.setString(2, normalizedIp);
+                insert.setString(3, playerId.toString());
+                insert.setLong(4, System.currentTimeMillis());
+                insert.executeUpdate();
+            }
+            connection.commit();
+            return true;
+        } catch (SQLException ex) {
+            connection.rollback();
+            throw ex;
+        } finally {
+            connection.setAutoCommit(true);
+        }
+    }
+
+    synchronized void release(UUID playerId, LocalDate date, String ipAddress) throws SQLException {
+        String normalizedIp = normalizeIp(ipAddress);
+        if (normalizedIp.isBlank()) {
+            return;
+        }
+        try (PreparedStatement statement = connection.prepareStatement("""
+            DELETE FROM daily_ip_claims WHERE claim_date=? AND ip_address=? AND player_uuid=?
+            """)) {
+            statement.setString(1, date.toString());
+            statement.setString(2, normalizedIp);
+            statement.setString(3, playerId.toString());
+            statement.executeUpdate();
+        }
+    }
+
+    synchronized boolean addSibling(UUID first, UUID second, String administrator) throws SQLException {
+        SiblingPair pair = SiblingPair.of(first, second);
+        if (pair == null) {
+            return false;
+        }
+        try (PreparedStatement statement = connection.prepareStatement("""
+            INSERT OR IGNORE INTO daily_ip_siblings(first_uuid,second_uuid,administrator,created_at)
+            VALUES(?,?,?,?)
+            """)) {
+            statement.setString(1, pair.first().toString());
+            statement.setString(2, pair.second().toString());
+            statement.setString(3, administrator);
+            statement.setLong(4, System.currentTimeMillis());
+            return statement.executeUpdate() == 1;
+        }
+    }
+
+    synchronized boolean removeSibling(UUID first, UUID second) throws SQLException {
+        SiblingPair pair = SiblingPair.of(first, second);
+        if (pair == null) {
+            return false;
+        }
+        try (PreparedStatement statement = connection.prepareStatement("""
+            DELETE FROM daily_ip_siblings WHERE first_uuid=? AND second_uuid=?
+            """)) {
+            statement.setString(1, pair.first().toString());
+            statement.setString(2, pair.second().toString());
+            return statement.executeUpdate() == 1;
+        }
+    }
+
+    synchronized Set<UUID> siblingGroup(UUID playerId) throws SQLException {
+        Set<UUID> visited = new LinkedHashSet<>();
+        ArrayDeque<UUID> queue = new ArrayDeque<>();
+        visited.add(playerId);
+        queue.add(playerId);
+        while (!queue.isEmpty()) {
+            UUID current = queue.removeFirst();
+            for (UUID sibling : directSiblings(current)) {
+                if (visited.add(sibling)) {
+                    queue.addLast(sibling);
+                }
+            }
+        }
+        return Set.copyOf(visited);
+    }
+
+    synchronized Set<UUID> owners(LocalDate date, String ipAddress) throws SQLException {
+        Set<UUID> owners = new HashSet<>();
+        try (PreparedStatement statement = connection.prepareStatement("""
+            SELECT player_uuid FROM daily_ip_claims WHERE claim_date=? AND ip_address=?
+            """)) {
+            statement.setString(1, date.toString());
+            statement.setString(2, normalizeIp(ipAddress));
+            try (ResultSet result = statement.executeQuery()) {
+                while (result.next()) {
+                    owners.add(UUID.fromString(result.getString("player_uuid")));
+                }
+            }
+        }
+        return Set.copyOf(owners);
+    }
+
+    private Set<UUID> directSiblings(UUID playerId) throws SQLException {
+        Set<UUID> siblings = new HashSet<>();
+        try (PreparedStatement statement = connection.prepareStatement("""
+            SELECT first_uuid,second_uuid FROM daily_ip_siblings
+            WHERE first_uuid=? OR second_uuid=?
+            """)) {
+            String uuid = playerId.toString();
+            statement.setString(1, uuid);
+            statement.setString(2, uuid);
+            try (ResultSet result = statement.executeQuery()) {
+                while (result.next()) {
+                    UUID first = UUID.fromString(result.getString("first_uuid"));
+                    UUID second = UUID.fromString(result.getString("second_uuid"));
+                    siblings.add(playerId.equals(first) ? second : first);
+                }
+            }
+        }
+        return siblings;
+    }
+
+    private void prune(LocalDate oldestDate) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+            "DELETE FROM daily_ip_claims WHERE claim_date<?")) {
+            statement.setString(1, oldestDate.toString());
+            statement.executeUpdate();
+        }
+    }
+
+    private String normalizeIp(String ipAddress) {
+        return ipAddress == null ? "" : ipAddress.trim().toLowerCase(java.util.Locale.ROOT);
+    }
+
+    @Override
+    public synchronized void close() throws SQLException {
+        connection.close();
+    }
+
+    private record SiblingPair(UUID first, UUID second) {
+        private static SiblingPair of(UUID first, UUID second) {
+            if (first == null || second == null || first.equals(second)) {
+                return null;
+            }
+            return first.toString().compareTo(second.toString()) <= 0
+                ? new SiblingPair(first, second) : new SiblingPair(second, first);
+        }
+    }
+}
+''')
+
+write('src/main/java/org/enthusia/tags/rewards/RewardTracker.java', r'''
+package org.enthusia.tags.rewards;
+
+import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
+import org.bukkit.Bukkit;
+import org.bukkit.Material;
+import org.bukkit.Statistic;
+import org.bukkit.entity.Chicken;
+import org.bukkit.entity.Player;
+import org.bukkit.entity.Projectile;
+import org.bukkit.event.EventHandler;
+import org.bukkit.event.EventPriority;
+import org.bukkit.event.Listener;
+import org.bukkit.event.block.BlockBreakEvent;
+import org.bukkit.event.entity.EntityDamageByEntityEvent;
+import org.bukkit.event.entity.EntityDamageEvent;
+import org.bukkit.event.entity.PlayerDeathEvent;
+import org.bukkit.event.entity.ProjectileHitEvent;
