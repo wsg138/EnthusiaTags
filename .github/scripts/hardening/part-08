@@ -1,0 +1,180 @@
+    public void join(PlayerJoinEvent event) {
+        backfillClaimedIp(event.getPlayer());
+    }
+''', 1)
+source = source.replace('''    private void closeStorage() {
+        if (storage == null) {
+            return;
+        }
+        try {
+            storage.close();
+        } catch (SQLException ex) {
+            plugin.getLogger().log(Level.WARNING, "Failed to close daily storage", ex);
+        }
+    }
+''', '''    private void closeStorage() {
+        if (storage == null) {
+            return;
+        }
+        try {
+            storage.close();
+        } catch (SQLException ex) {
+            plugin.getLogger().log(Level.WARNING, "Failed to close daily storage", ex);
+        }
+    }
+
+    private void closeIpStorage() {
+        if (ipStorage == null) {
+            return;
+        }
+        try {
+            ipStorage.close();
+        } catch (SQLException ex) {
+            plugin.getLogger().log(Level.WARNING, "Failed to close daily IP storage", ex);
+        }
+    }
+''', 1)
+source = source.replace('''    private void sendAdminUsage(CommandSender sender) {
+        sender.sendMessage("Usage: /enthusiatags daily inspect <player> [YYYY-MM-DD]");
+        sender.sendMessage(
+            "       /enthusiatags daily reconcile <player> <delivered|retry> <reason> [YYYY-MM-DD]");
+    }
+''', '''    private void sendAdminUsage(CommandSender sender) {
+        sender.sendMessage("Usage: /enthusiatags daily inspect <player> [YYYY-MM-DD]");
+        sender.sendMessage(
+            "       /enthusiatags daily reconcile <player> <delivered|retry> <reason> [YYYY-MM-DD]");
+        sender.sendMessage("       /enthusiatags daily sibling <add|remove> <player1> <player2>");
+        sender.sendMessage("       /enthusiatags daily sibling list <player>");
+    }
+
+    private boolean handleSiblingCommand(CommandSender sender, String[] args) {
+        if (args.length < 3) {
+            sendAdminUsage(sender);
+            return true;
+        }
+        String operation = args[1].toLowerCase(Locale.ROOT);
+        Optional<OfflinePlayer> first = resolveTarget(sender, args[2]);
+        if (first.isEmpty()) {
+            return true;
+        }
+        if (operation.equals("list")) {
+            completeToSender(sender, submit(() -> {
+                Set<UUID> group = ipStorage.siblingGroup(first.orElseThrow().getUniqueId());
+                return List.of("Daily IP sibling group: " + group);
+            }));
+            return true;
+        }
+        if (args.length < 4 || (!operation.equals("add") && !operation.equals("remove"))) {
+            sendAdminUsage(sender);
+            return true;
+        }
+        Optional<OfflinePlayer> second = resolveTarget(sender, args[3]);
+        if (second.isEmpty()) {
+            return true;
+        }
+        UUID firstId = first.orElseThrow().getUniqueId();
+        UUID secondId = second.orElseThrow().getUniqueId();
+        String administrator = sender instanceof Player player
+            ? player.getName() + "/" + player.getUniqueId() : "console";
+        completeToSender(sender, submit(() -> {
+            boolean changed = operation.equals("add")
+                ? ipStorage.addSibling(firstId, secondId, administrator)
+                : ipStorage.removeSibling(firstId, secondId);
+            return List.of("Daily IP sibling " + operation + " "
+                + (changed ? "completed" : "made no change") + " for " + firstId + " and " + secondId + ".");
+        }));
+        return true;
+    }
+''', 1)
+source = source.replace('''        LocalDate currentDate = today();
+        List<Double> payoutSnapshot = payouts;
+        submit(() -> claimOffThread(playerId, currentDate, payoutSnapshot))
+''', '''        LocalDate currentDate = today();
+        List<Double> payoutSnapshot = payouts;
+        String ipAddress = playerIp(player);
+        submit(() -> claimOffThread(playerId, currentDate, payoutSnapshot, ipAddress))
+''', 1)
+source = source.replace('''    private DailyClaimOutcome claimOffThread(UUID playerId, LocalDate currentDate,
+                                             List<Double> payoutSnapshot) throws SQLException {
+''', '''    private DailyClaimOutcome claimOffThread(UUID playerId, LocalDate currentDate,
+                                             List<Double> payoutSnapshot,
+                                             String ipAddress) throws SQLException {
+''', 1)
+source = source.replace('''        double amount = DailyRules.payout(streak, payoutSnapshot);
+        if (!storage.reserve(playerId, currentDate, amount)) {
+''', '''        double amount = DailyRules.payout(streak, payoutSnapshot);
+        boolean enforceIp = ipLimitEnabled() && !ipAddress.isBlank();
+        if (enforceIp && !ipStorage.reserve(playerId, currentDate, ipAddress)) {
+            return DailyClaimOutcome.failure(
+                "A daily reward has already been claimed from your IP today.");
+        }
+        if (!storage.reserve(playerId, currentDate, amount)) {
+''', 1)
+source = source.replace('''        if (!balance.available()) {
+            failReservationSafely(playerId, currentDate, balance.failureMessage());
+            return DailyClaimOutcome.failure(balance.failureMessage());
+        }
+        if (!markDepositing(playerId, currentDate, balance.amount())) {
+            return DailyClaimOutcome.failure(
+                "The daily claim could not be prepared safely and may be retried.");
+        }
+
+        DepositLookup deposit = invokeDeposit(playerId, currentDate, amount, balance.amount());
+        if (!deposit.completed()) {
+            return DailyClaimOutcome.failure(deposit.failureMessage());
+        }
+        return finalizeDeposit(playerId, currentDate, old, streak, amount, deposit.result());
+''', '''        if (!balance.available()) {
+            failReservationSafely(playerId, currentDate, balance.failureMessage());
+            releaseIpReservationSafely(playerId, currentDate, ipAddress, enforceIp);
+            return DailyClaimOutcome.failure(balance.failureMessage());
+        }
+        if (!markDepositing(playerId, currentDate, balance.amount())) {
+            releaseIpReservationSafely(playerId, currentDate, ipAddress, enforceIp);
+            return DailyClaimOutcome.failure(
+                "The daily claim could not be prepared safely and may be retried.");
+        }
+
+        DepositLookup deposit = invokeDeposit(playerId, currentDate, amount, balance.amount());
+        if (!deposit.completed()) {
+            if (deposit.safeToReleaseIp()) {
+                releaseIpReservationSafely(playerId, currentDate, ipAddress, enforceIp);
+            }
+            return DailyClaimOutcome.failure(deposit.failureMessage());
+        }
+        return finalizeDeposit(playerId, currentDate, old, streak, amount,
+            deposit.result(), ipAddress, enforceIp);
+''', 1)
+source = source.replace('''                .map(player -> DepositLookup.completed(vault.depositDetailed(player, amount)))
+                .orElseGet(() -> DepositLookup.notInvoked(
+                    "Daily claim stopped before the economy was invoked; it may be retried.")));
+''', '''                .map(player -> DepositLookup.completed(vault.depositDetailed(player, amount)))
+                .orElseGet(() -> DepositLookup.notInvoked(
+                    "Daily claim stopped before the economy was invoked; it may be retried.", true)));
+''', 1)
+source = source.replace('''            return DepositLookup.notInvoked(
+                "The economy result was uncertain. Do not retry; contact staff for reconciliation.");
+''', '''            return DepositLookup.notInvoked(
+                "The economy result was uncertain. Do not retry; contact staff for reconciliation.", false);
+''', 1)
+source = source.replace('''    private DailyClaimOutcome finalizeDeposit(UUID playerId, LocalDate date, DailyState old,
+                                              int streak, double amount,
+                                              VaultHook.DepositResult result) throws SQLException {
+''', '''    private DailyClaimOutcome finalizeDeposit(UUID playerId, LocalDate date, DailyState old,
+                                              int streak, double amount,
+                                              VaultHook.DepositResult result,
+                                              String ipAddress, boolean enforceIp) throws SQLException {
+''', 1)
+source = source.replace('''        if (status != DailyStorage.TransactionStatus.DELIVERED) {
+            return unsuccessfulDeposit(status);
+        }
+''', '''        if (status != DailyStorage.TransactionStatus.DELIVERED) {
+            if (status == DailyStorage.TransactionStatus.FAILED) {
+                releaseIpReservationSafely(playerId, date, ipAddress, enforceIp);
+            }
+            return unsuccessfulDeposit(status);
+        }
+''', 1)
+source = source.replace('''    private record DepositLookup(boolean completed, VaultHook.DepositResult result,
+                                 String failureMessage) {
+        private static DepositLookup completed(VaultHook.DepositResult result) {
