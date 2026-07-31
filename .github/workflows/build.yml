@@ -1,8 +1,8 @@
 name: Apply stale reward claim recovery
 
 on:
-  push:
-    branches: [agent/fix-stale-reward-claims]
+  pull_request:
+    branches: [main]
 
 permissions:
   contents: write
