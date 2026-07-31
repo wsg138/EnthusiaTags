@@ -49,11 +49,10 @@ global-scan:
 rewards:
   anti-farm:
     kills:
-      # Only this many kills of the same victim count during the rolling window.
+      # Each killer/victim pair may receive five credits in a true rolling hour.
       enabled: true
-      same-victim-cooldown-minutes: 30
-      victim-window-hours: 24
-      max-counted-per-victim-window: 3
+      rolling-window-minutes: 60
+      rolling-window-max-kills: 5
 
   unlock-notifications:
     individual-limit: 3
