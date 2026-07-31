@@ -19,34 +19,43 @@ final class DailyIpStorage implements AutoCloseable {
 
     DailyIpStorage(File file) throws SQLException {
         connection = DriverManager.getConnection("jdbc:sqlite:" + file.getAbsolutePath());
-        try (Statement statement = connection.createStatement()) {
-            statement.execute("PRAGMA journal_mode=WAL");
-            statement.execute("PRAGMA synchronous=NORMAL");
-            statement.execute("PRAGMA busy_timeout=5000");
-            statement.executeUpdate("""
-                CREATE TABLE IF NOT EXISTS daily_ip_claims (
-                  claim_date TEXT NOT NULL,
-                  ip_address TEXT NOT NULL,
-                  player_uuid TEXT NOT NULL,
-                  created_at INTEGER NOT NULL,
-                  PRIMARY KEY(claim_date, ip_address, player_uuid)
-                )
-                """);
-            statement.executeUpdate("""
-                CREATE INDEX IF NOT EXISTS daily_ip_claim_lookup
-                ON daily_ip_claims(claim_date, ip_address)
-                """);
-            statement.executeUpdate("""
-                CREATE TABLE IF NOT EXISTS daily_ip_siblings (
-                  first_uuid TEXT NOT NULL,
-                  second_uuid TEXT NOT NULL,
-                  administrator TEXT NOT NULL,
-                  created_at INTEGER NOT NULL,
-                  PRIMARY KEY(first_uuid, second_uuid)
-                )
-                """);
+        try {
+            try (Statement statement = connection.createStatement()) {
+                statement.execute("PRAGMA journal_mode=WAL");
+                statement.execute("PRAGMA synchronous=NORMAL");
+                statement.execute("PRAGMA busy_timeout=5000");
+                statement.executeUpdate("""
+                    CREATE TABLE IF NOT EXISTS daily_ip_claims (
+                      claim_date TEXT NOT NULL,
+                      ip_address TEXT NOT NULL,
+                      player_uuid TEXT NOT NULL,
+                      created_at INTEGER NOT NULL,
+                      PRIMARY KEY(claim_date, ip_address, player_uuid)
+                    )
+                    """);
+                statement.executeUpdate("""
+                    CREATE INDEX IF NOT EXISTS daily_ip_claim_lookup
+                    ON daily_ip_claims(claim_date, ip_address)
+                    """);
+                statement.executeUpdate("""
+                    CREATE TABLE IF NOT EXISTS daily_ip_siblings (
+                      first_uuid TEXT NOT NULL,
+                      second_uuid TEXT NOT NULL,
+                      administrator TEXT NOT NULL,
+                      created_at INTEGER NOT NULL,
+                      PRIMARY KEY(first_uuid, second_uuid)
+                    )
+                    """);
+            }
+            prune(LocalDate.now().minusDays(45));
+        } catch (SQLException ex) {
+            try {
+                connection.close();
+            } catch (SQLException closeFailure) {
+                ex.addSuppressed(closeFailure);
+            }
+            throw ex;
         }
-        prune(LocalDate.now().minusDays(45));
     }
 
     synchronized boolean reserve(UUID playerId, LocalDate date, String ipAddress) throws SQLException {

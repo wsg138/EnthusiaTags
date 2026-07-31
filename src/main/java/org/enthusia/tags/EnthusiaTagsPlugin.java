@@ -49,10 +49,12 @@ public final class EnthusiaTagsPlugin extends JavaPlugin {
             rewardTracker.start(this);
             try {
                 naturalBlockTracker = new NaturalBlockTracker(this, rewardService);
+                rewardService.setNaturalBlockTrackingAvailable(true);
             } catch (java.sql.SQLException ex) {
-                getLogger().severe("Natural ore tracking is disabled because storage failed: " + ex.getMessage());
+                rewardService.setNaturalBlockTrackingAvailable(false);
+                getLogger().severe("Natural ore rewards are locked because origin storage failed: "
+                    + ex.getMessage());
             }
-        }
         try {
             dailyService.enable();
         } catch (java.sql.SQLException ex) {

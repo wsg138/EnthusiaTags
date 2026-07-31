@@ -107,7 +107,9 @@ public final class NaturalBlockTracker implements Listener, AutoCloseable {
     }
 
     private Void logFailure(String operation, Throwable throwable) {
-        plugin.getLogger().log(Level.WARNING, "Could not " + operation, throwable);
+        rewardService.setNaturalBlockTrackingAvailable(false);
+        plugin.getLogger().log(Level.SEVERE,
+            "Could not " + operation + "; natural ore rewards are locked until restart", throwable);
         return null;
     }
 

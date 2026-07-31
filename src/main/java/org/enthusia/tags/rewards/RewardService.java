@@ -108,6 +108,7 @@ public final class RewardService {
     private long syncLastDurationMillis;
     private long syncRepairedStates;
     private long syncStaleStates;
+    private volatile boolean naturalBlockTrackingAvailable;
 
     public RewardService(JavaPlugin plugin, TagService tagService, Messages messages, PerformanceMonitor performanceMonitor) {
         this.plugin = plugin;
@@ -234,6 +235,11 @@ public final class RewardService {
 
     public List<String> getStaffWarnings() {
         return integrationStatus.warnings();
+    }
+
+    public void setNaturalBlockTrackingAvailable(boolean available) {
+        naturalBlockTrackingAvailable = available;
+        progressSnapshots.clear();
     }
 
     public void preloadPlayer(UUID playerId) {
@@ -1902,6 +1908,10 @@ public final class RewardService {
     private boolean isCriterionAvailable(RewardCriterion criterion) {
         if (criterion == null || !criterion.isValid()) {
             return false;
+        }
+        if (criterion.getType() == RewardCriterionType.BLOCK_MINED
+            && NaturalBlockPolicy.isTracked(criterion.getMaterial())) {
+            return naturalBlockTrackingAvailable;
         }
         return switch (criterion.getSourceType()) {
             case VAULT_BALANCE -> vaultHook.isAvailable();

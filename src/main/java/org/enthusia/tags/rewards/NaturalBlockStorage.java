@@ -23,21 +23,31 @@ final class NaturalBlockStorage implements AutoCloseable {
 
     NaturalBlockStorage(File file) throws SQLException {
         connection = DriverManager.getConnection("jdbc:sqlite:" + file.getAbsolutePath());
-        try (Statement statement = connection.createStatement()) {
-            statement.execute("PRAGMA journal_mode=WAL");
-            statement.execute("PRAGMA synchronous=NORMAL");
-            statement.execute("PRAGMA busy_timeout=5000");
-            statement.executeUpdate("""
-                CREATE TABLE IF NOT EXISTS player_placed_natural_blocks (
-                  world_uuid TEXT NOT NULL,
-                  block_x INTEGER NOT NULL,
-                  block_y INTEGER NOT NULL,
-                  block_z INTEGER NOT NULL,
-                  material TEXT NOT NULL,
-                  placed_at INTEGER NOT NULL,
-                  PRIMARY KEY(world_uuid, block_x, block_y, block_z)
-                )
-                """);
+        try {
+            try (Statement statement = connection.createStatement()) {
+                statement.execute("PRAGMA journal_mode=WAL");
+                statement.execute("PRAGMA synchronous=NORMAL");
+                statement.execute("PRAGMA busy_timeout=5000");
+                statement.executeUpdate("""
+                    CREATE TABLE IF NOT EXISTS player_placed_natural_blocks (
+                      world_uuid TEXT NOT NULL,
+                      block_x INTEGER NOT NULL,
+                      block_y INTEGER NOT NULL,
+                      block_z INTEGER NOT NULL,
+                      material TEXT NOT NULL,
+                      placed_at INTEGER NOT NULL,
+                      PRIMARY KEY(world_uuid, block_x, block_y, block_z)
+                    )
+                    """);
+            }
+        } catch (SQLException ex) {
+            executor.shutdownNow();
+            try {
+                connection.close();
+            } catch (SQLException closeFailure) {
+                ex.addSuppressed(closeFailure);
+            }
+            throw ex;
         }
     }
 
