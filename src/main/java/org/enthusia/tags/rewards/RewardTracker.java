@@ -160,17 +160,14 @@ public final class RewardTracker implements Listener {
         if (!plugin.getConfig().getBoolean(KILL_CONFIG + "enabled", true)) {
             return true;
         }
-        long cooldownMinutes = clamp(plugin.getConfig().getLong(
-            KILL_CONFIG + "same-victim-cooldown-minutes", 30L), 0L, 1440L);
-        long windowHours = clamp(plugin.getConfig().getLong(
-            KILL_CONFIG + "victim-window-hours", 24L), 1L, 168L);
+        long windowMinutes = clamp(plugin.getConfig().getLong(
+            KILL_CONFIG + "rolling-window-minutes", 60L), 1L, 1440L);
         int maximum = (int) clamp(plugin.getConfig().getLong(
-            KILL_CONFIG + "max-counted-per-victim-window", 3L), 1L, 100L);
+            KILL_CONFIG + "rolling-window-max-kills", 5L), 1L, 100L);
         String stateKey = KillFarmLimiter.PAIR_STATE_PREFIX + victim.getUniqueId();
         KillFarmLimiter.Decision decision = KillFarmLimiter.evaluate(
             rewardService.getState(killer.getUniqueId(), stateKey),
-            System.currentTimeMillis(), cooldownMinutes * 60_000L,
-            windowHours * 3_600_000L, maximum);
+            System.currentTimeMillis(), windowMinutes * 60_000L, maximum);
         if (decision.credited()) {
             rewardService.setState(killer.getUniqueId(), stateKey, decision.nextState());
         }
@@ -214,9 +211,9 @@ public final class RewardTracker implements Listener {
     }
 
     private void pruneExpiredKillPairs(UUID playerId) {
-        long windowHours = clamp(plugin.getConfig().getLong(
-            KILL_CONFIG + "victim-window-hours", 24L), 1L, 168L);
-        long windowMillis = windowHours * 3_600_000L;
+        long windowMinutes = clamp(plugin.getConfig().getLong(
+            KILL_CONFIG + "rolling-window-minutes", 60L), 1L, 1440L);
+        long windowMillis = windowMinutes * 60_000L;
         long now = System.currentTimeMillis();
         for (String key : rewardService.stateKeysWithPrefix(
             playerId, KillFarmLimiter.PAIR_STATE_PREFIX)) {
