@@ -1,0 +1,94 @@
+name: Harden protected-counter initialization
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.head_ref == 'agent/anti-farm-natural-daily-ip'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/anti-farm-natural-daily-ip
+          fetch-depth: 0
+
+      - name: Wait for loaded reward state before snapshotting
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          service = Path('src/main/java/org/enthusia/tags/rewards/RewardService.java')
+          source = service.read_text()
+          anchor = '''    public long getCounter(UUID playerId, String key) {
+          '''
+          method = '''    public boolean isPlayerStateLoaded(UUID playerId) {
+              if (!isAvailable()) {
+                  return false;
+              }
+              RewardPlayerState state = getLoadedState(playerId);
+              return state != null && state.isLoaded();
+          }
+
+          '''
+          if source.count(anchor) != 1:
+              raise SystemExit('RewardService counter anchor mismatch')
+          service.write_text(source.replace(anchor, method + anchor, 1))
+
+          tracker = Path('src/main/java/org/enthusia/tags/rewards/RewardTracker.java')
+          source = tracker.read_text()
+          old = '''        rewardService.loadPlayer(player);
+              initializeProtectedCounters(player);
+              Bukkit.getScheduler().runTaskLater(plugin, () -> {
+                  if (player.isOnline()) {
+                      initializeProtectedCounters(player);
+                  }
+              }, 20L);
+          '''
+          new = '''        rewardService.loadPlayer(player);
+              initializeProtectedCountersWhenLoaded(player, 0);
+          '''
+          if source.count(old) != 1:
+              raise SystemExit('RewardTracker join initialization block mismatch')
+          source = source.replace(old, new, 1)
+
+          anchor = '''    private void initializeProtectedCounters(Player player) {
+          '''
+          method = '''    private void initializeProtectedCountersWhenLoaded(Player player, int attempt) {
+              if (!player.isOnline()) {
+                  return;
+              }
+              if (rewardService.isPlayerStateLoaded(player.getUniqueId())) {
+                  initializeProtectedCounters(player);
+                  return;
+              }
+              if (attempt >= 20) {
+                  plugin.getLogger().warning("Could not initialize protected reward counters for "
+                      + player.getUniqueId() + " because reward state did not load within 20 seconds.");
+                  return;
+              }
+              Bukkit.getScheduler().runTaskLater(plugin,
+                  () -> initializeProtectedCountersWhenLoaded(player, attempt + 1), 20L);
+          }
+
+          '''
+          if source.count(anchor) != 1:
+              raise SystemExit('RewardTracker initialization method anchor mismatch')
+          tracker.write_text(source.replace(anchor, method + anchor, 1))
+
+          Path('.github/workflows/fix-baseline-init.yml').unlink()
+          PY
+
+      - name: Commit initialization fix
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Wait for reward state before baseline migration"
+          git push origin HEAD:agent/anti-farm-natural-daily-ip
