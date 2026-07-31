@@ -12,6 +12,7 @@ import java.util.concurrent.atomic.AtomicReference;
  * Serial executor that runs nested submissions inline when they originate from
  * its own worker thread. This prevents a storage callback from deadlocking by
  * submitting another storage operation and synchronously waiting for it.
+ * RewardStorage must instantiate this executor for the safeguard to apply.
  */
 final class ReentrantSingleThreadExecutor extends AbstractExecutorService {
     private final AtomicReference<Thread> worker = new AtomicReference<>();
