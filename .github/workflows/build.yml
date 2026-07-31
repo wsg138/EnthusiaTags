@@ -15,7 +15,7 @@ jobs:
         with:
           ref: agent/fix-stale-reward-claims
 
-      - name: Format recovery code
+      - name: Format recovery code exactly
         shell: bash
         run: |
           python3 - <<'PY'
@@ -26,57 +26,61 @@ jobs:
 
           branch_start = source.index('        if (evaluation.status() == RewardStatus.CLAIM_PENDING) {')
           branch_end = source.index('        if (!evaluation.claimable()) {', branch_start)
-          formatted_branch = '''        if (evaluation.status() == RewardStatus.CLAIM_PENDING) {
-              String pendingClaimKey = player.getUniqueId() + ":" + rewardId;
-              if (!inFlightClaims.add(pendingClaimKey)) {
-                  return CompletableFuture.completedFuture(RewardClaimResult.CLAIM_IN_PROGRESS);
-              }
-              return recoverPendingClaimAsync(player, reward, pendingClaimKey);
-          }
-          '''
+          formatted_branch = '\n'.join([
+              '        if (evaluation.status() == RewardStatus.CLAIM_PENDING) {',
+              '            String pendingClaimKey = player.getUniqueId() + ":" + rewardId;',
+              '            if (!inFlightClaims.add(pendingClaimKey)) {',
+              '                return CompletableFuture.completedFuture(RewardClaimResult.CLAIM_IN_PROGRESS);',
+              '            }',
+              '            return recoverPendingClaimAsync(player, reward, pendingClaimKey);',
+              '        }',
+              '',
+          ])
           source = source[:branch_start] + formatted_branch + source[branch_end:]
 
           method_start = source.index('    private CompletableFuture<RewardClaimResult> recoverPendingClaimAsync(')
           method_end = source.index('    private void resumeClaimAfterItem(UUID playerId, String rewardId) {', method_start)
-          formatted_method = '''    private CompletableFuture<RewardClaimResult> recoverPendingClaimAsync(
-              Player player, RewardDefinition reward, String claimKey) {
-              UUID playerId = player.getUniqueId();
-              String playerName = player.getName();
-              String ipAddress = getPlayerIpAddress(player);
-              String rewardId = reward.getId().toLowerCase(Locale.ROOT);
-              CompletableFuture<RewardClaimResult> future = new CompletableFuture<>();
-              activeOperations.add(future);
-              try {
-                  claimExecutor.execute(() -> {
-                      try {
-                          RewardStatus refreshed = refreshOverallAfterReconciliation(playerId, rewardId);
-                          PendingClaimRecoveryDecision decision = PendingClaimRecoveryDecision.from(refreshed);
-                          RewardClaimResult result = decision == PendingClaimRecoveryDecision.RESUME
-                              ? claimInternal(playerId, playerName, reward, ipAddress)
-                              : decision.result();
-                          future.complete(result);
-                      } catch (Throwable throwable) {
-                          future.completeExceptionally(throwable);
-                      } finally {
-                          inFlightClaims.remove(claimKey);
-                      }
-                  });
-              } catch (RuntimeException ex) {
-                  activeOperations.remove(future);
-                  inFlightClaims.remove(claimKey);
-                  return CompletableFuture.completedFuture(RewardClaimResult.SERVICE_UNAVAILABLE);
-              }
-              future.whenComplete((ignored, throwable) -> {
-                  activeOperations.remove(future);
-                  if (lifecycle.get() == ServiceLifecycle.RELOADING && activeOperations.isEmpty()
-                      && reloadQueued.compareAndSet(false, true)) {
-                      Bukkit.getScheduler().runTask(plugin, this::reloadNow);
-                  }
-              });
-              return future;
-          }
-
-          '''
+          formatted_method = '\n'.join([
+              '    private CompletableFuture<RewardClaimResult> recoverPendingClaimAsync(',
+              '        Player player, RewardDefinition reward, String claimKey) {',
+              '        UUID playerId = player.getUniqueId();',
+              '        String playerName = player.getName();',
+              '        String ipAddress = getPlayerIpAddress(player);',
+              '        String rewardId = reward.getId().toLowerCase(Locale.ROOT);',
+              '        CompletableFuture<RewardClaimResult> future = new CompletableFuture<>();',
+              '        activeOperations.add(future);',
+              '        try {',
+              '            claimExecutor.execute(() -> {',
+              '                try {',
+              '                    RewardStatus refreshed = refreshOverallAfterReconciliation(playerId, rewardId);',
+              '                    PendingClaimRecoveryDecision decision = PendingClaimRecoveryDecision.from(refreshed);',
+              '                    RewardClaimResult result = decision == PendingClaimRecoveryDecision.RESUME',
+              '                        ? claimInternal(playerId, playerName, reward, ipAddress)',
+              '                        : decision.result();',
+              '                    future.complete(result);',
+              '                } catch (Throwable throwable) {',
+              '                    future.completeExceptionally(throwable);',
+              '                } finally {',
+              '                    inFlightClaims.remove(claimKey);',
+              '                }',
+              '            });',
+              '        } catch (RuntimeException ex) {',
+              '            activeOperations.remove(future);',
+              '            inFlightClaims.remove(claimKey);',
+              '            return CompletableFuture.completedFuture(RewardClaimResult.SERVICE_UNAVAILABLE);',
+              '        }',
+              '        future.whenComplete((ignored, throwable) -> {',
+              '            activeOperations.remove(future);',
+              '            if (lifecycle.get() == ServiceLifecycle.RELOADING && activeOperations.isEmpty()',
+              '                && reloadQueued.compareAndSet(false, true)) {',
+              '                Bukkit.getScheduler().runTask(plugin, this::reloadNow);',
+              '            }',
+              '        });',
+              '        return future;',
+              '    }',
+              '',
+              '',
+          ])
           source = source[:method_start] + formatted_method + source[method_end:]
           path.write_text(source)
           PY
@@ -87,5 +91,6 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add src/main/java/org/enthusia/tags/rewards/RewardService.java
+          git diff --cached --quiet && exit 0
           git commit -m "Format stale claim recovery"
           git push origin HEAD:agent/fix-stale-reward-claims
