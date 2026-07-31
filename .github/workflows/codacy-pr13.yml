@@ -1,0 +1,38 @@
+name: Exact Codacy findings for PR 13
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  codacy:
+    if: github.head_ref == 'agent/fix-playtime-link-kill-window'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Print analyzed Codacy issues
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL='https://api.codacy.com/api/v3/analysis/organizations/gh/wsg138/repositories/EnthusiaTags/pull-requests/13/issues?limit=100'
+          for attempt in $(seq 1 60); do
+            curl --fail --silent --show-error --location "$URL" --output /tmp/codacy.json
+            if python3 - <<'PY'
+          import json
+          from pathlib import Path
+          payload = json.loads(Path('/tmp/codacy.json').read_text())
+          raise SystemExit(0 if payload.get('analyzed') is True else 1)
+          PY
+            then
+              break
+            fi
+            sleep 10
+          done
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          payload = json.loads(Path('/tmp/codacy.json').read_text())
+          print(json.dumps(payload, indent=2, sort_keys=True))
+          PY
