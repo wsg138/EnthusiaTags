@@ -8,6 +8,7 @@ import java.sql.SQLException;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.TimeUnit;
 import org.enthusia.tags.PerformanceMonitor;
@@ -54,6 +55,20 @@ class RewardStorageReentrancyTest {
         } finally {
             storage.close();
         }
+    }
+
+    @Test
+    void acceptedWorkerCanFinishNestedWorkAfterShutdownBegins() throws Exception {
+        ReentrantSingleThreadExecutor executor = new ReentrantSingleThreadExecutor("test-reentrant-storage");
+        CompletableFuture<String> completed = new CompletableFuture<>();
+
+        executor.execute(() -> {
+            executor.shutdown();
+            CompletableFuture.runAsync(() -> completed.complete("finished"), executor).join();
+        });
+
+        assertEquals("finished", completed.get(2, TimeUnit.SECONDS));
+        assertTrue(executor.awaitTermination(2, TimeUnit.SECONDS));
     }
 
     private RewardStorage storage(Path tempDir) throws SQLException {
