@@ -43,7 +43,11 @@ public final class RewardTracker implements Listener {
         if (playtimeTask != null) {
             return;
         }
-        playtimeTask = Bukkit.getScheduler().runTaskTimer(schedulingPlugin, this::tickPlaytime, 20L, 1200L);
+        for (Player online : Bukkit.getOnlinePlayers()) {
+            initializeProtectedCountersWhenLoaded(online, 0);
+        }
+        playtimeTask = Bukkit.getScheduler().runTaskTimer(
+            schedulingPlugin, this::tickPlaytime, 20L, 1200L);
     }
 
     public void stop() {
@@ -205,6 +209,21 @@ public final class RewardTracker implements Listener {
             rewardService.setCounter(playerId, NaturalBlockPolicy.counterKey(material),
                 player.getStatistic(Statistic.MINE_BLOCK, material));
             rewardService.setState(playerId, marker, "1");
+        }
+        pruneExpiredKillPairs(playerId);
+    }
+
+    private void pruneExpiredKillPairs(UUID playerId) {
+        long windowHours = clamp(plugin.getConfig().getLong(
+            KILL_CONFIG + "victim-window-hours", 24L), 1L, 168L);
+        long windowMillis = windowHours * 3_600_000L;
+        long now = System.currentTimeMillis();
+        for (String key : rewardService.stateKeysWithPrefix(
+            playerId, KillFarmLimiter.PAIR_STATE_PREFIX)) {
+            if (KillFarmLimiter.isExpired(
+                rewardService.getState(playerId, key), now, windowMillis)) {
+                rewardService.removeState(playerId, key);
+            }
         }
     }
 

@@ -786,6 +786,17 @@ public final class RewardService {
             && NaturalBlockPolicy.isTracked(criterion.getMaterial())) {
             return getCounter(player.getUniqueId(), NaturalBlockPolicy.counterKey(criterion.getMaterial()));
         }
+        if (criterion.getSourceType() == RewardSourceType.CUSTOM_COUNTER) {
+            String key = criterion.getKey();
+            if ("diamond_ore_mined".equals(key)) {
+                return getCounter(player.getUniqueId(), NaturalBlockPolicy.counterKey(Material.DIAMOND_ORE))
+                    + getCounter(player.getUniqueId(), NaturalBlockPolicy.counterKey(Material.DEEPSLATE_DIAMOND_ORE));
+            }
+            if ("iron_ore_mined".equals(key)) {
+                return getCounter(player.getUniqueId(), NaturalBlockPolicy.counterKey(Material.IRON_ORE))
+                    + getCounter(player.getUniqueId(), NaturalBlockPolicy.counterKey(Material.DEEPSLATE_IRON_ORE));
+            }
+        }
         if (criterion.getSourceType() != RewardSourceType.LEGACY) {
             return computeSourceProgress(player, criterion);
         }
@@ -951,6 +962,24 @@ public final class RewardService {
             return 0L;
         }
         return state.getCounter(key);
+    }
+
+    public Set<String> stateKeysWithPrefix(UUID playerId, String prefix) {
+        if (!isAvailable()) {
+            return Set.of();
+        }
+        RewardPlayerState state = getLoadedState(playerId);
+        return state == null ? Set.of() : state.stateKeysWithPrefix(prefix);
+    }
+
+    public void removeState(UUID playerId, String key) {
+        if (!isAvailable()) {
+            return;
+        }
+        RewardPlayerState state = getLoadedState(playerId);
+        if (state != null && state.isLoaded()) {
+            state.removeState(key);
+        }
     }
 
     public String getState(UUID playerId, String key) {

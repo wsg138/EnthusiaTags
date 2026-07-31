@@ -31,6 +31,13 @@ final class KillFarmLimiter {
         return new Decision(true, next.serialize(), Reason.ACCEPTED);
     }
 
+    static boolean isExpired(String encoded, long now, long windowMillis) {
+        KillRecord record = KillRecord.parse(encoded);
+        long safeWindow = Math.max(1L, windowMillis);
+        return record == null || now < record.windowStartedAt()
+            || now - record.windowStartedAt() >= safeWindow;
+    }
+
     enum Reason {
         ACCEPTED,
         COOLDOWN,

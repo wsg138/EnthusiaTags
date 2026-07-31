@@ -900,10 +900,9 @@ public final class DailyService implements CommandExecutor, Listener {
     }
 
     private String playerIp(Player player) {
-        if (player.getAddress() == null || player.getAddress().getAddress() == null) {
-            return "";
-        }
-        return player.getAddress().getAddress().getHostAddress();
+        java.net.InetSocketAddress socketAddress = player.getAddress();
+        java.net.InetAddress address = socketAddress == null ? null : socketAddress.getAddress();
+        return address == null ? "" : address.getHostAddress();
     }
 
     private void releaseIpReservationSafely(UUID playerId, LocalDate date,

@@ -5,6 +5,7 @@ import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.logging.Level;
+import org.bukkit.Bukkit;
 import org.bukkit.Material;
 import org.bukkit.block.Block;
 import org.bukkit.block.BlockFace;
@@ -53,8 +54,10 @@ public final class NaturalBlockTracker implements Listener, AutoCloseable {
                 logFailure("check natural block origin", throwable);
                 return;
             }
-            if (!playerPlaced) {
-                rewardService.incrementCounter(playerId, NaturalBlockPolicy.counterKey(material), 1L);
+            if (!playerPlaced && plugin.isEnabled()) {
+                Bukkit.getScheduler().runTask(plugin, () ->
+                    rewardService.incrementCounter(playerId,
+                        NaturalBlockPolicy.counterKey(material), 1L));
             }
         });
     }
