@@ -75,7 +75,7 @@ public final class RewardStorage {
     public RewardStorage(File databaseFile, PerformanceMonitor performanceMonitor) {
         this.databaseFile = databaseFile;
         this.performanceMonitor = performanceMonitor;
-        this.executor = Executors.newSingleThreadExecutor(new StorageThreadFactory("enthusia-tags-rewards-storage"));
+        this.executor = new ReentrantSingleThreadExecutor("enthusia-tags-rewards-storage");
     }
 
     public void init() throws SQLException {
