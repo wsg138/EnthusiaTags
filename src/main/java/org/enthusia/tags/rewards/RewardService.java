@@ -773,20 +773,20 @@ public final class RewardService {
     }
 
     private long computeProgress(Player player, RewardCriterion criterion) {
-    if (criterion.getType() == RewardCriterionType.KILLS_TOTAL) {
-        return getCounter(player.getUniqueId(), KillFarmLimiter.TRUSTED_KILL_COUNTER);
+        if (criterion.getType() == RewardCriterionType.KILLS_TOTAL) {
+            return getCounter(player.getUniqueId(), KillFarmLimiter.TRUSTED_KILL_COUNTER);
+        }
+        if (criterion.getType() == RewardCriterionType.BLOCK_MINED
+            && NaturalBlockPolicy.isTracked(criterion.getMaterial())) {
+            return getCounter(player.getUniqueId(), NaturalBlockPolicy.counterKey(criterion.getMaterial()));
+        }
+        if (criterion.getSourceType() != RewardSourceType.LEGACY) {
+            return computeSourceProgress(player, criterion);
+        }
+        return computeLegacyProgress(player, criterion);
     }
-    if (criterion.getType() == RewardCriterionType.BLOCK_MINED
-        && NaturalBlockPolicy.isTracked(criterion.getMaterial())) {
-        return getCounter(player.getUniqueId(), NaturalBlockPolicy.counterKey(criterion.getMaterial()));
-    }
-    if (criterion.getSourceType() != RewardSourceType.LEGACY) {
-        return computeSourceProgress(player, criterion);
-    }
-    return computeLegacyProgress(player, criterion);
-}
 
-private long computeSourceProgress(Player player, RewardCriterion criterion) {
+    private long computeSourceProgress(Player player, RewardCriterion criterion) {
         return switch (criterion.getSourceType()) {
             case BUKKIT_STAT -> getBukkitStat(player, criterion.getStatistic());
             case BUKKIT_STAT_MATERIAL -> getBukkitMaterialStat(player, criterion.getStatistic(), criterion.getMaterial());
