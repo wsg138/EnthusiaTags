@@ -1,7 +1,7 @@
 package org.enthusia.tags.daily;
 
 final class DailyAnimationPlan {
-    static final int BORDER_RING_LENGTH = 24;
+    static final int BORDER_RING_LENGTH = 20;
 
     private DailyAnimationPlan() {
     }
@@ -12,26 +12,31 @@ final class DailyAnimationPlan {
         }
         int frame = Math.max(0, Math.min(totalFrames - 1, requestedFrame));
         boolean finalFrame = frame == totalFrames - 1;
-        int revealedDays = finalFrame
-            ? DailyMenuModel.TRACK_LENGTH
-            : Math.min(DailyMenuModel.TRACK_LENGTH, Math.max(0, frame / 2));
-        int previousRevealedDays = frame == 0
-            ? 0 : Math.min(DailyMenuModel.TRACK_LENGTH, Math.max(0, (frame - 1) / 2));
-        int progressSegments = Math.min(DailyMenuModel.TRACK_LENGTH,
-            1 + (frame * DailyMenuModel.TRACK_LENGTH / (totalFrames - 1)));
+        int revealedDays = revealedDays(frame, totalFrames);
+        int previousRevealedDays = frame == 0 ? 0 : revealedDays(frame - 1, totalFrames);
+        int progressSegments = finalFrame ? DailyMenuModel.TRACK_LENGTH
+            : Math.min(DailyMenuModel.TRACK_LENGTH,
+                Math.max(1, 1 + frame * DailyMenuModel.TRACK_LENGTH / (totalFrames - 1)));
         int borderHead = frame * (BORDER_RING_LENGTH - 1) / (totalFrames - 1);
-        CenterStage centerStage = centerStage(frame, totalFrames);
-
         return new Frame(frame, borderHead, revealedDays, progressSegments,
-            frame >= 5, frame >= 7, revealedDays > previousRevealedDays,
-            finalFrame, centerStage);
+            frame >= 3, frame >= 5, revealedDays > previousRevealedDays,
+            finalFrame, centerStage(frame, totalFrames));
+    }
+
+    private static int revealedDays(int frame, int totalFrames) {
+        if (frame >= totalFrames - 1) {
+            return DailyMenuModel.TRACK_LENGTH;
+        }
+        int revealWindow = Math.max(1, totalFrames - 5);
+        return Math.min(DailyMenuModel.TRACK_LENGTH,
+            Math.max(0, (frame - 2) * DailyMenuModel.TRACK_LENGTH / revealWindow));
     }
 
     private static CenterStage centerStage(int frame, int totalFrames) {
         if (frame < 3) {
             return CenterStage.LOADING;
         }
-        if (frame < 7) {
+        if (frame < 6) {
             return CenterStage.ALIGNING;
         }
         if (frame < totalFrames - 5) {

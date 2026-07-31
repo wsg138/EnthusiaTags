@@ -1,3 +1,61 @@
+package org.enthusia.tags.daily;
+
+import java.io.File;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Statement;
+import java.time.LocalDate;
+import java.util.ArrayDeque;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
+import java.util.Set;
+import java.util.UUID;
+
+final class DailyIpStorage implements AutoCloseable {
+    private final Connection connection;
+
+    DailyIpStorage(File file) throws SQLException {
+        connection = DriverManager.getConnection("jdbc:sqlite:" + file.getAbsolutePath());
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("PRAGMA journal_mode=WAL");
+            statement.execute("PRAGMA synchronous=NORMAL");
+            statement.execute("PRAGMA busy_timeout=5000");
+            statement.executeUpdate("""
+                CREATE TABLE IF NOT EXISTS daily_ip_claims (
+                  claim_date TEXT NOT NULL,
+                  ip_address TEXT NOT NULL,
+                  player_uuid TEXT NOT NULL,
+                  created_at INTEGER NOT NULL,
+                  PRIMARY KEY(claim_date, ip_address, player_uuid)
+                )
+                """);
+            statement.executeUpdate("""
+                CREATE INDEX IF NOT EXISTS daily_ip_claim_lookup
+                ON daily_ip_claims(claim_date, ip_address)
+                """);
+            statement.executeUpdate("""
+                CREATE TABLE IF NOT EXISTS daily_ip_siblings (
+                  first_uuid TEXT NOT NULL,
+                  second_uuid TEXT NOT NULL,
+                  administrator TEXT NOT NULL,
+                  created_at INTEGER NOT NULL,
+                  PRIMARY KEY(first_uuid, second_uuid)
+                )
+                """);
+        }
+        prune(LocalDate.now().minusDays(45));
+    }
+
+    synchronized boolean reserve(UUID playerId, LocalDate date, String ipAddress) throws SQLException {
+        String normalizedIp = normalizeIp(ipAddress);
+        if (normalizedIp.isBlank()) {
+            return true;
+        }
+        connection.setAutoCommit(false);
+        try {
             Set<UUID> owners = owners(date, normalizedIp);
             if (owners.contains(playerId)) {
                 connection.commit();
@@ -155,26 +213,3 @@
         }
     }
 }
-''')
-
-write('src/main/java/org/enthusia/tags/rewards/RewardTracker.java', r'''
-package org.enthusia.tags.rewards;
-
-import java.util.Map;
-import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
-import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
-import org.bukkit.Bukkit;
-import org.bukkit.Material;
-import org.bukkit.Statistic;
-import org.bukkit.entity.Chicken;
-import org.bukkit.entity.Player;
-import org.bukkit.entity.Projectile;
-import org.bukkit.event.EventHandler;
-import org.bukkit.event.EventPriority;
-import org.bukkit.event.Listener;
-import org.bukkit.event.block.BlockBreakEvent;
-import org.bukkit.event.entity.EntityDamageByEntityEvent;
-import org.bukkit.event.entity.EntityDamageEvent;
-import org.bukkit.event.entity.PlayerDeathEvent;
-import org.bukkit.event.entity.ProjectileHitEvent;

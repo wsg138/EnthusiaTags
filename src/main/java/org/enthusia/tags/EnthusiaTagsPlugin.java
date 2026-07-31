@@ -8,6 +8,7 @@ import org.enthusia.tags.api.TagVisibilityService;
 import org.enthusia.tags.cosmetics.CosmeticsCommand;
 import org.enthusia.tags.cosmetics.CosmeticsListener;
 import org.enthusia.tags.cosmetics.CosmeticsService;
+import org.enthusia.tags.rewards.NaturalBlockTracker;
 import org.enthusia.tags.rewards.RewardListener;
 import org.enthusia.tags.rewards.RewardService;
 import org.enthusia.tags.rewards.RewardTracker;
@@ -19,6 +20,7 @@ public final class EnthusiaTagsPlugin extends JavaPlugin {
     private Messages messages;
     private RewardService rewardService;
     private RewardTracker rewardTracker;
+    private NaturalBlockTracker naturalBlockTracker;
     private CosmeticsService cosmeticsService;
     private PerformanceMonitor performanceMonitor;
     private ConfigMigrator configMigrator;
@@ -43,8 +45,13 @@ public final class EnthusiaTagsPlugin extends JavaPlugin {
         cosmeticsService.enable();
         rewardService.enable();
         if (rewardService.isAvailable()) {
-            rewardTracker = new RewardTracker(rewardService);
+            rewardTracker = new RewardTracker(this, rewardService);
             rewardTracker.start(this);
+            try {
+                naturalBlockTracker = new NaturalBlockTracker(this, rewardService);
+            } catch (java.sql.SQLException ex) {
+                getLogger().severe("Natural ore tracking is disabled because storage failed: " + ex.getMessage());
+            }
         }
         try {
             dailyService.enable();
@@ -65,6 +72,13 @@ public final class EnthusiaTagsPlugin extends JavaPlugin {
         Bukkit.getServicesManager().unregister(tagService);
         if (rewardTracker != null) {
             rewardTracker.stop();
+        }
+        if (naturalBlockTracker != null) {
+            try {
+                naturalBlockTracker.close();
+            } catch (java.sql.SQLException ex) {
+                getLogger().warning("Failed to close natural ore tracking: " + ex.getMessage());
+            }
         }
         if (dailyService != null) dailyService.disable();
         if (rewardService != null) {
@@ -122,6 +136,9 @@ public final class EnthusiaTagsPlugin extends JavaPlugin {
         if (rewardService.isAvailable()) {
             Bukkit.getPluginManager().registerEvents(new RewardListener(rewardService, rewardsCommand.getRewardMenu()), this);
             Bukkit.getPluginManager().registerEvents(rewardTracker, this);
+            if (naturalBlockTracker != null) {
+                Bukkit.getPluginManager().registerEvents(naturalBlockTracker, this);
+            }
         }
         if (dailyService != null) {
             Bukkit.getPluginManager().registerEvents(dailyService, this);

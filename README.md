@@ -75,3 +75,26 @@ The server-ready output is `target/EnthusiaTags.jar`.
 
 Every push and pull request runs the build workflow and uploads the JAR as a GitHub Actions artifact.
 Every push to `main` also replaces the rolling `latest` prerelease asset used by the download table.
+
+
+## Reward anti-farming and natural ores
+
+- Player-kill reward credit is limited per killer/victim pair by a configurable cooldown and rolling-window cap.
+- The same filter applies to kill totals, kill streaks, quick kills, armored kills, low-health kills, and PvP death-streak rewards.
+- Existing kill progress is snapshotted once when a player first joins after the update.
+- Ore and ancient-debris milestones use durable natural-block counters. Player-placed tracked blocks do not count, including after a restart or piston move.
+- Existing mining progress is snapshotted once before natural-only tracking takes over.
+
+## Daily IP limits
+
+A successful or uncertain `/daily` transaction reserves the player's IP for that server date. Unrelated accounts on the same IP cannot claim another daily reward that day. Definite pre-Vault failures release the reservation safely.
+
+Shared-household exceptions are managed with:
+
+```text
+/enthusiatags daily sibling add <player1> <player2>
+/enthusiatags daily sibling remove <player1> <player2>
+/enthusiatags daily sibling list <player>
+```
+
+Sibling relationships are transitive, so a connected household group may all claim from the same IP.

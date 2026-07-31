@@ -780,6 +780,13 @@ public final class RewardService {
     }
 
     private long computeSourceProgress(Player player, RewardCriterion criterion) {
+        if (criterion.getType() == RewardCriterionType.KILLS_TOTAL) {
+            return getCounter(player.getUniqueId(), KillFarmLimiter.TRUSTED_KILL_COUNTER);
+        }
+        if (criterion.getType() == RewardCriterionType.BLOCK_MINED
+            && NaturalBlockPolicy.isTracked(criterion.getMaterial())) {
+            return getCounter(player.getUniqueId(), NaturalBlockPolicy.counterKey(criterion.getMaterial()));
+        }
         return switch (criterion.getSourceType()) {
             case BUKKIT_STAT -> getBukkitStat(player, criterion.getStatistic());
             case BUKKIT_STAT_MATERIAL -> getBukkitMaterialStat(player, criterion.getStatistic(), criterion.getMaterial());

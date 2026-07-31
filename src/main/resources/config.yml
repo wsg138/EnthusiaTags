@@ -47,6 +47,14 @@ global-scan:
   debug-log-repairs: false
 
 rewards:
+  anti-farm:
+    kills:
+      # Only this many kills of the same victim count during the rolling window.
+      enabled: true
+      same-victim-cooldown-minutes: 30
+      victim-window-hours: 24
+      max-counted-per-victim-window: 3
+
   unlock-notifications:
     individual-limit: 3
   unlock-sound:
@@ -65,10 +73,15 @@ daily:
   currency-label: "Raw Gold"
   payouts: [5, 10, 15, 20, 30, 40, 50]
 
+  # One successful or uncertain daily transaction per IP and date.
+  # Use /enthusiatags daily sibling add <player1> <player2> for shared households.
+  ip-limit:
+    enabled: true
+
   # Plays when /daily is opened. This is a global server option, not a player GUI toggle.
   animation:
     enabled: true
-    frames: 18
+    frames: 20
     frame-ticks: 2
     sound:
       enabled: true

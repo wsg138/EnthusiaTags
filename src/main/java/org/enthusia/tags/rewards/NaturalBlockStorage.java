@@ -1,3 +1,39 @@
+package org.enthusia.tags.rewards;
+
+import java.io.File;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Statement;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.TimeUnit;
+import org.bukkit.Material;
+
+final class NaturalBlockStorage implements AutoCloseable {
+    private final Connection connection;
+    private final ExecutorService executor =
+        new ReentrantSingleThreadExecutor("enthusia-tags-natural-blocks");
+
+    NaturalBlockStorage(File file) throws SQLException {
+        connection = DriverManager.getConnection("jdbc:sqlite:" + file.getAbsolutePath());
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("PRAGMA journal_mode=WAL");
+            statement.execute("PRAGMA synchronous=NORMAL");
+            statement.execute("PRAGMA busy_timeout=5000");
+            statement.executeUpdate("""
+                CREATE TABLE IF NOT EXISTS player_placed_natural_blocks (
+                  world_uuid TEXT NOT NULL,
+                  block_x INTEGER NOT NULL,
+                  block_y INTEGER NOT NULL,
+                  block_z INTEGER NOT NULL,
+                  material TEXT NOT NULL,
                   placed_at INTEGER NOT NULL,
                   PRIMARY KEY(world_uuid, block_x, block_y, block_z)
                 )
@@ -176,5 +212,3 @@
         T run() throws Exception;
     }
 }
-''')
-

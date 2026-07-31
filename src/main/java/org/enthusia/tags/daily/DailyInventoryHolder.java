@@ -28,7 +28,7 @@ final class DailyInventoryHolder implements InventoryHolder {
     }
 
     static DailyInventoryHolder animation(UUID sessionId, Component title) {
-        return new DailyInventoryHolder(true, -1, sessionId, 45, title);
+        return new DailyInventoryHolder(true, -1, sessionId, 27, title);
     }
 
     boolean isAnimation() {
