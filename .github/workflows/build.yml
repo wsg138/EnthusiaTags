@@ -1,40 +1,37 @@
-name: Apply reward storage executor integration
+name: Build
 
 on:
   push:
-    branches:
-      - agent/fix-reward-shutdown-deadlock
+  pull_request:
+    branches: [main]
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: enthusiatags-build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  apply:
+  build:
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
         with:
-          ref: agent/fix-reward-shutdown-deadlock
-          fetch-depth: 0
+          distribution: temurin
+          java-version: '21'
+          cache: maven
 
-      - name: Wire reentrant reward storage executor
-        shell: python
-        run: |
-          from pathlib import Path
+      - name: Test and package
+        run: mvn --batch-mode --no-transfer-progress clean test package
 
-          path = Path("src/main/java/org/enthusia/tags/rewards/RewardStorage.java")
-          source = path.read_text()
-          old = '        this.executor = Executors.newSingleThreadExecutor(new StorageThreadFactory("enthusia-tags-rewards-storage"));\n'
-          new = '        this.executor = new ReentrantSingleThreadExecutor("enthusia-tags-rewards-storage");\n'
-          if source.count(old) != 1:
-              raise SystemExit(f"Expected one reward executor constructor, found {source.count(old)}")
-          path.write_text(source.replace(old, new, 1))
-
-      - name: Commit source integration
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src/main/java/org/enthusia/tags/rewards/RewardStorage.java
-          git commit -m "Wire reentrant reward storage executor"
-          git push origin HEAD:agent/fix-reward-shutdown-deadlock
+      - name: Upload plugin JAR
+        uses: actions/upload-artifact@v4
+        with:
+          name: EnthusiaTags-${{ github.sha }}
+          path: target/EnthusiaTags.jar
+          if-no-files-found: error
+          retention-days: 14
