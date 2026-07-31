@@ -1,37 +1,170 @@
-name: Build
+name: Apply stale reward claim recovery
 
 on:
   push:
-  pull_request:
-    branches: [main]
+    branches: [agent/fix-stale-reward-claims]
 
 permissions:
-  contents: read
-
-concurrency:
-  group: enthusiatags-build-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  contents: write
 
 jobs:
-  build:
+  patch:
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
-
-      - uses: actions/setup-java@v4
         with:
-          distribution: temurin
-          java-version: '21'
-          cache: maven
+          ref: agent/fix-stale-reward-claims
 
-      - name: Test and package
-        run: mvn --batch-mode --no-transfer-progress clean test package
+      - name: Apply recovery implementation and tests
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
 
-      - name: Upload plugin JAR
-        uses: actions/upload-artifact@v4
-        with:
-          name: EnthusiaTags-${{ github.sha }}
-          path: target/EnthusiaTags.jar
-          if-no-files-found: error
-          retention-days: 14
+          service_path = Path('src/main/java/org/enthusia/tags/rewards/RewardService.java')
+          source = service_path.read_text()
+
+          old_pending = '''        if (evaluation.status() == RewardStatus.CLAIM_PENDING) {
+              return CompletableFuture.completedFuture(RewardClaimResult.CLAIM_IN_PROGRESS);
+          }
+          '''
+          new_pending = '''        if (evaluation.status() == RewardStatus.CLAIM_PENDING) {
+              String pendingClaimKey = player.getUniqueId() + ":" + rewardId;
+              if (!inFlightClaims.add(pendingClaimKey)) {
+                  return CompletableFuture.completedFuture(RewardClaimResult.CLAIM_IN_PROGRESS);
+              }
+              return recoverPendingClaimAsync(player, reward, pendingClaimKey);
+          }
+          '''
+          if old_pending not in source:
+              raise SystemExit('CLAIM_PENDING branch did not match expected source')
+          source = source.replace(old_pending, new_pending, 1)
+
+          marker = '    private void resumeClaimAfterItem(UUID playerId, String rewardId) {'
+          recovery_method = '''    private CompletableFuture<RewardClaimResult> recoverPendingClaimAsync(
+              Player player, RewardDefinition reward, String claimKey) {
+              UUID playerId = player.getUniqueId();
+              String playerName = player.getName();
+              String ipAddress = getPlayerIpAddress(player);
+              String rewardId = reward.getId().toLowerCase(Locale.ROOT);
+              CompletableFuture<RewardClaimResult> future = new CompletableFuture<>();
+              activeOperations.add(future);
+              try {
+                  claimExecutor.execute(() -> {
+                      try {
+                          RewardStatus refreshed = refreshOverallAfterReconciliation(playerId, rewardId);
+                          PendingClaimRecoveryDecision decision = PendingClaimRecoveryDecision.from(refreshed);
+                          RewardClaimResult result = decision == PendingClaimRecoveryDecision.RESUME
+                              ? claimInternal(playerId, playerName, reward, ipAddress)
+                              : decision.result();
+                          future.complete(result);
+                      } catch (Throwable throwable) {
+                          future.completeExceptionally(throwable);
+                      } finally {
+                          inFlightClaims.remove(claimKey);
+                      }
+                  });
+              } catch (RuntimeException ex) {
+                  activeOperations.remove(future);
+                  inFlightClaims.remove(claimKey);
+                  return CompletableFuture.completedFuture(RewardClaimResult.SERVICE_UNAVAILABLE);
+              }
+              future.whenComplete((ignored, throwable) -> {
+                  activeOperations.remove(future);
+                  if (lifecycle.get() == ServiceLifecycle.RELOADING && activeOperations.isEmpty()
+                      && reloadQueued.compareAndSet(false, true)) {
+                      Bukkit.getScheduler().runTask(plugin, this::reloadNow);
+                  }
+              });
+              return future;
+          }
+
+          '''
+          if marker not in source:
+              raise SystemExit('resumeClaimAfterItem marker was not found')
+          source = source.replace(marker, recovery_method + marker, 1)
+          service_path.write_text(source)
+
+          decision_path = Path('src/main/java/org/enthusia/tags/rewards/PendingClaimRecoveryDecision.java')
+          decision_path.write_text('''package org.enthusia.tags.rewards;
+
+          enum PendingClaimRecoveryDecision {
+              RESUME,
+              SUCCESS,
+              ITEM_QUEUED,
+              RECONCILIATION_REQUIRED,
+              IN_PROGRESS;
+
+              static PendingClaimRecoveryDecision from(RewardStatus status) {
+                  if (status == null || status == RewardStatus.DELIVERY_FAILED) {
+                      return RESUME;
+                  }
+                  return switch (status) {
+                      case CLAIMED -> SUCCESS;
+                      case ITEM_QUEUED -> ITEM_QUEUED;
+                      case REQUIRES_RECONCILIATION -> RECONCILIATION_REQUIRED;
+                      default -> IN_PROGRESS;
+                  };
+              }
+
+              RewardClaimResult result() {
+                  return switch (this) {
+                      case SUCCESS -> RewardClaimResult.SUCCESS;
+                      case ITEM_QUEUED -> RewardClaimResult.ITEM_QUEUED;
+                      case RECONCILIATION_REQUIRED -> RewardClaimResult.RECONCILIATION_REQUIRED;
+                      case IN_PROGRESS -> RewardClaimResult.CLAIM_IN_PROGRESS;
+                      case RESUME -> throw new IllegalStateException("Resume decisions do not have a terminal result");
+                  };
+              }
+          }
+          ''')
+
+          test_path = Path('src/test/java/org/enthusia/tags/rewards/PendingClaimRecoveryDecisionTest.java')
+          test_path.parent.mkdir(parents=True, exist_ok=True)
+          test_path.write_text('''package org.enthusia.tags.rewards;
+
+          import static org.junit.jupiter.api.Assertions.assertEquals;
+          import static org.junit.jupiter.api.Assertions.assertThrows;
+
+          import org.junit.jupiter.api.Test;
+
+          class PendingClaimRecoveryDecisionTest {
+              @Test
+              void resumesOnlyWhenNoActionIsAmbiguous() {
+                  assertEquals(PendingClaimRecoveryDecision.RESUME,
+                      PendingClaimRecoveryDecision.from(null));
+                  assertEquals(PendingClaimRecoveryDecision.RESUME,
+                      PendingClaimRecoveryDecision.from(RewardStatus.DELIVERY_FAILED));
+              }
+
+              @Test
+              void mapsDurableRecoveryStatesToPlayerResults() {
+                  assertEquals(RewardClaimResult.SUCCESS,
+                      PendingClaimRecoveryDecision.from(RewardStatus.CLAIMED).result());
+                  assertEquals(RewardClaimResult.ITEM_QUEUED,
+                      PendingClaimRecoveryDecision.from(RewardStatus.ITEM_QUEUED).result());
+                  assertEquals(RewardClaimResult.RECONCILIATION_REQUIRED,
+                      PendingClaimRecoveryDecision.from(RewardStatus.REQUIRES_RECONCILIATION).result());
+                  assertEquals(RewardClaimResult.CLAIM_IN_PROGRESS,
+                      PendingClaimRecoveryDecision.from(RewardStatus.CLAIM_PENDING).result());
+              }
+
+              @Test
+              void resumeMustRunTheClaimFlowInsteadOfReturningAResult() {
+                  assertThrows(IllegalStateException.class,
+                      () -> PendingClaimRecoveryDecision.RESUME.result());
+              }
+          }
+          ''')
+          PY
+
+      - name: Commit recovery implementation
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/main/java/org/enthusia/tags/rewards/RewardService.java \
+            src/main/java/org/enthusia/tags/rewards/PendingClaimRecoveryDecision.java \
+            src/test/java/org/enthusia/tags/rewards/PendingClaimRecoveryDecisionTest.java
+          git commit -m "Recover stale reward claims safely"
+          git push origin HEAD:agent/fix-stale-reward-claims
