@@ -7,7 +7,7 @@ Tags, rewards, cosmetics, and daily-reward plugin with PlaceholderAPI and Vault 
 
 | Download | Version | Runtime |
 | --- | --- | --- |
-| [EnthusiaTags.jar](https://github.com/wsg138/EnthusiaTags/releases/download/latest/EnthusiaTags.jar) | rolling `main` build (`2.1.0`) | Java 21, Paper/Leaf 1.21.11 |
+| [EnthusiaTags.jar](https://github.com/wsg138/EnthusiaTags/releases/download/latest/EnthusiaTags.jar) | rolling `main` build (`2.2.0`) | Java 21, Paper/Leaf 1.21.11 |
 
 The `latest` download is rebuilt from `main` after every merged commit. Pull requests and branch pushes also run the full Maven test/package workflow and retain a downloadable Actions artifact.
 
