@@ -4,6 +4,8 @@ import java.util.Objects;
 import java.util.function.UnaryOperator;
 
 public final class TagPlaceholderRenderer {
+    private static final String FORMAT_RESET = "<reset>";
+
     private TagPlaceholderRenderer() {
     }
 
@@ -16,7 +18,7 @@ public final class TagPlaceholderRenderer {
         }
         String format = TagTextFormat.canonicalMiniMessage(lineFormat);
         String tagText = TagTextFormat.canonicalMiniMessage(tag.getTagText());
-        String rendered = format.replace("{tag}", tagText)
+        String rendered = format.replace("{tag}", tagText + FORMAT_RESET)
             .replace("{player}", TagTextFormat.safeDynamicValue(playerName));
         rendered = Objects.requireNonNullElse(externalPlaceholders.apply(rendered), rendered);
         return new TagPlaceholderOutput(

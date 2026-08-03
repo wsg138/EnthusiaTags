@@ -18,7 +18,7 @@ class CachedTagPlaceholderResolverTest {
         TagPlaceholderOutput output = CachedTagPlaceholderResolver.resolve(
             data, registry, false, LINE_FORMAT, "Lincoln", value -> value);
 
-        assertEquals("<gray>[<red><bold>Hero<gray>]", output.miniMessage());
+        assertEquals("<gray>[<red><bold>Hero<reset><gray>]", output.miniMessage());
         assertEquals("[Hero]", output.plain());
         assertEquals("hero", output.id());
         assertTrue(output.legacy().contains("Hero"));
@@ -27,6 +27,16 @@ class CachedTagPlaceholderResolverTest {
         assertEquals(output.id(), output.value("selected_id"));
         assertEquals(output.legacy(), output.value("selected_legacy"));
         assertNull(output.value("unknown"));
+    }
+
+    @Test
+    void tagDecorationsDoNotLeakIntoLineFormatSuffix() {
+        TagPlaceholderOutput output = CachedTagPlaceholderResolver.resolve(
+            selectedHero(), registryWithHero(), false, LINE_FORMAT, "Lincoln", value -> value);
+
+        assertTrue(output.miniMessage().contains("Hero<reset><gray>]"));
+        assertTrue(output.legacy().endsWith("&7]"),
+            "the suffix should return to the line format's gray, non-bold style");
     }
 
     @Test
