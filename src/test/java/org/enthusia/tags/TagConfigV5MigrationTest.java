@@ -16,7 +16,8 @@ class TagConfigV5MigrationTest {
         assertTrue(TagConfigV5Migration.migrate(config, report));
 
         assertTrue(config.getString("line-format").contains("<gray>"));
-        assertTrue(config.getString("tags.custom.display-name").contains("39c5ff"));
+        assertTrue(config.getString("tags.custom.display-name")
+            .toLowerCase(java.util.Locale.ROOT).contains("39c5ff"));
         assertTrue(config.getString("tags.custom.tag-text").contains("<bold>"));
         assertEquals("CUSTOM_MATERIAL", config.getString("tags.custom.private-admin-field"));
         assertEquals(List.of("&7Keep this legacy description"), config.getStringList("tags.custom.description"));

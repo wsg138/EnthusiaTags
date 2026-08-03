@@ -100,7 +100,7 @@ class CachedTagPlaceholderResolverTest {
             data, registry, false, "&7[{tag}&7]", "Lincoln", value -> value);
 
         assertEquals("[Legacy]", output.plain());
-        assertTrue(output.miniMessage().contains("#39c5ff"));
+        assertTrue(output.miniMessage().toLowerCase(java.util.Locale.ROOT).contains("#39c5ff"));
         assertTrue(output.miniMessage().contains("bold"));
     }
 
