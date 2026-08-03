@@ -31,22 +31,11 @@ public final class TagAdminCommand implements CommandExecutor, TabCompleter {
     private static final int PLAYER_ARGUMENTS = 2;
     private static final int TAG_ARGUMENTS = 3;
     private static final List<String> ROOT_COMPLETIONS = List.of(
-        COMMAND_GIVE,
-        COMMAND_REVOKE,
-        COMMAND_SET,
-        COMMAND_CLEAR,
-        COMMAND_LIST,
-        COMMAND_CREATE,
-        COMMAND_EDIT,
-        COMMAND_OFFSET,
-        COMMAND_RELOAD
+        COMMAND_GIVE, COMMAND_REVOKE, COMMAND_SET, COMMAND_CLEAR, COMMAND_LIST,
+        COMMAND_CREATE, COMMAND_EDIT, COMMAND_OFFSET, COMMAND_RELOAD
     );
     private static final Set<String> PLAYER_TARGET_COMMANDS = Set.of(
-        COMMAND_GIVE,
-        COMMAND_REVOKE,
-        COMMAND_SET,
-        COMMAND_CLEAR,
-        COMMAND_LIST
+        COMMAND_GIVE, COMMAND_REVOKE, COMMAND_SET, COMMAND_CLEAR, COMMAND_LIST
     );
     private static final Set<String> TAG_TARGET_COMMANDS = Set.of(COMMAND_GIVE, COMMAND_REVOKE, COMMAND_SET);
 
@@ -70,8 +59,7 @@ public final class TagAdminCommand implements CommandExecutor, TabCompleter {
             sendUsage(sender);
             return true;
         }
-        String sub = args[0].toLowerCase(Locale.ROOT);
-        switch (sub) {
+        switch (args[0].toLowerCase(Locale.ROOT)) {
             case COMMAND_GIVE -> handleGrant(sender, args);
             case COMMAND_REVOKE -> handleRevoke(sender, args);
             case COMMAND_CLEAR -> handleClear(sender, args);
@@ -81,18 +69,14 @@ public final class TagAdminCommand implements CommandExecutor, TabCompleter {
             case COMMAND_CREATE -> handleCreate(sender, args);
             case COMMAND_EDIT -> handleEdit(sender, args);
             case COMMAND_OFFSET -> handleOffset(sender, args);
-            default -> {
-                sendUsage(sender);
-            }
+            default -> sendUsage(sender);
         }
         return true;
     }
 
     private void handleGrant(CommandSender sender, String[] args) {
         OfflinePlayer target = requireTarget(sender, args, TAG_ARGUMENTS);
-        if (target == null) {
-            return;
-        }
+        if (target == null) return;
         String tagId = args[2].toLowerCase(Locale.ROOT);
         tagService.grantTagAsync(target, tagId).thenAccept(result ->
             Bukkit.getScheduler().runTask(plugin, () -> sender.sendMessage(switch (result) {
@@ -104,9 +88,7 @@ public final class TagAdminCommand implements CommandExecutor, TabCompleter {
 
     private void handleRevoke(CommandSender sender, String[] args) {
         OfflinePlayer target = requireTarget(sender, args, TAG_ARGUMENTS);
-        if (target == null) {
-            return;
-        }
+        if (target == null) return;
         String tagId = args[2].toLowerCase(Locale.ROOT);
         tagService.revokeTagAsync(target, tagId).thenAccept(result ->
             Bukkit.getScheduler().runTask(plugin, () -> sender.sendMessage(switch (result) {
@@ -118,9 +100,7 @@ public final class TagAdminCommand implements CommandExecutor, TabCompleter {
 
     private void handleClear(CommandSender sender, String[] args) {
         OfflinePlayer target = requireTarget(sender, args, PLAYER_ARGUMENTS);
-        if (target == null) {
-            return;
-        }
+        if (target == null) return;
         tagService.setSelectedTagAsync(target, null).thenAccept(result ->
             Bukkit.getScheduler().runTask(plugin, () -> sender.sendMessage(
                 result == TagAdminResult.PLAYER_NOT_FOUND ? message(MSG_PLAYER_NOT_FOUND)
@@ -134,9 +114,7 @@ public final class TagAdminCommand implements CommandExecutor, TabCompleter {
 
     private void handleSet(CommandSender sender, String[] args) {
         OfflinePlayer target = requireTarget(sender, args, TAG_ARGUMENTS);
-        if (target == null) {
-            return;
-        }
+        if (target == null) return;
         String tagId = args[2].toLowerCase(Locale.ROOT);
         tagService.setSelectedTagAsync(target, tagId).thenAccept(result ->
             Bukkit.getScheduler().runTask(plugin, () -> sender.sendMessage(switch (result) {
@@ -149,9 +127,7 @@ public final class TagAdminCommand implements CommandExecutor, TabCompleter {
 
     private void handleList(CommandSender sender, String[] args) {
         OfflinePlayer target = requireTarget(sender, args, PLAYER_ARGUMENTS);
-        if (target == null) {
-            return;
-        }
+        if (target == null) return;
         tagService.getPlayerDataAsync(target.getUniqueId()).thenAccept(data ->
             Bukkit.getScheduler().runTask(plugin, () -> {
                 String selected = data.getSelectedTag();
@@ -194,7 +170,8 @@ public final class TagAdminCommand implements CommandExecutor, TabCompleter {
         try {
             double offset = Double.parseDouble(args[1]);
             tagService.setDisplayOffset(offset);
-            sender.sendMessage(formatMessage("tag-offset-set", "", String.valueOf(offset)));
+            sender.sendMessage(Component.text(
+                "Tag display offset is now controlled by UnlimitedNametags; no EnthusiaTags value was changed."));
         } catch (NumberFormatException ex) {
             sender.sendMessage(message("tag-offset-invalid"));
         }
@@ -206,46 +183,30 @@ public final class TagAdminCommand implements CommandExecutor, TabCompleter {
             return null;
         }
         OfflinePlayer target = playerLookup.findPlayer(args[1]);
-        if (target == null) {
-            sender.sendMessage(message(MSG_PLAYER_NOT_FOUND));
-        }
+        if (target == null) sender.sendMessage(message(MSG_PLAYER_NOT_FOUND));
         return target;
     }
 
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
-        if (!sender.hasPermission(ADMIN_PERMISSION)) {
-            return Collections.emptyList();
-        }
-        if (args.length == PLAYER_ARGUMENTS - 1) {
-            return ROOT_COMPLETIONS;
-        }
+        if (!sender.hasPermission(ADMIN_PERMISSION)) return Collections.emptyList();
+        if (args.length == PLAYER_ARGUMENTS - 1) return ROOT_COMPLETIONS;
         String subcommand = args[0].toLowerCase(Locale.ROOT);
-        if (args.length == PLAYER_ARGUMENTS && PLAYER_TARGET_COMMANDS.contains(subcommand)) {
-            return onlinePlayerNames();
-        }
-        if (args.length == PLAYER_ARGUMENTS && COMMAND_EDIT.equals(subcommand)) {
-            return tagIds();
-        }
-        if (args.length == TAG_ARGUMENTS && TAG_TARGET_COMMANDS.contains(subcommand)) {
-            return tagIds();
-        }
+        if (args.length == PLAYER_ARGUMENTS && PLAYER_TARGET_COMMANDS.contains(subcommand)) return onlinePlayerNames();
+        if (args.length == PLAYER_ARGUMENTS && COMMAND_EDIT.equals(subcommand)) return tagIds();
+        if (args.length == TAG_ARGUMENTS && TAG_TARGET_COMMANDS.contains(subcommand)) return tagIds();
         return Collections.emptyList();
     }
 
     private List<String> onlinePlayerNames() {
         List<String> names = new ArrayList<>();
-        for (var player : Bukkit.getOnlinePlayers()) {
-            names.add(player.getName());
-        }
+        for (var player : Bukkit.getOnlinePlayers()) names.add(player.getName());
         return names;
     }
 
     private List<String> tagIds() {
         Set<String> ids = new java.util.HashSet<>();
-        for (TagDefinition tag : tagService.getRegistry().getAll()) {
-            ids.add(tag.getId().toLowerCase(Locale.ROOT));
-        }
+        for (TagDefinition tag : tagService.getRegistry().getAll()) ids.add(tag.getId().toLowerCase(Locale.ROOT));
         return new ArrayList<>(ids);
     }
 
@@ -257,16 +218,14 @@ public final class TagAdminCommand implements CommandExecutor, TabCompleter {
         sender.sendMessage(Component.text("       /tag list <player>"));
         sender.sendMessage(Component.text("       /tag create <id> <display name>"));
         sender.sendMessage(Component.text("       /tag edit <id> <tag text>"));
-        sender.sendMessage(Component.text("       /tag offset <number>"));
+        sender.sendMessage(Component.text("       /tag offset <number> (deprecated)"));
         sender.sendMessage(Component.text("       /tag reload"));
     }
 
     private String joinArgs(String[] args, int start) {
         StringBuilder builder = new StringBuilder();
         for (int i = start; i < args.length; i++) {
-            if (i > start) {
-                builder.append(' ');
-            }
+            if (i > start) builder.append(' ');
             builder.append(args[i]);
         }
         return builder.toString();

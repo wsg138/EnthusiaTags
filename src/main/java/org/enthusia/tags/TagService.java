@@ -1,13 +1,10 @@
 package org.enthusia.tags;
 
-import net.kyori.adventure.text.Component;
-import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
 import org.bukkit.OfflinePlayer;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.entity.Player;
-import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitTask;
 import org.enthusia.tags.api.TagVisibilityService;
 
@@ -22,27 +19,27 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 
 public final class TagService implements TagVisibilityService {
-    private final JavaPlugin plugin;
+    private final EnthusiaTagsPlugin plugin;
     private final Messages messages;
     private final PerformanceMonitor performanceMonitor;
     private final TagRegistry registry = new TagRegistry();
     private final PlaceholderRegistry placeholderRegistry = new PlaceholderRegistry();
     private final PlaceholderApiHook placeholderApiHook = new PlaceholderApiHook();
-    private final TagDisplayManager displayManager = new TagDisplayManager();
     private final VanishHook vanishHook = new VanishHook();
     private final Map<UUID, PlayerTagData> cache = new ConcurrentHashMap<>();
     private final Map<UUID, CompletableFuture<Void>> pendingLoads = new ConcurrentHashMap<>();
     private final Map<UUID, Set<Object>> suppressionOwners = new ConcurrentHashMap<>();
 
     private TagStorage storage;
-    private String lineFormat;
-    private String guiTitle;
-    private String clearItemName;
-    private String noTagsItemName;
-    private double displayOffset;
+    private volatile String lineFormat;
+    private volatile String guiTitle;
+    private volatile String clearItemName;
+    private volatile String noTagsItemName;
     private BukkitTask vanishTask;
+    private NametagRefreshCoordinator refreshCoordinator;
+    private AutoCloseable placeholderExpansion = () -> { };
 
-    public TagService(JavaPlugin plugin, Messages messages, PerformanceMonitor performanceMonitor) {
+    public TagService(EnthusiaTagsPlugin plugin, Messages messages, PerformanceMonitor performanceMonitor) {
         this.plugin = plugin;
         this.messages = messages;
         this.performanceMonitor = performanceMonitor;
@@ -55,7 +52,8 @@ public final class TagService implements TagVisibilityService {
         initStorage();
         loadConfigTags();
         vanishHook.reload(plugin);
-        displayManager.start(plugin);
+        refreshCoordinator = new NametagRefreshCoordinator(NametagRefreshBridgeFactory.create(plugin));
+        placeholderExpansion = PlaceholderExpansionRegistrar.register(plugin, this);
         startVanishWatcher();
         for (Player player : Bukkit.getOnlinePlayers()) {
             preloadPlayer(player.getUniqueId());
@@ -65,7 +63,11 @@ public final class TagService implements TagVisibilityService {
 
     public void disable() {
         stopVanishWatcher();
-        displayManager.stop();
+        closePlaceholderExpansion();
+        if (refreshCoordinator != null) {
+            refreshCoordinator.close();
+            refreshCoordinator = null;
+        }
         pendingLoads.clear();
         suppressionOwners.clear();
         cache.clear();
@@ -83,11 +85,13 @@ public final class TagService implements TagVisibilityService {
                 if (throwable != null) {
                     plugin.getLogger().warning("Failed to load tags for " + playerId + ": " + throwable.getMessage());
                 } else {
-                    PlayerTagData state = toPlayerTagData(data);
-                    cache.put(playerId, state);
+                    cache.put(playerId, toPlayerTagData(data));
                 }
                 return (Void) null;
-            }).whenComplete((ignoredResult, ignoredThrowable) -> pendingLoads.remove(playerId)));
+            }).whenComplete((ignoredResult, ignoredThrowable) -> {
+                pendingLoads.remove(playerId);
+                scheduleRefresh(playerId, TagRefreshReason.PLAYER_DATA_LOADED);
+            }));
     }
 
     public void preloadPlayerBlocking(UUID playerId) {
@@ -106,20 +110,15 @@ public final class TagService implements TagVisibilityService {
         preloadPlayer(playerId);
         CompletableFuture<Void> pending = pendingLoads.get(playerId);
         if (pending == null) {
-            updateDisplay(player);
+            requestNametagRefresh(player, TagRefreshReason.PLAYER_DATA_LOADED);
             return;
         }
-        pending.thenRun(() -> Bukkit.getScheduler().runTask(plugin, () -> {
-            if (player.isOnline()) {
-                updateDisplay(player);
-            }
-        }));
+        pending.thenRun(() -> scheduleRefresh(playerId, TagRefreshReason.PLAYER_DATA_LOADED));
     }
 
     public void unloadPlayer(Player player) {
         cache.remove(player.getUniqueId());
         pendingLoads.remove(player.getUniqueId());
-        displayManager.remove(player);
     }
 
     public void reloadAll() {
@@ -130,33 +129,33 @@ public final class TagService implements TagVisibilityService {
         vanishHook.reload(plugin);
         startVanishWatcher();
         for (Player player : Bukkit.getOnlinePlayers()) {
-            updateDisplay(player);
+            requestNametagRefresh(player, TagRefreshReason.RELOADED);
         }
     }
 
     public void reloadConfigValues() {
         plugin.reloadConfig();
-        lineFormat = plugin.getConfig().getString("line-format", "&7[{tag}&7]");
+        lineFormat = TagTextFormat.canonicalMiniMessage(
+            plugin.getConfig().getString("line-format", "<gray>[{tag}<gray>]"));
         guiTitle = plugin.getConfig().getString("gui-title", "Your Tags");
         clearItemName = plugin.getConfig().getString("clear-item-name", "&cClear Tag");
         noTagsItemName = plugin.getConfig().getString("no-tags-item-name", "&7No tags yet");
-        displayOffset = plugin.getConfig().getDouble("display-offset", 0.06D);
     }
 
-    public void setDisplayOffset(double offset) {
-        displayOffset = offset;
-        plugin.getConfig().set("display-offset", offset);
-        plugin.saveConfig();
-        for (Player player : Bukkit.getOnlinePlayers()) {
-            updateDisplay(player);
-        }
+    /**
+     * Retained for command compatibility. UnlimitedNametags now owns nametag positioning.
+     */
+    @Deprecated(forRemoval = false)
+    public void setDisplayOffset(double ignoredOffset) {
+        plugin.getLogger().warning("Ignored legacy display offset " + ignoredOffset
+            + "; configure positioning in UnlimitedNametags.");
     }
 
     public TagRegistry getRegistry() {
         return registry;
     }
 
-    public JavaPlugin getPlugin() {
+    public EnthusiaTagsPlugin getPlugin() {
         return plugin;
     }
 
@@ -181,8 +180,15 @@ public final class TagService implements TagVisibilityService {
     }
 
     public void registerTag(TagDefinition tag) {
-        registry.register(tag);
-        refreshSelectedForTag(tag.getId());
+        TagDefinition canonical = new TagDefinition(
+            tag.getId(),
+            TagTextFormat.canonicalMiniMessage(tag.getDisplayName()),
+            TagTextFormat.canonicalMiniMessage(tag.getTagText()),
+            tag.getIcon(),
+            tag.getDescription()
+        );
+        registry.register(canonical);
+        refreshSelectedForTag(canonical.getId());
     }
 
     public void unregisterTag(String tagId) {
@@ -195,11 +201,13 @@ public final class TagService implements TagVisibilityService {
         if (registry.get(key) != null) {
             return false;
         }
-        plugin.getConfig().set("tags." + key + ".display-name", displayName);
-        plugin.getConfig().set("tags." + key + ".tag-text", tagText);
+        String canonicalDisplay = TagTextFormat.canonicalMiniMessage(displayName);
+        String canonicalText = TagTextFormat.canonicalMiniMessage(tagText);
+        plugin.getConfig().set("tags." + key + ".display-name", canonicalDisplay);
+        plugin.getConfig().set("tags." + key + ".tag-text", canonicalText);
         plugin.getConfig().set("tags." + key + ".icon", "NAME_TAG");
         plugin.saveConfig();
-        registerTag(new TagDefinition(key, displayName, tagText, Material.NAME_TAG, List.of()));
+        registerTag(new TagDefinition(key, canonicalDisplay, canonicalText, Material.NAME_TAG, List.of()));
         return true;
     }
 
@@ -209,9 +217,11 @@ public final class TagService implements TagVisibilityService {
         if (existing == null) {
             return false;
         }
-        plugin.getConfig().set("tags." + key + ".tag-text", tagText);
+        String canonicalText = TagTextFormat.canonicalMiniMessage(tagText);
+        plugin.getConfig().set("tags." + key + ".tag-text", canonicalText);
         plugin.saveConfig();
-        registerTag(new TagDefinition(key, existing.getDisplayName(), tagText, existing.getIcon(), existing.getDescription()));
+        registerTag(new TagDefinition(key, existing.getDisplayName(), canonicalText,
+            existing.getIcon(), existing.getDescription()));
         return true;
     }
 
@@ -227,12 +237,14 @@ public final class TagService implements TagVisibilityService {
         PlayerTagData data = cache.computeIfAbsent(playerId, ignored -> new PlayerTagData());
         boolean alreadyOwned = data.getOwnedTags().contains(lowered);
         data.getOwnedTags().add(lowered);
+        scheduleRefresh(playerId, TagRefreshReason.GRANTED);
         return storage.grantTagAsync(playerId, lowered).handle((ignored, throwable) -> {
             if (throwable == null) {
                 return true;
             }
             if (!alreadyOwned) {
                 data.getOwnedTags().remove(lowered);
+                scheduleRefresh(playerId, TagRefreshReason.REVOKED);
             }
             plugin.getLogger().warning("Failed to grant tag " + lowered + " to " + playerId + ": "
                 + throwable.getMessage());
@@ -244,17 +256,14 @@ public final class TagService implements TagVisibilityService {
         if (player == null) {
             return CompletableFuture.completedFuture(TagAdminResult.PLAYER_NOT_FOUND);
         }
-        if (registry.get(tagId) == null) {
+        String lowered = tagId.toLowerCase(Locale.ROOT);
+        if (registry.get(lowered) == null) {
             return CompletableFuture.completedFuture(TagAdminResult.UNKNOWN_TAG);
         }
-        String lowered = tagId.toLowerCase(Locale.ROOT);
         return loadDataAsync(player.getUniqueId()).thenCompose(data -> {
             data.getOwnedTags().add(lowered);
             cache.put(player.getUniqueId(), data);
-            Player online = player.getPlayer();
-            if (online != null) {
-                Bukkit.getScheduler().runTask(plugin, () -> updateDisplay(online));
-            }
+            scheduleRefresh(player.getUniqueId(), TagRefreshReason.GRANTED);
             return storage.grantTagAsync(player.getUniqueId(), lowered).handle((ignored, throwable) -> {
                 if (throwable != null) {
                     plugin.getLogger().warning("Failed to grant tag " + lowered + " to " + player.getUniqueId() + ": "
@@ -271,11 +280,8 @@ public final class TagService implements TagVisibilityService {
         data.getOwnedTags().remove(lowered);
         if (lowered.equalsIgnoreCase(data.getSelectedTag())) {
             data.setSelectedTag(null);
-            Player player = Bukkit.getPlayer(playerId);
-            if (player != null) {
-                updateDisplay(player);
-            }
         }
+        scheduleRefresh(playerId, TagRefreshReason.REVOKED);
         storage.revokeTagAsync(playerId, lowered).exceptionally(throwable -> {
             plugin.getLogger().warning("Failed to revoke tag " + lowered + " from " + playerId + ": " + throwable.getMessage());
             return null;
@@ -292,10 +298,6 @@ public final class TagService implements TagVisibilityService {
             return CompletableFuture.completedFuture(TagAdminResult.UNKNOWN_TAG);
         }
         return loadDataAsync(player.getUniqueId()).thenApply(data -> {
-            data.getOwnedTags().remove(lowered);
-            if (lowered.equalsIgnoreCase(data.getSelectedTag())) {
-                data.setSelectedTag(null);
-            }
             cache.put(player.getUniqueId(), data);
             revokeTag(player.getUniqueId(), lowered);
             return TagAdminResult.SUCCESS;
@@ -305,11 +307,11 @@ public final class TagService implements TagVisibilityService {
     public boolean setSelectedTag(Player player, String tagId) {
         String normalized = tagId == null ? null : tagId.toLowerCase(Locale.ROOT);
         PlayerTagData data = cache.computeIfAbsent(player.getUniqueId(), ignored -> new PlayerTagData());
-        if (normalized != null && !data.getOwnedTags().contains(normalized)) {
+        if (normalized != null && (registry.get(normalized) == null || !data.getOwnedTags().contains(normalized))) {
             return false;
         }
         data.setSelectedTag(normalized);
-        updateDisplay(player);
+        requestNametagRefresh(player, normalized == null ? TagRefreshReason.CLEARED : TagRefreshReason.SELECTED);
         storage.setSelectedTagAsync(player.getUniqueId(), normalized).exceptionally(throwable -> {
             plugin.getLogger().warning("Failed to set selected tag for " + player.getUniqueId() + ": " + throwable.getMessage());
             return null;
@@ -331,10 +333,7 @@ public final class TagService implements TagVisibilityService {
             }
             data.setSelectedTag(normalized);
             cache.put(player.getUniqueId(), data);
-            Player online = player.getPlayer();
-            if (online != null) {
-                Bukkit.getScheduler().runTask(plugin, () -> updateDisplay(online));
-            }
+            scheduleRefresh(player.getUniqueId(), normalized == null ? TagRefreshReason.CLEARED : TagRefreshReason.SELECTED);
             return storage.setSelectedTagAsync(player.getUniqueId(), normalized).handle((ignored, throwable) -> {
                 if (throwable != null) {
                     plugin.getLogger().warning("Failed to set selected tag for " + player.getUniqueId() + ": "
@@ -353,41 +352,35 @@ public final class TagService implements TagVisibilityService {
         return cache.computeIfAbsent(playerId, ignored -> new PlayerTagData());
     }
 
-    public void updateDisplay(Player player) {
-        if (!player.isOnline()) {
-            displayManager.remove(player);
-            return;
-        }
-        if (isSuppressed(player.getUniqueId())) {
-            displayManager.remove(player);
+    public TagPlaceholderOutput getPlaceholderOutput(UUID playerId, Player player) {
+        return getPlaceholderOutput(playerId, player, player == null ? "" : player.getName());
+    }
+
+    TagPlaceholderOutput getPlaceholderOutput(UUID playerId, Player player, String playerName) {
+        PlayerTagData data = cache.get(playerId);
+        return CachedTagPlaceholderResolver.resolve(data, registry, isSuppressed(playerId),
+            lineFormat, playerName, line -> {
+                String internal = player == null ? line : placeholderRegistry.apply(player, line);
+                return player == null ? internal : placeholderApiHook.apply(player, internal);
+            });
+    }
+
+    public void requestNametagRefresh(Player player) {
+        requestNametagRefresh(player, TagRefreshReason.PLAYER_LIFECYCLE);
+    }
+
+    void requestNametagRefresh(Player player, TagRefreshReason reason) {
+        if (player == null || !player.isOnline()) {
             return;
         }
         PlayerTagData data = cache.get(player.getUniqueId());
-        if (data == null) {
-            displayManager.update(player, null, displayOffset);
-            return;
+        if (data != null) {
+            data.setVanished(vanishHook.isVanished(player));
         }
-        boolean vanished = vanishHook.isVanished(player);
-        data.setVanished(vanished);
-        if (vanished || data.getSelectedTag() == null) {
-            displayManager.update(player, null, displayOffset);
-            return;
+        if (refreshCoordinator != null) {
+            performanceMonitor.increment("tags.refresh");
+            refreshCoordinator.request(player.getUniqueId(), reason);
         }
-        TagDefinition tag = registry.get(data.getSelectedTag());
-        if (tag == null) {
-            displayManager.update(player, null, displayOffset);
-            return;
-        }
-        String line = lineFormat.replace("{tag}", tag.getTagText());
-        line = placeholderRegistry.apply(player, line);
-        line = placeholderApiHook.apply(player, line);
-        Component component = LegacyComponentSerializer.legacyAmpersand().deserialize(line);
-        performanceMonitor.increment("tags.refresh");
-        displayManager.update(player, component, displayOffset);
-    }
-
-    public void removeDisplay(Player player) {
-        displayManager.remove(player);
     }
 
     @Override
@@ -396,10 +389,7 @@ public final class TagService implements TagVisibilityService {
             return;
         }
         suppressionOwners.computeIfAbsent(playerId, unused -> ConcurrentHashMap.newKeySet()).add(owner);
-        Player player = Bukkit.getPlayer(playerId);
-        if (player != null) {
-            displayManager.remove(player);
-        }
+        scheduleRefresh(playerId, TagRefreshReason.SUPPRESSED);
     }
 
     @Override
@@ -416,10 +406,7 @@ public final class TagService implements TagVisibilityService {
             return;
         }
         suppressionOwners.remove(playerId, owners);
-        Player player = Bukkit.getPlayer(playerId);
-        if (player != null && player.isOnline()) {
-            updateDisplay(player);
-        }
+        scheduleRefresh(playerId, TagRefreshReason.UNSUPPRESSED);
     }
 
     @Override
@@ -467,7 +454,8 @@ public final class TagService implements TagVisibilityService {
             String iconName = section.getString(id + ".icon", "NAME_TAG");
             Material icon = Material.matchMaterial(iconName);
             List<String> description = section.getStringList(id + ".description");
-            registerTag(new TagDefinition(id, displayName, tagText, icon == null ? Material.NAME_TAG : icon, description));
+            registerTag(new TagDefinition(id, displayName, tagText,
+                icon == null ? Material.NAME_TAG : icon, description));
         }
     }
 
@@ -475,10 +463,7 @@ public final class TagService implements TagVisibilityService {
         String lowered = tagId.toLowerCase(Locale.ROOT);
         for (Map.Entry<UUID, PlayerTagData> entry : cache.entrySet()) {
             if (lowered.equals(entry.getValue().getSelectedTag())) {
-                Player player = Bukkit.getPlayer(entry.getKey());
-                if (player != null) {
-                    updateDisplay(player);
-                }
+                scheduleRefresh(entry.getKey(), TagRefreshReason.TAG_DEFINITION_CHANGED);
             }
         }
     }
@@ -505,8 +490,30 @@ public final class TagService implements TagVisibilityService {
             boolean vanished = vanishHook.isVanished(player);
             if (data.isVanished() != vanished) {
                 data.setVanished(vanished);
-                updateDisplay(player);
+                requestNametagRefresh(player, TagRefreshReason.VISIBILITY_CHANGED);
             }
+        }
+    }
+
+    private void scheduleRefresh(UUID playerId, TagRefreshReason reason) {
+        if (!plugin.isEnabled()) {
+            return;
+        }
+        Bukkit.getScheduler().runTask(plugin, () -> {
+            Player player = Bukkit.getPlayer(playerId);
+            if (player != null) {
+                requestNametagRefresh(player, reason);
+            }
+        });
+    }
+
+    private void closePlaceholderExpansion() {
+        try {
+            placeholderExpansion.close();
+        } catch (Exception ex) {
+            plugin.getLogger().warning("Failed to unregister the EnthusiaTags placeholder expansion: " + ex.getMessage());
+        } finally {
+            placeholderExpansion = () -> { };
         }
     }
 

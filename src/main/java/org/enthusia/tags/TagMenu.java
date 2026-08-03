@@ -31,8 +31,7 @@ public final class TagMenu {
 
     public Inventory create(Player player) {
         TagMenuHolder holder = new TagMenuHolder(tagService);
-        Component title = LegacyComponentSerializer.legacyAmpersand().deserialize(tagService.getGuiTitle());
-        Inventory inventory = Bukkit.createInventory(holder, 54, title);
+        Inventory inventory = Bukkit.createInventory(holder, 54, TagTextFormat.deserializeCompat(tagService.getGuiTitle()));
         holder.setInventory(inventory);
 
         PlayerTagData data = tagService.getPlayerData(player.getUniqueId());
@@ -75,11 +74,11 @@ public final class TagMenu {
     private ItemStack createTagItem(TagDefinition tag) {
         ItemStack stack = new ItemStack(tag.getIcon());
         ItemMeta meta = stack.getItemMeta();
-        meta.displayName(LegacyComponentSerializer.legacyAmpersand().deserialize(tag.getDisplayName()));
+        meta.displayName(TagTextFormat.deserializeCompat(tag.getDisplayName()));
         if (!tag.getDescription().isEmpty()) {
             List<Component> lore = new ArrayList<>();
             for (String line : tag.getDescription()) {
-                lore.add(LegacyComponentSerializer.legacyAmpersand().deserialize(line));
+                lore.add(TagTextFormat.deserializeCompat(line));
             }
             meta.lore(lore);
         }
@@ -91,7 +90,7 @@ public final class TagMenu {
     private ItemStack createClearItem() {
         ItemStack stack = new ItemStack(Material.BARRIER);
         ItemMeta meta = stack.getItemMeta();
-        meta.displayName(LegacyComponentSerializer.legacyAmpersand().deserialize(tagService.getClearItemName()));
+        meta.displayName(TagTextFormat.deserializeCompat(tagService.getClearItemName()));
         meta.getPersistentDataContainer().set(clearKey, PersistentDataType.BYTE, (byte) 1);
         stack.setItemMeta(meta);
         return stack;
@@ -110,7 +109,7 @@ public final class TagMenu {
     private ItemStack createNoTagsItem() {
         ItemStack stack = new ItemStack(Material.BARRIER);
         ItemMeta meta = stack.getItemMeta();
-        meta.displayName(LegacyComponentSerializer.legacyAmpersand().deserialize(tagService.getNoTagsItemName()));
+        meta.displayName(TagTextFormat.deserializeCompat(tagService.getNoTagsItemName()));
         stack.setItemMeta(meta);
         return stack;
     }

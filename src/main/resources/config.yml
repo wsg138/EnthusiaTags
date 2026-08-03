@@ -1,17 +1,14 @@
-config-version: 4
+config-version: 5
 
-# Format shown above the player. `{tag}` is replaced with the configured tag text.
-line-format: "&7[{tag}&7]"
+# MiniMessage format exposed to nametag consumers. `{tag}` is replaced with configured tag text.
+line-format: "<gray>[{tag}<gray>]"
 
 # Main /tags GUI title.
 gui-title: "Your Tags"
 
-# Menu labels.
+# Menu labels. Legacy values remain supported for compatibility.
 clear-item-name: "&cClear Tag"
 no-tags-item-name: "&7No tags yet"
-
-# Vertical offset for the floating tag display.
-display-offset: 0.06
 
 # Operational settings.
 performance:
@@ -102,194 +99,194 @@ daily:
 
 tags:
   beta_tester:
-    display-name: "&#39c5ffBeta &#6ee7ffTester"
-    tag-text: "&#39c5ffBeta &#6ee7ffTester"
+    display-name: "<#39c5ff>Beta <#6ee7ff>Tester"
+    tag-text: "<#39c5ff>Beta <#6ee7ff>Tester"
     icon: "DIAMOND"
     description:
       - "&7Early supporter"
   example_placeholder:
-    display-name: "&aExample Placeholder"
-    tag-text: "&e{player}"
+    display-name: "<green>Example Placeholder"
+    tag-text: "<yellow>{player}"
     icon: "NAME_TAG"
     description:
       - "&7Shows how to use placeholders"
   block_game_addict:
-    display-name: "&#4fc3ff&lBlock &#8be3ff&lGame &#b6f2ff&lAddict"
-    tag-text: "&#4fc3ff&lBlock &#8be3ff&lGame &#b6f2ff&lAddict"
+    display-name: "<#4fc3ff><bold>Block <#8be3ff>Game <#b6f2ff>Addict"
+    tag-text: "<#4fc3ff><bold>Block <#8be3ff>Game <#b6f2ff>Addict"
     icon: "CLOCK"
   no_life:
-    display-name: "&#d16bff&lNo &#ff7adf&lLife"
-    tag-text: "&#d16bff&lNo &#ff7adf&lLife"
+    display-name: "<#d16bff><bold>No <#ff7adf>Life"
+    tag-text: "<#d16bff><bold>No <#ff7adf>Life"
     icon: "CLOCK"
   grass_never:
-    display-name: "&#4caf50&nGrass? Never Heard of It"
-    tag-text: "&#4caf50&nGrass? Never Heard of It"
+    display-name: "<#4caf50><underlined>Grass? Never Heard of It"
+    tag-text: "<#4caf50><underlined>Grass? Never Heard of It"
     icon: "CLOCK"
   touch_grass_failed:
-    display-name: "&#6bff7a&lTouch Grass &f&l(Failed)"
-    tag-text: "&#6bff7a&lTouch Grass &f&l(Failed)"
+    display-name: "<#6bff7a><bold>Touch Grass <white>(Failed)"
+    tag-text: "<#6bff7a><bold>Touch Grass <white>(Failed)"
     icon: "CLOCK"
   my_life_now:
-    display-name: "&#ff7adf&lThis Is My Life Now"
-    tag-text: "&#ff7adf&lThis Is My Life Now"
+    display-name: "<#ff7adf><bold>This Is My Life Now"
+    tag-text: "<#ff7adf><bold>This Is My Life Now"
     icon: "CLOCK"
   server_home:
-    display-name: "&#ffcc66&lThis Server Is My Home"
-    tag-text: "&#ffcc66&lThis Server Is My Home"
+    display-name: "<#ffcc66><bold>This Server Is My Home"
+    tag-text: "<#ffcc66><bold>This Server Is My Home"
     icon: "CLOCK"
   sleeps_in_minecraft:
-    display-name: "&#6ee7ff&lSleeps in Minecraft"
-    tag-text: "&#6ee7ff&lSleeps in Minecraft"
+    display-name: "<#6ee7ff><bold>Sleeps in Minecraft"
+    tag-text: "<#6ee7ff><bold>Sleeps in Minecraft"
     icon: "CLOCK"
   tree_puncher:
-    display-name: "&#7bdc5f&lProfessional Tree Puncher"
-    tag-text: "&#7bdc5f&lTree Puncher"
+    display-name: "<#7bdc5f><bold>Professional Tree Puncher"
+    tag-text: "<#7bdc5f><bold>Tree Puncher"
     icon: "OAK_LOG"
   industrial_lumberjack:
-    display-name: "&#4caf50&lIndustrial Lumberjack"
-    tag-text: "&#4caf50&lLumberjack"
+    display-name: "<#4caf50><bold>Industrial Lumberjack"
+    tag-text: "<#4caf50><bold>Lumberjack"
     icon: "OAK_LOG"
   dirt_collector:
-    display-name: "&#d2a679&lCertified Dirt Collector"
-    tag-text: "&#d2a679&lDirt Collector"
+    display-name: "<#d2a679><bold>Certified Dirt Collector"
+    tag-text: "<#d2a679><bold>Dirt Collector"
     icon: "DIRT"
   stone_age:
-    display-name: "&#b0b0b0&lStone Age Never Ended"
-    tag-text: "&#b0b0b0&lStone Age"
+    display-name: "<#b0b0b0><bold>Stone Age Never Ended"
+    tag-text: "<#b0b0b0><bold>Stone Age"
     icon: "STONE"
   iron_deficiency:
-    display-name: "&f&lIron Deficiency"
-    tag-text: "&f&lIron Deficiency"
+    display-name: "<white><bold>Iron Deficiency"
+    tag-text: "<white><bold>Iron Deficiency"
     icon: "IRON_ORE"
   diamond_hands:
-    display-name: "&#5fd3ff&lDiamond Hands"
-    tag-text: "&#5fd3ff&lDiamond Hands"
+    display-name: "<#5fd3ff><bold>Diamond Hands"
+    tag-text: "<#5fd3ff><bold>Diamond Hands"
     icon: "DIAMOND"
   nether_enjoyer:
-    display-name: "&#ff6b6b&lNether Enjoyer"
-    tag-text: "&#ff6b6b&lNether Enjoyer"
+    display-name: "<#ff6b6b><bold>Nether Enjoyer"
+    tag-text: "<#ff6b6b><bold>Nether Enjoyer"
     icon: "NETHERRACK"
   yearn_for_mines:
-    display-name: "&#6b6b6b&lI Yearn for the Mines"
-    tag-text: "&#6b6b6b&lYearn for the Mines"
+    display-name: "<#6b6b6b><bold>I Yearn for the Mines"
+    tag-text: "<#6b6b6b><bold>Yearn for the Mines"
     icon: "DEEPSLATE"
   no_mercy:
-    display-name: "&#ff4444&lNo Mercy"
-    tag-text: "&#ff4444&lNo Mercy"
+    display-name: "<#ff4444><bold>No Mercy"
+    tag-text: "<#ff4444><bold>No Mercy"
     icon: "IRON_SWORD"
   silent_killer:
-    display-name: "&#b00020&lSilent Killer"
-    tag-text: "&#b00020&lSilent Killer"
+    display-name: "<#b00020><bold>Silent Killer"
+    tag-text: "<#b00020><bold>Silent Killer"
     icon: "IRON_SWORD"
   already_dead:
-    display-name: "&#8b0000&lAlready Dead"
-    tag-text: "&#8b0000&lAlready Dead"
+    display-name: "<#8b0000><bold>Already Dead"
+    tag-text: "<#8b0000><bold>Already Dead"
     icon: "NETHERITE_SWORD"
   death_sentence:
-    display-name: "&#ff9f43&lDeath Sentence"
-    tag-text: "&#ff9f43&lDeath Sentence"
+    display-name: "<#ff9f43><bold>Death Sentence"
+    tag-text: "<#ff9f43><bold>Death Sentence"
     icon: "GOLDEN_SWORD"
   checkmate:
-    display-name: "&#6ee7ff&lCheckmate"
-    tag-text: "&#6ee7ff&lCheckmate"
+    display-name: "<#6ee7ff><bold>Checkmate"
+    tag-text: "<#6ee7ff><bold>Checkmate"
     icon: "DIAMOND_CHESTPLATE"
   not_even_close:
-    display-name: "&#ff5252&lNot Even Close"
-    tag-text: "&#ff5252&lNot Even Close"
+    display-name: "<#ff5252><bold>Not Even Close"
+    tag-text: "<#ff5252><bold>Not Even Close"
     icon: "RED_DYE"
   fear_me:
-    display-name: "&#c0c0c0&lFear Me (Please)"
-    tag-text: "&#c0c0c0&lFear Me"
+    display-name: "<#c0c0c0><bold>Fear Me (Please)"
+    tag-text: "<#c0c0c0><bold>Fear Me"
     icon: "SKELETON_SKULL"
   fallen:
-    display-name: "&#9e9e9e&lFallen"
-    tag-text: "&#9e9e9e&lFallen"
+    display-name: "<#9e9e9e><bold>Fallen"
+    tag-text: "<#9e9e9e><bold>Fallen"
     icon: "SKELETON_SKULL"
   very_experienced:
-    display-name: "&#9e9e9e&lVery Experienced"
-    tag-text: "&#9e9e9e&lVery Experienced"
+    display-name: "<#9e9e9e><bold>Very Experienced"
+    tag-text: "<#9e9e9e><bold>Very Experienced"
     icon: "SKELETON_SKULL"
   respawn_enjoyer:
-    display-name: "&#9e9e9e&lRespawn Enjoyer"
-    tag-text: "&#9e9e9e&lRespawn Enjoyer"
+    display-name: "<#9e9e9e><bold>Respawn Enjoyer"
+    tag-text: "<#9e9e9e><bold>Respawn Enjoyer"
     icon: "SKELETON_SKULL"
   unkillable_spirit:
-    display-name: "&#d0d0d0&lUnkillable Spirit"
-    tag-text: "&#d0d0d0&lUnkillable Spirit"
+    display-name: "<#d0d0d0><bold>Unkillable Spirit"
+    tag-text: "<#d0d0d0><bold>Unkillable Spirit"
     icon: "SKELETON_SKULL"
   refuses_to_quit:
-    display-name: "&#b0b0b0&lRefuses to Quit"
-    tag-text: "&#b0b0b0&lRefuses to Quit"
+    display-name: "<#b0b0b0><bold>Refuses to Quit"
+    tag-text: "<#b0b0b0><bold>Refuses to Quit"
     icon: "SKELETON_SKULL"
   target_practice:
-    display-name: "&#ffd166&lTarget Practice"
-    tag-text: "&#ffd166&lTarget Practice"
+    display-name: "<#ffd166><bold>Target Practice"
+    tag-text: "<#ffd166><bold>Target Practice"
     icon: "BOW"
   personal_problem:
-    display-name: "&#ffb347&lPersonal Problem"
-    tag-text: "&#ffb347&lPersonal Problem"
+    display-name: "<#ffb347><bold>Personal Problem"
+    tag-text: "<#ffb347><bold>Personal Problem"
     icon: "BOW"
   rent_free:
-    display-name: "&#ff9f1a&lRent Free"
-    tag-text: "&#ff9f1a&lRent Free"
+    display-name: "<#ff9f1a><bold>Rent Free"
+    tag-text: "<#ff9f1a><bold>Rent Free"
     icon: "BOW"
   nemesis:
-    display-name: "&#ff4d4d&lNemesis"
-    tag-text: "&#ff4d4d&lNemesis"
+    display-name: "<#ff4d4d><bold>Nemesis"
+    tag-text: "<#ff4d4d><bold>Nemesis"
     icon: "BOW"
   blooded:
-    display-name: "&#ff4d4d&lBlooded"
-    tag-text: "&#ff4d4d&lBlooded"
+    display-name: "<#ff4d4d><bold>Blooded"
+    tag-text: "<#ff4d4d><bold>Blooded"
     icon: "IRON_SWORD"
   seasoned:
-    display-name: "&#ff3b30&lSeasoned"
-    tag-text: "&#ff3b30&lSeasoned"
+    display-name: "<#ff3b30><bold>Seasoned"
+    tag-text: "<#ff3b30><bold>Seasoned"
     icon: "IRON_SWORD"
   battle_hardened:
-    display-name: "&#ff2d55&lBattle-Hardened"
-    tag-text: "&#ff2d55&lBattle-Hardened"
+    display-name: "<#ff2d55><bold>Battle-Hardened"
+    tag-text: "<#ff2d55><bold>Battle-Hardened"
     icon: "IRON_SWORD"
   warpath:
-    display-name: "&#ff0000&lWarpath"
-    tag-text: "&#ff0000&lWarpath"
+    display-name: "<#ff0000><bold>Warpath"
+    tag-text: "<#ff0000><bold>Warpath"
     icon: "NETHERITE_SWORD"
   unstoppable:
-    display-name: "&#ff0000&lUnstoppable"
-    tag-text: "&#ff0000&lUnstoppable"
+    display-name: "<#ff0000><bold>Unstoppable"
+    tag-text: "<#ff0000><bold>Unstoppable"
     icon: "NETHERITE_SWORD"
   gravity_victim:
-    display-name: "&#a0a0a0&lGravity's Victim"
-    tag-text: "&#a0a0a0&lGravity's Victim"
+    display-name: "<#a0a0a0><bold>Gravity's Victim"
+    tag-text: "<#a0a0a0><bold>Gravity's Victim"
     icon: "FEATHER"
   skill_issue:
-    display-name: "&#b0b0b0&lSkill Issue"
-    tag-text: "&#b0b0b0&lSkill Issue"
+    display-name: "<#b0b0b0><bold>Skill Issue"
+    tag-text: "<#b0b0b0><bold>Skill Issue"
     icon: "FEATHER"
   physics_hard:
-    display-name: "&#8d8d8d&lPhysics Is Hard"
-    tag-text: "&#8d8d8d&lPhysics Is Hard"
+    display-name: "<#8d8d8d><bold>Physics Is Hard"
+    tag-text: "<#8d8d8d><bold>Physics Is Hard"
     icon: "FEATHER"
   lava_allergy:
-    display-name: "&#ff8c00&lLava Allergy"
-    tag-text: "&#ff8c00&lLava Allergy"
+    display-name: "<#ff8c00><bold>Lava Allergy"
+    tag-text: "<#ff8c00><bold>Lava Allergy"
     icon: "LAVA_BUCKET"
   i_swear_it_worked:
-    display-name: "&#c0c0c0&lI Swear It Worked"
-    tag-text: "&#c0c0c0&lI Swear It Worked"
+    display-name: "<#c0c0c0><bold>I Swear It Worked"
+    tag-text: "<#c0c0c0><bold>I Swear It Worked"
     icon: "TNT"
   died_to_chicken:
-    display-name: "&#ffe066&lDied to a Chicken"
-    tag-text: "&#ffe066&lDied to a Chicken"
+    display-name: "<#ffe066><bold>Died to a Chicken"
+    tag-text: "<#ffe066><bold>Died to a Chicken"
     icon: "CHICKEN"
   lag_was_crazy:
-    display-name: "&#b0b0b0&nLag Was Crazy"
-    tag-text: "&#b0b0b0&nLag Was Crazy"
+    display-name: "<#b0b0b0><underlined>Lag Was Crazy"
+    tag-text: "<#b0b0b0><underlined>Lag Was Crazy"
     icon: "ENDER_PEARL"
   baltop_elite:
-    display-name: "&#ffd700&lBaltop Elite"
-    tag-text: "&#ffd700&lBaltop Elite"
+    display-name: "<#ffd700><bold>Baltop Elite"
+    tag-text: "<#ffd700><bold>Baltop Elite"
     icon: "GOLD_INGOT"
   high_roller:
-    display-name: "&#ffb700&lHigh Roller"
-    tag-text: "&#ffb700&lHigh Roller"
+    display-name: "<#ffb700><bold>High Roller"
+    tag-text: "<#ffb700><bold>High Roller"
     icon: "GOLD_BLOCK"
