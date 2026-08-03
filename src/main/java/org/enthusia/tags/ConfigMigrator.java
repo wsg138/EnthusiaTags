@@ -16,7 +16,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 public final class ConfigMigrator {
-    public static final int CURRENT_CONFIG_VERSION = 4;
+    public static final int CURRENT_CONFIG_VERSION = 5;
     private static final int REWARDS_CONFIG_VERSION = 5;
     private static final DateTimeFormatter BACKUP_FORMAT = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
 
@@ -110,6 +110,9 @@ public final class ConfigMigrator {
             changed |= removeDeprecated(config, "daily.animation.default-player-preference", report);
             changed |= removeDeprecated(config, "daily.animation.duration-ticks", report);
         }
+        if (existingVersion < 5) {
+            changed |= TagConfigV5Migration.migrate(config, report);
+        }
         return changed;
     }
 
@@ -185,7 +188,6 @@ public final class ConfigMigrator {
 
     @SuppressWarnings("PMD.NullAssignment")
     private void clearPath(YamlConfiguration config, String path) {
-        // Bukkit's Configuration API removes a key by assigning null.
         config.set(path, null);
     }
 

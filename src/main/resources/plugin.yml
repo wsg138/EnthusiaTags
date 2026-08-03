@@ -5,6 +5,7 @@ api-version: 1.21
 author: Enthusia
 softdepend:
   - PlaceholderAPI
+  - UnlimitedNametags
   - Vault
   - EnthusiaCurrency
   - EnthusiaPlaytime

@@ -54,22 +54,17 @@ public final class TagListener implements Listener {
 
     @EventHandler
     public void onRespawn(PlayerRespawnEvent event) {
-        Bukkit.getScheduler().runTask(tagService.getPlugin(), () -> tagService.updateDisplay(event.getPlayer()));
+        Bukkit.getScheduler().runTask(tagService.getPlugin(), () -> tagService.requestNametagRefresh(event.getPlayer()));
     }
 
     @EventHandler
     public void onWorldChange(PlayerChangedWorldEvent event) {
-        Bukkit.getScheduler().runTask(tagService.getPlugin(), () -> tagService.updateDisplay(event.getPlayer()));
+        Bukkit.getScheduler().runTask(tagService.getPlugin(), () -> tagService.requestNametagRefresh(event.getPlayer()));
     }
 
-    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
-    public void onTeleportStart(PlayerTeleportEvent event) {
-        tagService.removeDisplay(event.getPlayer());
-    }
-
-    @EventHandler(priority = EventPriority.MONITOR)
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onTeleportEnd(PlayerTeleportEvent event) {
-        Bukkit.getScheduler().runTask(tagService.getPlugin(), () -> tagService.updateDisplay(event.getPlayer()));
+        Bukkit.getScheduler().runTask(tagService.getPlugin(), () -> tagService.requestNametagRefresh(event.getPlayer()));
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
@@ -80,7 +75,7 @@ public final class TagListener implements Listener {
         if (event.getModifiedType() != PotionEffectType.INVISIBILITY) {
             return;
         }
-        Bukkit.getScheduler().runTask(tagService.getPlugin(), () -> tagService.updateDisplay(player));
+        Bukkit.getScheduler().runTask(tagService.getPlugin(), () -> tagService.requestNametagRefresh(player));
     }
 
     @EventHandler

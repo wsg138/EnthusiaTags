@@ -1,0 +1,15 @@
+package org.enthusia.tags;
+
+enum TagRefreshReason {
+    SELECTED,
+    CLEARED,
+    GRANTED,
+    REVOKED,
+    TAG_DEFINITION_CHANGED,
+    SUPPRESSED,
+    UNSUPPRESSED,
+    RELOADED,
+    PLAYER_DATA_LOADED,
+    VISIBILITY_CHANGED,
+    PLAYER_LIFECYCLE
+}
