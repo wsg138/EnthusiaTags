@@ -13,24 +13,35 @@ final class NametagRefreshBridgeFactory {
     }
 
     static NametagRefreshBridge create(JavaPlugin plugin) {
+        Consumer<String> warningLogger = plugin.getLogger()::warning;
         Plugin dependency = plugin.getServer().getPluginManager().getPlugin("UnlimitedNametags");
-        boolean enabled = dependency != null && dependency.isEnabled();
-        return create(enabled, UnlimitedNametagsBridge::new, plugin.getLogger()::warning);
+        if (dependency == null || !dependency.isEnabled()) {
+            return unavailable(warningLogger, null);
+        }
+        try {
+            return new UnlimitedNametagsBridge();
+        } catch (LinkageError | RuntimeException ex) {
+            return unavailable(warningLogger, ex);
+        }
     }
 
     static NametagRefreshBridge create(boolean dependencyEnabled,
                                         Supplier<NametagRefreshBridge> bridgeFactory,
                                         Consumer<String> warningLogger) {
         if (!dependencyEnabled) {
-            warningLogger.accept(UNAVAILABLE_WARNING);
-            return NoOpNametagRefreshBridge.INSTANCE;
+            return unavailable(warningLogger, null);
         }
         try {
             return bridgeFactory.get();
         } catch (LinkageError | RuntimeException ex) {
-            warningLogger.accept(UNAVAILABLE_WARNING + " Cause: " + ex.getClass().getSimpleName()
-                + (ex.getMessage() == null ? "" : ": " + ex.getMessage()));
-            return NoOpNametagRefreshBridge.INSTANCE;
+            return unavailable(warningLogger, ex);
         }
+    }
+
+    private static NametagRefreshBridge unavailable(Consumer<String> warningLogger, Throwable cause) {
+        String detail = cause == null ? "" : " Cause: " + cause.getClass().getSimpleName()
+            + (cause.getMessage() == null ? "" : ": " + cause.getMessage());
+        warningLogger.accept(UNAVAILABLE_WARNING + detail);
+        return NoOpNametagRefreshBridge.INSTANCE;
     }
 }

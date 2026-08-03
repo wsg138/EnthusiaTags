@@ -36,7 +36,7 @@ final class EnthusiaTagsPlaceholderExpansion extends PlaceholderExpansion implem
 
     @Override
     public @NotNull String getVersion() {
-        return plugin.getDescription().getVersion();
+        return plugin.getPluginMeta().getVersion();
     }
 
     @Override

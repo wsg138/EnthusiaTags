@@ -1,5 +1,6 @@
 package org.enthusia.tags;
 
+import java.util.Objects;
 import java.util.UUID;
 
 final class NoOpNametagRefreshBridge implements NametagRefreshBridge {
@@ -10,6 +11,7 @@ final class NoOpNametagRefreshBridge implements NametagRefreshBridge {
 
     @Override
     public void refresh(UUID playerId) {
+        Objects.requireNonNull(playerId, "playerId");
     }
 
     @Override

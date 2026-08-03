@@ -31,7 +31,7 @@ public final class PlaceholderApiHook {
             return input;
         }
         Matcher matcher = PLACEHOLDER.matcher(input);
-        StringBuffer output = new StringBuffer(input.length());
+        StringBuilder output = new StringBuilder(input.length());
         while (matcher.find()) {
             String token = matcher.group();
             String identifier = matcher.group(1).toLowerCase(Locale.ROOT);

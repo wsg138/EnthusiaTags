@@ -1,33 +1,25 @@
 package org.enthusia.tags;
 
-import java.util.Collection;
+import java.util.Objects;
 import java.util.UUID;
 
 final class NametagRefreshCoordinator implements AutoCloseable {
     private final NametagRefreshBridge bridge;
+    private boolean closed;
 
     NametagRefreshCoordinator(NametagRefreshBridge bridge) {
         this.bridge = bridge;
     }
 
     void request(UUID playerId, TagRefreshReason reason) {
-        if (playerId != null) {
+        Objects.requireNonNull(reason, "reason");
+        if (!closed && playerId != null) {
             bridge.refresh(playerId);
         }
     }
 
-    void requestAll(Collection<UUID> playerIds, TagRefreshReason reason) {
-        for (UUID playerId : playerIds) {
-            request(playerId, reason);
-        }
-    }
-
-    boolean isAvailable() {
-        return bridge.isAvailable();
-    }
-
     @Override
     public void close() {
-        bridge.close();
+        closed = true;
     }
 }

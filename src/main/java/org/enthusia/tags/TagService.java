@@ -147,7 +147,8 @@ public final class TagService implements TagVisibilityService {
      */
     @Deprecated(forRemoval = false)
     public void setDisplayOffset(double ignoredOffset) {
-        plugin.getLogger().warning("The /tag offset command is deprecated and ignored; configure positioning in UnlimitedNametags.");
+        plugin.getLogger().warning("Ignored legacy display offset " + ignoredOffset
+            + "; configure positioning in UnlimitedNametags.");
     }
 
     public TagRegistry getRegistry() {

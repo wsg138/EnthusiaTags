@@ -5,7 +5,6 @@ import org.junit.jupiter.api.Test;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -39,7 +38,7 @@ class NametagRefreshIntegrationTest {
     }
 
     @Test
-    void everyMutationReasonRequestsRefreshAndShutdownClosesBridge() {
+    void everyMutationReasonRequestsRefreshAndShutdownStopsRefreshes() {
         RecordingBridge bridge = new RecordingBridge();
         NametagRefreshCoordinator coordinator = new NametagRefreshCoordinator(bridge);
         UUID playerId = UUID.randomUUID();
@@ -48,14 +47,14 @@ class NametagRefreshIntegrationTest {
             coordinator.request(playerId, reason);
         }
         coordinator.close();
+        coordinator.request(playerId, TagRefreshReason.SELECTED);
 
-        assertEquals(TagRefreshReason.values().length, bridge.refreshes.size());
-        assertTrue(bridge.closed.get());
+        assertEquals(TagRefreshReason.values().length, bridge.refreshes.size(),
+            "closed coordinators must not emit additional refreshes");
     }
 
     private static final class RecordingBridge implements NametagRefreshBridge {
         private final List<UUID> refreshes = new ArrayList<>();
-        private final AtomicBoolean closed = new AtomicBoolean();
 
         @Override
         public void refresh(UUID playerId) {
@@ -65,11 +64,6 @@ class NametagRefreshIntegrationTest {
         @Override
         public boolean isAvailable() {
             return true;
-        }
-
-        @Override
-        public void close() {
-            closed.set(true);
         }
     }
 }
