@@ -1,5 +1,6 @@
 package org.enthusia.tags;
 
+import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 
 import java.lang.reflect.Method;
@@ -27,7 +28,11 @@ public final class PlaceholderApiHook {
     }
 
     public String apply(Player player, String input) {
-        if (resolver == null || input == null || input.indexOf('%') < 0) {
+        return apply(player, input, Bukkit.isPrimaryThread());
+    }
+
+    String apply(Player player, String input, boolean primaryThread) {
+        if (!primaryThread || resolver == null || input == null || input.indexOf('%') < 0) {
             return input;
         }
         Matcher matcher = PLACEHOLDER.matcher(input);
