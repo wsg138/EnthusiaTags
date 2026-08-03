@@ -19,7 +19,7 @@ final class NametagRefreshBridgeFactory {
             return unavailable(warningLogger, null);
         }
         try {
-            return new UnlimitedNametagsBridge();
+            return new FailSafeNametagRefreshBridge(new UnlimitedNametagsBridge(), warningLogger);
         } catch (LinkageError | RuntimeException ex) {
             return unavailable(warningLogger, ex);
         }
@@ -32,16 +32,20 @@ final class NametagRefreshBridgeFactory {
             return unavailable(warningLogger, null);
         }
         try {
-            return bridgeFactory.get();
+            return new FailSafeNametagRefreshBridge(bridgeFactory.get(), warningLogger);
         } catch (LinkageError | RuntimeException ex) {
             return unavailable(warningLogger, ex);
         }
     }
 
-    private static NametagRefreshBridge unavailable(Consumer<String> warningLogger, Throwable cause) {
+    static String unavailableMessage(Throwable cause) {
         String detail = cause == null ? "" : " Cause: " + cause.getClass().getSimpleName()
             + (cause.getMessage() == null ? "" : ": " + cause.getMessage());
-        warningLogger.accept(UNAVAILABLE_WARNING + detail);
+        return UNAVAILABLE_WARNING + detail;
+    }
+
+    private static NametagRefreshBridge unavailable(Consumer<String> warningLogger, Throwable cause) {
+        warningLogger.accept(unavailableMessage(cause));
         return NoOpNametagRefreshBridge.INSTANCE;
     }
 }
