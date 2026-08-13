@@ -6,6 +6,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Locale;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -29,7 +30,7 @@ class LoreItemsArchitectureTest {
     @Test
     void repositoryContainsNoLoreItemsCommandOrDatabaseFallback() throws Exception {
         for (Path source : javaSources()) {
-            String text = Files.readString(source).toLowerCase();
+            String text = Files.readString(source).toLowerCase(Locale.ROOT);
             assertFalse(text.contains("/loreitems"),
                 () -> source + " contains a forbidden LoreItems command fallback");
             assertFalse(text.contains("net.enthusia.loreitems.plugin"),
