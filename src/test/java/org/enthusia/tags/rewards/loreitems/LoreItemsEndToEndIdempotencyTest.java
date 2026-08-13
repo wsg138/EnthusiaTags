@@ -40,8 +40,8 @@ class LoreItemsEndToEndIdempotencyTest {
 
             assertEquals(LoreItemHandoffState.ACCEPTED, first.state());
             assertEquals(first.externalOperationId(), replay.externalOperationId());
-            assertEquals(1, service.invocations());
-            assertEquals(1, service.physicalAwards());
+            assertEquals(1, service.serviceInvocationCount());
+            assertEquals(1, service.physicalAwardCount());
         }
     }
 
@@ -70,25 +70,25 @@ class LoreItemsEndToEndIdempotencyTest {
             assertEquals(LoreItemHandoffState.ACCEPTED, recovered.state());
             assertEquals(operationId, recovered.externalOperationId());
             assertEquals("ALREADY_ACCEPTED", recovered.lastOutcome());
-            assertEquals(2, service.invocations());
-            assertEquals(1, service.physicalAwards());
+            assertEquals(2, service.serviceInvocationCount());
+            assertEquals(1, service.physicalAwardCount());
         }
     }
 
     private static final class CountingIdempotentService implements LoreItemsServiceV1 {
         private final Set<String> acceptedOperations = new HashSet<>();
-        private int invocations;
-        private int physicalAwards;
+        private int serviceInvocationCount;
+        private int physicalAwardCount;
 
         @Override
         public CompletionStage<LoreDeliveryResult> queueDelivery(
             String definitionKey,
             UUID playerId,
             String externalOperationId) {
-            invocations++;
+            serviceInvocationCount++;
             boolean firstAcceptance = acceptedOperations.add(externalOperationId);
             if (firstAcceptance) {
-                physicalAwards++;
+                physicalAwardCount++;
             }
             LoreDeliveryStatus status = firstAcceptance
                 ? LoreDeliveryStatus.ACCEPTED_QUEUED
@@ -99,12 +99,12 @@ class LoreItemsEndToEndIdempotencyTest {
                 firstAcceptance ? "accepted" : "already accepted"));
         }
 
-        int invocations() {
-            return invocations;
+        int serviceInvocationCount() {
+            return serviceInvocationCount;
         }
 
-        int physicalAwards() {
-            return physicalAwards;
+        int physicalAwardCount() {
+            return physicalAwardCount;
         }
     }
 }
