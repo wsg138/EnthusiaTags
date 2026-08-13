@@ -13,6 +13,11 @@ import java.util.Objects;
 
 public final class LoreItemRewardAdmin {
     public static final String PERMISSION = "enthusia.tags.rewards.loreitems.admin";
+    private static final String STATUS_COMMAND = "lorestatus";
+    private static final String RETRY_COMMAND = "loreretry";
+    private static final int SUBCOMMAND_ARGUMENT_COUNT = 1;
+    private static final int STATUS_ARGUMENT_COUNT = 3;
+    private static final int RETRY_ARGUMENT_COUNT = 4;
 
     private final JavaPlugin plugin;
     private final Messages messages;
@@ -33,7 +38,7 @@ public final class LoreItemRewardAdmin {
         if (args == null || args.length == 0) {
             return false;
         }
-        return args[0].equalsIgnoreCase("lorestatus") || args[0].equalsIgnoreCase("loreretry");
+        return STATUS_COMMAND.equalsIgnoreCase(args[0]) || RETRY_COMMAND.equalsIgnoreCase(args[0]);
     }
 
     public boolean handle(CommandSender sender, String[] args) {
@@ -41,13 +46,10 @@ public final class LoreItemRewardAdmin {
             send(sender, messages.get("rewards-loreitems-admin-no-permission"));
             return true;
         }
-        if (args.length < 3) {
-            sender.sendMessage(Component.text(
-                "Usage: /enthusiatags rewards lorestatus <player|uuid> <reward> OR "
-                    + "/enthusiatags rewards loreretry <player|uuid> <reward> <action-id>"));
+        if (args.length < STATUS_ARGUMENT_COUNT) {
+            sendUsage(sender);
             return true;
         }
-
         OfflinePlayer target = playerLookup.findPlayer(args[1]);
         if (target == null) {
             send(sender, messages.get("player-not-found"));
@@ -55,59 +57,82 @@ public final class LoreItemRewardAdmin {
         }
         String playerName = target.getName() == null ? target.getUniqueId().toString() : target.getName();
         String rewardId = args[2];
-
-        if (args[0].equalsIgnoreCase("lorestatus")) {
-            runtime.inspect(target.getUniqueId(), rewardId)
-                .whenComplete((records, failure) -> plugin.getServer().getScheduler().runTask(plugin, () -> {
-                    if (failure != null) {
-                        sendError(sender, failure);
-                        return;
-                    }
-                    send(sender, messages.get("rewards-loreitems-status-header")
-                        .replace("{player}", playerName)
-                        .replace("{reward}", rewardId));
-                    if (records == null || records.isEmpty()) {
-                        send(sender, messages.get("rewards-loreitems-status-empty"));
-                        return;
-                    }
-                    for (LoreItemHandoffRecord record : records) {
-                        send(sender, formatStatus(record));
-                    }
-                }));
-            return true;
+        if (STATUS_COMMAND.equalsIgnoreCase(args[0])) {
+            handleStatus(sender, target, playerName, rewardId);
+        } else {
+            handleRetry(sender, args, target, playerName, rewardId);
         }
+        return true;
+    }
 
-        if (args.length < 4) {
-            sender.sendMessage(Component.text(
-                "Usage: /enthusiatags rewards loreretry <player|uuid> <reward> <action-id>"));
-            return true;
-        }
-        String actionId = args[3];
-        runtime.requestRetry(target.getUniqueId(), rewardId, actionId)
-            .whenComplete((record, failure) -> plugin.getServer().getScheduler().runTask(plugin, () -> {
+    private void handleStatus(
+        CommandSender sender,
+        OfflinePlayer target,
+        String playerName,
+        String rewardId) {
+        runtime.inspect(target.getUniqueId(), rewardId)
+            .whenComplete((records, failure) -> scheduleMain(() -> {
                 if (failure != null) {
                     sendError(sender, failure);
                     return;
                 }
-                if (record == null) {
-                    send(sender, messages.get("rewards-loreitems-retry-missing"));
+                send(sender, messages.get("rewards-loreitems-status-header")
+                    .replace("{player}", playerName)
+                    .replace("{reward}", rewardId));
+                if (records == null || records.isEmpty()) {
+                    send(sender, messages.get("rewards-loreitems-status-empty"));
                     return;
                 }
-                send(sender, messages.get("rewards-loreitems-retry-queued")
-                    .replace("{player}", playerName)
-                    .replace("{reward}", rewardId)
-                    .replace("{action}", actionId)
-                    .replace("{state}", record.state().name()));
+                for (LoreItemHandoffRecord record : records) {
+                    send(sender, formatStatus(record));
+                }
             }));
-        return true;
+    }
+
+    private void handleRetry(
+        CommandSender sender,
+        String[] args,
+        OfflinePlayer target,
+        String playerName,
+        String rewardId) {
+        if (args.length < RETRY_ARGUMENT_COUNT) {
+            sendRetryUsage(sender);
+            return;
+        }
+        String actionId = args[3];
+        runtime.requestRetry(target.getUniqueId(), rewardId, actionId)
+            .whenComplete((record, failure) -> scheduleMain(() -> renderRetryResult(
+                sender, record, failure, playerName, rewardId, actionId)));
+    }
+
+    private void renderRetryResult(
+        CommandSender sender,
+        LoreItemHandoffRecord record,
+        Throwable failure,
+        String playerName,
+        String rewardId,
+        String actionId) {
+        if (failure != null) {
+            sendError(sender, failure);
+            return;
+        }
+        if (record == null) {
+            send(sender, messages.get("rewards-loreitems-retry-missing"));
+            return;
+        }
+        send(sender, messages.get("rewards-loreitems-retry-queued")
+            .replace("{player}", playerName)
+            .replace("{reward}", rewardId)
+            .replace("{action}", actionId)
+            .replace("{state}", record.state().name()));
     }
 
     public List<String> tabComplete(CommandSender sender, String[] args) {
         if (!sender.hasPermission(PERMISSION)) {
             return List.of();
         }
-        if (args.length == 1) {
-            return List.of("lorestatus", "loreretry");
+        if (args.length == SUBCOMMAND_ARGUMENT_COUNT) {
+            return List.of(STATUS_COMMAND, RETRY_COMMAND);
         }
         return List.of();
     }
@@ -123,10 +148,27 @@ public final class LoreItemRewardAdmin {
             .replace("{error}", blank(record.lastError()));
     }
 
+    private void sendUsage(CommandSender sender) {
+        sender.sendMessage(Component.text(
+            "Usage: /enthusiatags rewards lorestatus <player|uuid> <reward> OR "
+                + "/enthusiatags rewards loreretry <player|uuid> <reward> <action-id>"));
+    }
+
+    private void sendRetryUsage(CommandSender sender) {
+        sender.sendMessage(Component.text(
+            "Usage: /enthusiatags rewards loreretry <player|uuid> <reward> <action-id>"));
+    }
+
+    private void scheduleMain(Runnable action) {
+        plugin.getServer().getScheduler().runTask(plugin, action);
+    }
+
     private void sendError(CommandSender sender, Throwable failure) {
         Throwable current = failure;
-        while (current.getCause() != null && current != current.getCause()) {
-            current = current.getCause();
+        Throwable cause = current.getCause();
+        while (cause != null && !Objects.equals(current, cause)) {
+            current = cause;
+            cause = current.getCause();
         }
         String detail = current.getMessage();
         if (detail == null || detail.isBlank()) {
