@@ -13,7 +13,7 @@
         <maven.compiler.target>21</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <loreitems.release.version>1.0.0</loreitems.release.version>
-        <loreitems.release.url>https://api.github.com/repos/wsg138/EnthusiaLoreItems/releases/assets/512257459</loreitems.release.url>
+        <loreitems.release.url>https://github.com/wsg138/EnthusiaLoreItems/releases/download/v1.0.0/EnthusiaLoreItems.jar</loreitems.release.url>
         <loreitems.release.sha256>7c862b0ae545d710a33267ad6e19a4ae26d97323e97f40707c1475c9f9ba7063</loreitems.release.sha256>
         <loreitems.release.jar>${project.basedir}/.wp06-deps/EnthusiaLoreItems.jar</loreitems.release.jar>
     </properties>
