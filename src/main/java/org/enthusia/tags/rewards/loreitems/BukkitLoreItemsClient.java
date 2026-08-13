@@ -10,9 +10,12 @@ import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
 public final class BukkitLoreItemsClient implements LoreItemsClient {
+    static final long SERVICE_TIMEOUT_SECONDS = 10L;
+
     private final Supplier<LoreItemsServiceV1> serviceSupplier;
 
     public BukkitLoreItemsClient(JavaPlugin plugin) {
@@ -60,11 +63,24 @@ public final class BukkitLoreItemsClient implements LoreItemsClient {
             return retry(externalOperationId, "NULL_STAGE", "LoreItems returned a null completion stage");
         }
 
-        return stage.handle((result, failure) -> {
+        CompletableFuture<LoreDeliveryResult> bounded = new CompletableFuture<>();
+        try {
+            stage.whenComplete((result, failure) -> {
+                if (failure != null) {
+                    bounded.completeExceptionally(failure);
+                } else {
+                    bounded.complete(result);
+                }
+            });
+        } catch (RuntimeException ex) {
+            return retry(externalOperationId, "STAGE_REGISTRATION_FAILURE", safeMessage(ex));
+        }
+
+        return bounded.orTimeout(SERVICE_TIMEOUT_SECONDS, TimeUnit.SECONDS).handle((result, failure) -> {
             if (failure != null) {
                 return new LoreItemsGatewayResult(
                     LoreItemsGatewayResult.Disposition.RETRY,
-                    "ASYNC_FAILURE",
+                    failure instanceof java.util.concurrent.TimeoutException ? "TIMEOUT" : "ASYNC_FAILURE",
                     externalOperationId,
                     safeMessage(failure));
             }
@@ -111,7 +127,11 @@ public final class BukkitLoreItemsClient implements LoreItemsClient {
     }
 
     private static String safeMessage(Throwable throwable) {
-        String message = throwable.getMessage();
-        return message == null || message.isBlank() ? throwable.getClass().getSimpleName() : message;
+        Throwable current = throwable;
+        while (current.getCause() != null && current != current.getCause()) {
+            current = current.getCause();
+        }
+        String message = current.getMessage();
+        return message == null || message.isBlank() ? current.getClass().getSimpleName() : message;
     }
 }
