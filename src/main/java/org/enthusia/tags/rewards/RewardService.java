@@ -645,31 +645,39 @@ public final class RewardService {
                 .handoff(playerId, rewardId, action.getActionId(), action.getValue())
                 .toCompletableFuture()
                 .get(12, TimeUnit.SECONDS);
-            if (record == null) {
-                return new LoreItemDeliveryAttempt(false, false,
-                    "Lore-item runtime completed without a durable handoff record");
-            }
-            String evidence = "operation=" + record.externalOperationId()
-                + " state=" + record.state()
-                + " outcome=" + blankAuditValue(record.lastOutcome())
-                + " attempts=" + record.attempts()
-                + " error=" + blankAuditValue(record.lastError());
-            if (record.state() == LoreItemHandoffState.ACCEPTED) {
-                return new LoreItemDeliveryAttempt(true, false, evidence);
-            }
-            if (record.state() == LoreItemHandoffState.REVIEW) {
-                return new LoreItemDeliveryAttempt(false, true, evidence);
-            }
-            return new LoreItemDeliveryAttempt(false, false, evidence);
+            return mapLoreItemHandoff(record);
         } catch (InterruptedException ex) {
             Thread.currentThread().interrupt();
             return new LoreItemDeliveryAttempt(false, false,
                 "Interrupted waiting for durable LoreItems handoff; retry uses the same operation identity");
-        } catch (ExecutionException | TimeoutException ex) {
-            Throwable cause = ex instanceof ExecutionException && ex.getCause() != null ? ex.getCause() : ex;
-            return new LoreItemDeliveryAttempt(false, false,
-                "LoreItems handoff did not complete in the claim worker: " + safeThrowableMessage(cause));
+        } catch (ExecutionException ex) {
+            Throwable cause = ex.getCause() == null ? ex : ex.getCause();
+            return retryableLoreItemFailure(cause);
+        } catch (TimeoutException ex) {
+            return retryableLoreItemFailure(ex);
         }
+    }
+
+    private LoreItemDeliveryAttempt mapLoreItemHandoff(LoreItemHandoffRecord record) {
+        if (record == null) {
+            return new LoreItemDeliveryAttempt(false, false,
+                "Lore-item runtime completed without a durable handoff record");
+        }
+        String evidence = "operation=" + record.externalOperationId()
+            + " state=" + record.state()
+            + " outcome=" + blankAuditValue(record.lastOutcome())
+            + " attempts=" + record.attempts()
+            + " error=" + blankAuditValue(record.lastError());
+        return switch (record.state()) {
+            case ACCEPTED -> new LoreItemDeliveryAttempt(true, false, evidence);
+            case REVIEW -> new LoreItemDeliveryAttempt(false, true, evidence);
+            default -> new LoreItemDeliveryAttempt(false, false, evidence);
+        };
+    }
+
+    private LoreItemDeliveryAttempt retryableLoreItemFailure(Throwable cause) {
+        return new LoreItemDeliveryAttempt(false, false,
+            "LoreItems handoff did not complete in the claim worker: " + safeThrowableMessage(cause));
     }
 
     private static String blankAuditValue(String value) {
@@ -678,7 +686,7 @@ public final class RewardService {
 
     private static String safeThrowableMessage(Throwable throwable) {
         Throwable current = throwable;
-        while (current.getCause() != null && current != current.getCause()) {
+        while (current.getCause() != null && !java.util.Objects.equals(current, current.getCause())) {
             current = current.getCause();
         }
         String message = current.getMessage();
@@ -2693,7 +2701,7 @@ public final class RewardService {
         EntityType entityType = parseEnum(EntityType.class, entry.getString("entity", ""), path + ".entity");
         CriterionSource resolved = resolveCriterionSource(type, sourceType, statistic, material, counterKey);
         boolean valid = validateCriterionSource(resolved.sourceType(), resolved.statistic(), resolved.material(), entityType,
-            resolved.key(), maxY, path);
+            resolved.key(), path);
         String label = entry.getString("label", defaultLabel(type, resolved.material(), resolved.key()));
         return new RewardCriterion(type, resolved.sourceType(), amount, resolved.material(), resolved.statistic(), entityType,
             resolved.key(), maxY, label, valid);
@@ -2860,7 +2868,6 @@ public final class RewardService {
                                             Material material,
                                             EntityType entityType,
                                             String key,
-                                            int maxY,
                                             String path) {
         boolean valid = validateStatisticSource(sourceType, statistic, material, entityType, path)
             && validateCounterSource(sourceType, key, path);
