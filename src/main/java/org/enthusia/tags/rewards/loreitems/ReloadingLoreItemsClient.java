@@ -7,6 +7,7 @@ import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
+import java.util.function.Supplier;
 
 /**
  * Defers loading the typed V1 adapter until the LoreItems plugin is actually enabled.
@@ -14,12 +15,20 @@ import java.util.concurrent.CompletionStage;
  * service contract once the provider is present.
  */
 public final class ReloadingLoreItemsClient implements LoreItemsClient {
-    private final JavaPlugin plugin;
+    private final Supplier<ProviderSnapshot> providerSupplier;
+    private final Supplier<LoreItemsClient> clientFactory;
     private volatile LoreItemsClient delegate;
-    private volatile Plugin provider;
+    private volatile Object provider;
 
     public ReloadingLoreItemsClient(JavaPlugin plugin) {
-        this.plugin = Objects.requireNonNull(plugin, "plugin");
+        this(providerSupplier(plugin), clientFactory(plugin));
+    }
+
+    ReloadingLoreItemsClient(
+        Supplier<ProviderSnapshot> providerSupplier,
+        Supplier<LoreItemsClient> clientFactory) {
+        this.providerSupplier = Objects.requireNonNull(providerSupplier, "providerSupplier");
+        this.clientFactory = Objects.requireNonNull(clientFactory, "clientFactory");
     }
 
     @Override
@@ -27,19 +36,19 @@ public final class ReloadingLoreItemsClient implements LoreItemsClient {
         String definitionKey,
         UUID playerId,
         String externalOperationId) {
-        Plugin loreItems = plugin.getServer().getPluginManager().getPlugin("EnthusiaLoreItems");
-        if (loreItems == null || !loreItems.isEnabled()) {
+        ProviderSnapshot snapshot = providerSupplier.get();
+        if (snapshot == null || snapshot.provider() == null || !snapshot.enabled()) {
             delegate = null;
             provider = null;
             return unavailable(externalOperationId, "EnthusiaLoreItems is not enabled");
         }
 
         LoreItemsClient current = delegate;
-        if (current == null || provider != loreItems) {
+        if (current == null || provider != snapshot.provider()) {
             try {
-                current = new BukkitLoreItemsClient(plugin);
+                current = clientFactory.get();
                 delegate = current;
-                provider = loreItems;
+                provider = snapshot.provider();
             } catch (LinkageError error) {
                 delegate = null;
                 provider = null;
@@ -61,6 +70,28 @@ public final class ReloadingLoreItemsClient implements LoreItemsClient {
             return unavailable(externalOperationId,
                 "LoreItems V1 API linkage changed during reload: " + safeMessage(error));
         }
+    }
+
+    record ProviderSnapshot(Object provider, boolean enabled) {
+        static ProviderSnapshot unavailable() {
+            return new ProviderSnapshot(null, false);
+        }
+    }
+
+    private static Supplier<ProviderSnapshot> providerSupplier(JavaPlugin plugin) {
+        JavaPlugin checkedPlugin = Objects.requireNonNull(plugin, "plugin");
+        return () -> {
+            Plugin loreItems = checkedPlugin.getServer().getPluginManager().getPlugin("EnthusiaLoreItems");
+            if (loreItems == null) {
+                return ProviderSnapshot.unavailable();
+            }
+            return new ProviderSnapshot(loreItems, loreItems.isEnabled());
+        };
+    }
+
+    private static Supplier<LoreItemsClient> clientFactory(JavaPlugin plugin) {
+        JavaPlugin checkedPlugin = Objects.requireNonNull(plugin, "plugin");
+        return () -> new BukkitLoreItemsClient(checkedPlugin);
     }
 
     private static CompletionStage<LoreItemsGatewayResult> unavailable(
