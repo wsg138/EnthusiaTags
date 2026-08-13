@@ -9,8 +9,11 @@ import org.bukkit.plugin.java.JavaPlugin;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.function.Supplier;
 
 public final class BukkitLoreItemsClient implements LoreItemsClient {
@@ -113,11 +116,12 @@ public final class BukkitLoreItemsClient implements LoreItemsClient {
         Throwable failure,
         String externalOperationId) {
         if (failure != null) {
+            Throwable cause = unwrapCompletionFailure(failure);
             return new LoreItemsGatewayResult(
                 LoreItemsGatewayResult.Disposition.RETRY,
-                failure instanceof java.util.concurrent.TimeoutException ? "TIMEOUT" : "ASYNC_FAILURE",
+                cause instanceof TimeoutException ? "TIMEOUT" : "ASYNC_FAILURE",
                 externalOperationId,
-                safeMessage(failure));
+                safeMessage(cause));
         }
         if (result == null) {
             return new LoreItemsGatewayResult(
@@ -134,6 +138,15 @@ public final class BukkitLoreItemsClient implements LoreItemsClient {
                 "LoreItems response operation id did not match the submitted id");
         }
         return mapResult(result);
+    }
+
+    private static Throwable unwrapCompletionFailure(Throwable failure) {
+        Throwable current = failure;
+        while ((current instanceof CompletionException || current instanceof ExecutionException)
+            && current.getCause() != null && !Objects.equals(current, current.getCause())) {
+            current = current.getCause();
+        }
+        return current;
     }
 
     private static boolean validRequest(
