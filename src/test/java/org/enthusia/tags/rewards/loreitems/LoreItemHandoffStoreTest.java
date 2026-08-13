@@ -68,4 +68,27 @@ class LoreItemHandoffStoreTest {
             assertEquals(1, due.getFirst().attempts());
         }
     }
+
+    @Test
+    void staffRetryCanRequeueReviewButNeverReopensAcceptedOperation() throws Exception {
+        UUID player = UUID.fromString("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
+        try (LoreItemHandoffStore store = new LoreItemHandoffStore(tempDir.resolve("staff-retry.db"))) {
+            LoreItemHandoffRecord review = store.prepare(player, "reward", "action", "hourglass", 1000L);
+            review = store.recordOutcome(review.externalOperationId(), LoreItemHandoffState.REVIEW,
+                "UNKNOWN_DEFINITION", "missing definition", 0L, 1100L);
+
+            LoreItemHandoffRecord retry = store.requestRetry(player, "reward", "action", 2000L);
+            assertEquals(LoreItemHandoffState.RETRY, retry.state());
+            assertEquals(review.externalOperationId(), retry.externalOperationId());
+            assertEquals(2000L, retry.nextAttemptAtEpochMillis());
+
+            LoreItemHandoffRecord accepted = store.recordOutcome(retry.externalOperationId(), LoreItemHandoffState.ACCEPTED,
+                "ALREADY_ACCEPTED", "accepted", 0L, 2100L);
+            LoreItemHandoffRecord protectedAccepted = store.requestRetry(player, "reward", "action", 3000L);
+
+            assertEquals(LoreItemHandoffState.ACCEPTED, protectedAccepted.state());
+            assertEquals(accepted.externalOperationId(), protectedAccepted.externalOperationId());
+            assertEquals(0L, protectedAccepted.nextAttemptAtEpochMillis());
+        }
+    }
 }
