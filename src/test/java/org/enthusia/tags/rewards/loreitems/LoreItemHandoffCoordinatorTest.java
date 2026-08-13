@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 class LoreItemHandoffCoordinatorTest {
     private static final String ACTION = "action";
+    private static final String REWARD = "reward";
 
     @TempDir
     Path tempDir;
@@ -42,19 +43,19 @@ class LoreItemHandoffCoordinatorTest {
             LoreItemHandoffCoordinator coordinator = new LoreItemHandoffCoordinator(
                 store, client, Runnable::run, clock::get);
 
-            LoreItemHandoffRecord first = coordinator.handoff(player, "reward", ACTION, "hourglass")
+            LoreItemHandoffRecord first = coordinator.handoff(player, REWARD, ACTION, "hourglass")
                 .toCompletableFuture().join();
             assertEquals(LoreItemHandoffState.RETRY, first.state());
             assertEquals(1, first.attempts());
             assertEquals(15_000L, first.nextAttemptAtEpochMillis());
 
-            LoreItemHandoffRecord tooSoon = coordinator.handoff(player, "reward", ACTION, "hourglass")
+            LoreItemHandoffRecord tooSoon = coordinator.handoff(player, REWARD, ACTION, "hourglass")
                 .toCompletableFuture().join();
             assertEquals(first.externalOperationId(), tooSoon.externalOperationId());
             assertEquals(1, calls.get());
 
             clock.set(15_000L);
-            LoreItemHandoffRecord accepted = coordinator.handoff(player, "reward", ACTION, "hourglass")
+            LoreItemHandoffRecord accepted = coordinator.handoff(player, REWARD, ACTION, "hourglass")
                 .toCompletableFuture().join();
             assertEquals(LoreItemHandoffState.ACCEPTED, accepted.state());
             assertEquals(first.externalOperationId(), accepted.externalOperationId());
@@ -71,7 +72,7 @@ class LoreItemHandoffCoordinatorTest {
 
         try (LoreItemHandoffStore beforeCrash = new LoreItemHandoffStore(database)) {
             LoreItemHandoffRecord prepared = beforeCrash.prepare(
-                player, "reward", ACTION, "star", 1000L);
+                player, REWARD, ACTION, "star", 1000L);
             operationId = prepared.externalOperationId();
             // Model the crash window: LoreItems accepted the operation, but Tags died before
             // persisting the returned acceptance. The Tags row intentionally remains PENDING.
@@ -91,7 +92,7 @@ class LoreItemHandoffCoordinatorTest {
             LoreItemHandoffCoordinator coordinator = new LoreItemHandoffCoordinator(
                 afterRestart, replayClient, Runnable::run, () -> 2000L);
             LoreItemHandoffRecord recovered = coordinator.handoff(
-                player, "reward", ACTION, "star").toCompletableFuture().join();
+                player, REWARD, ACTION, "star").toCompletableFuture().join();
 
             assertEquals(operationId, recovered.externalOperationId());
             assertEquals(LoreItemHandoffState.ACCEPTED, recovered.state());
@@ -117,9 +118,9 @@ class LoreItemHandoffCoordinatorTest {
             LoreItemHandoffCoordinator coordinator = new LoreItemHandoffCoordinator(
                 store, client, Runnable::run, () -> 1000L);
 
-            LoreItemHandoffRecord first = coordinator.handoff(player, "reward", ACTION, "missing")
+            LoreItemHandoffRecord first = coordinator.handoff(player, REWARD, ACTION, "missing")
                 .toCompletableFuture().join();
-            LoreItemHandoffRecord replay = coordinator.handoff(player, "reward", ACTION, "missing")
+            LoreItemHandoffRecord replay = coordinator.handoff(player, REWARD, ACTION, "missing")
                 .toCompletableFuture().join();
 
             assertEquals(LoreItemHandoffState.REVIEW, first.state());

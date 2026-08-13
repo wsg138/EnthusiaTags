@@ -93,6 +93,40 @@ public final class LoreItemRewardRuntime implements AutoCloseable {
         }, executor);
     }
 
+    public CompletionStage<List<LoreItemHandoffRecord>> acceptedPendingFinalization(int requestedLimit) {
+        if (!open.get()) {
+            return CompletableFuture.failedFuture(new IllegalStateException("LoreItems reward runtime is closed"));
+        }
+        int limit = Math.max(0, Math.min(requestedLimit, LoreItemHandoffCoordinator.MAX_RETRY_BATCH));
+        if (limit == 0) {
+            return CompletableFuture.completedFuture(List.of());
+        }
+        return CompletableFuture.supplyAsync(() -> listAcceptedPendingFinalization(limit), executor);
+    }
+
+    public CompletionStage<Void> markRewardFinalized(String externalOperationId) {
+        if (!open.get()) {
+            return CompletableFuture.failedFuture(new IllegalStateException("LoreItems reward runtime is closed"));
+        }
+        return CompletableFuture.runAsync(() -> {
+            try {
+                store.markRewardFinalized(externalOperationId, System.currentTimeMillis());
+            } catch (SQLException ex) {
+                throw new LoreItemHandoffCoordinator.LoreItemHandoffException(
+                    "Could not persist LoreItems reward finalization acknowledgement", ex);
+            }
+        }, executor);
+    }
+
+    private List<LoreItemHandoffRecord> listAcceptedPendingFinalization(int limit) {
+        try {
+            return store.listAcceptedPendingFinalization(limit);
+        } catch (SQLException ex) {
+            throw new LoreItemHandoffCoordinator.LoreItemHandoffException(
+                "Could not load accepted LoreItems handoffs awaiting Tags finalization", ex);
+        }
+    }
+
     public CompletionStage<LoreItemHandoffRecord> requestRetry(
         UUID playerId,
         String rewardId,

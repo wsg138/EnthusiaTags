@@ -60,6 +60,7 @@ import java.util.regex.Pattern;
 public final class RewardService {
     private static final String REWARD_UNLOCK_NOTIFIED_PREFIX = "reward-unlocked:";
     private static final int MAX_UNLOCK_CHECKS_PER_RUN = 25;
+    private static final int MAX_LORE_ITEM_FINALIZATIONS_PER_SWEEP = 50;
     private static final Pattern HOURS_PATTERN = Pattern.compile("(?i)(\\d+)\\s*h");
     private static final Pattern MINUTES_PATTERN = Pattern.compile("(?i)(\\d+)\\s*m");
     private static final Pattern SECONDS_PATTERN = Pattern.compile("(?i)(\\d+)\\s*s");
@@ -98,6 +99,7 @@ public final class RewardService {
     private final AtomicReference<ServiceLifecycle> lifecycle =
         new AtomicReference<>(ServiceLifecycle.STOPPED);
     private final AtomicBoolean reloadQueued = new AtomicBoolean(false);
+    private final AtomicBoolean loreItemFinalizationRunning = new AtomicBoolean(false);
 
     private RewardStorage storage;
     private ExecutorService claimExecutor;
@@ -106,6 +108,7 @@ public final class RewardService {
     private BukkitTask globalScanTask;
     private BukkitTask syncDrainTask;
     private BukkitTask unlockCheckTask;
+    private BukkitTask loreItemFinalizationTask;
     private Plugin baltopPlugin;
     private Method baltopMethod;
     private long progressCacheTicks = 100L;
@@ -149,6 +152,7 @@ public final class RewardService {
         stopGlobalScanTask();
         stopSyncDrainTask();
         stopUnlockCheckTask();
+        stopLoreItemFinalizationTask();
         if (claimExecutor != null) {
             claimExecutor.shutdownNow();
             try {
@@ -211,6 +215,7 @@ public final class RewardService {
         progressCacheTicks = Math.max(20L, plugin.getConfig().getLong("performance.reward-progress-cache-ticks", 100L));
         startFlushTask();
         startGlobalScanTask();
+        startLoreItemFinalizationTask();
         for (Player player : Bukkit.getOnlinePlayers()) {
             preloadPlayer(player.getUniqueId());
             queueProgressRefresh(player);
@@ -2217,6 +2222,125 @@ public final class RewardService {
             plugin.getLogger().severe("Queued item delivered but reward finalization needs staff review for "
                 + playerId + "/" + queued.rewardId() + ": " + ex.getMessage());
         }
+    }
+
+    private void startLoreItemFinalizationTask() {
+        stopLoreItemFinalizationTask();
+        if (loreItemRewardRuntime == null || !loreItemRewardRuntime.isOpen()) {
+            return;
+        }
+        loreItemFinalizationTask = Bukkit.getScheduler().runTaskTimerAsynchronously(
+            plugin,
+            this::queueAcceptedLoreItemFinalization,
+            20L,
+            100L);
+    }
+
+    private void stopLoreItemFinalizationTask() {
+        if (loreItemFinalizationTask != null) {
+            loreItemFinalizationTask.cancel();
+            loreItemFinalizationTask = null;
+        }
+        loreItemFinalizationRunning.set(false);
+    }
+
+    private void queueAcceptedLoreItemFinalization() {
+        if (lifecycle.get() != ServiceLifecycle.RUNNING
+            || claimExecutor == null
+            || claimExecutor.isShutdown()
+            || !loreItemFinalizationRunning.compareAndSet(false, true)) {
+            return;
+        }
+        loreItemRewardRuntime.acceptedPendingFinalization(MAX_LORE_ITEM_FINALIZATIONS_PER_SWEEP)
+            .whenComplete((records, failure) -> {
+                if (failure != null) {
+                    loreItemFinalizationRunning.set(false);
+                    plugin.getLogger().warning(
+                        "Failed to load accepted LoreItems handoffs for Tags finalization: "
+                            + safeThrowableMessage(failure));
+                    return;
+                }
+                try {
+                    claimExecutor.execute(() -> finalizeAcceptedLoreItemBatch(records));
+                } catch (RuntimeException ex) {
+                    loreItemFinalizationRunning.set(false);
+                    plugin.getLogger().warning(
+                        "Could not queue accepted LoreItems finalization: " + ex.getMessage());
+                }
+            });
+    }
+
+    private void finalizeAcceptedLoreItemBatch(List<LoreItemHandoffRecord> records) {
+        try {
+            if (records == null) {
+                return;
+            }
+            for (LoreItemHandoffRecord record : records) {
+                finalizeAcceptedLoreItem(record);
+            }
+        } finally {
+            loreItemFinalizationRunning.set(false);
+        }
+    }
+
+    private void finalizeAcceptedLoreItem(LoreItemHandoffRecord record) {
+        String claimKey = record.playerId() + ":" + record.rewardId();
+        if (!inFlightClaims.add(claimKey)) {
+            return;
+        }
+        boolean resumeRemainingActions = false;
+        try {
+            RewardDefinition reward = rewards.get(record.rewardId());
+            RewardAction action = findLoreItemAction(reward, record);
+            if (action == null) {
+                plugin.getLogger().warning(
+                    "Accepted LoreItems handoff needs staff review because its Tags reward/action changed: "
+                        + record.externalOperationId());
+                return;
+            }
+            String fingerprint = actionFingerprint(action);
+            String evidence = "Recovered accepted LoreItems handoff operation=" + record.externalOperationId()
+                + " outcome=" + blankAuditValue(record.lastOutcome())
+                + " attempts=" + record.attempts()
+                + " error=" + blankAuditValue(record.lastError());
+            if (!storage.acceptLoreItemHandoffNow(
+                record.playerId(), record.rewardId(), action, fingerprint, evidence)) {
+                plugin.getLogger().warning(
+                    "Accepted LoreItems handoff could not be reconciled automatically with the Tags action ledger: "
+                        + record.externalOperationId());
+                return;
+            }
+            RewardStatus refreshed = refreshOverallAfterReconciliation(record.playerId(), record.rewardId());
+            loreItemRewardRuntime.markRewardFinalized(record.externalOperationId())
+                .toCompletableFuture()
+                .get(5, TimeUnit.SECONDS);
+            resumeRemainingActions = refreshed == null;
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            plugin.getLogger().warning(
+                "Interrupted while acknowledging accepted LoreItems handoff " + record.externalOperationId());
+        } catch (ExecutionException | TimeoutException | SQLException ex) {
+            plugin.getLogger().warning(
+                "Accepted LoreItems handoff remains pending Tags finalization " + record.externalOperationId()
+                    + ": " + safeThrowableMessage(ex));
+        } finally {
+            inFlightClaims.remove(claimKey);
+        }
+        if (resumeRemainingActions) {
+            resumeClaimAfterItem(record.playerId(), record.rewardId());
+        }
+    }
+
+    private RewardAction findLoreItemAction(RewardDefinition reward, LoreItemHandoffRecord record) {
+        if (reward == null) {
+            return null;
+        }
+        return reward.getActions().stream()
+            .filter(action -> action.getType() == RewardActionType.LORE_ITEM)
+            .filter(action -> action.getActionId().equals(record.actionId()))
+            .filter(action -> action.getValue().equals(record.definitionKey()))
+            .findFirst()
+            .orElse(null);
     }
 
     private void recoverPendingRewards(UUID playerId) {

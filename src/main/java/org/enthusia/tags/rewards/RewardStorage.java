@@ -1137,6 +1137,64 @@ public final class RewardStorage {
         });
     }
 
+    public boolean acceptLoreItemHandoffNow(
+        UUID playerId,
+        String rewardId,
+        RewardAction action,
+        String expectedFingerprint,
+        String evidence) throws SQLException {
+        if (action == null || action.getType() != RewardActionType.LORE_ITEM) {
+            throw new IllegalArgumentException("action must be a LORE_ITEM reward action");
+        }
+        return executeBlockingMeasured("storage.rewards.loreitems-accepted", () -> {
+            connection.setAutoCommit(false);
+            try {
+                ActionLedgerEntry current = selectActionEntry(playerId, rewardId, action.getActionId());
+                if (current == null
+                    || !RewardActionType.LORE_ITEM.name().equals(current.actionType())
+                    || !expectedFingerprint.equals(current.fingerprint())) {
+                    connection.rollback();
+                    return false;
+                }
+                if (current.status() == RewardStatus.CLAIMED) {
+                    connection.rollback();
+                    return true;
+                }
+                if (current.status() != RewardStatus.CLAIM_PENDING
+                    && current.status() != RewardStatus.DELIVERY_FAILED) {
+                    connection.rollback();
+                    return false;
+                }
+                try (PreparedStatement update = connection.prepareStatement("""
+                    UPDATE reward_action_ledger
+                       SET status='CLAIMED', error_message=?, updated_at=?
+                     WHERE player_uuid=? AND reward_id=? AND action_id=?
+                       AND action_type='LORE_ITEM' AND fingerprint=? AND status=?
+                    """)) {
+                    update.setString(1, evidence);
+                    update.setLong(2, System.currentTimeMillis());
+                    update.setString(3, playerId.toString());
+                    update.setString(4, rewardId);
+                    update.setString(5, action.getActionId());
+                    update.setString(6, expectedFingerprint);
+                    update.setString(7, current.status().name());
+                    if (update.executeUpdate() != 1) {
+                        throw new SQLException("Concurrent LoreItems reward recovery change");
+                    }
+                }
+                insertActionHistory(playerId, rewardId, action.getActionId(), current.status(),
+                    RewardStatus.CLAIMED, expectedFingerprint, null, evidence);
+                connection.commit();
+                return true;
+            } catch (SQLException ex) {
+                connection.rollback();
+                throw ex;
+            } finally {
+                connection.setAutoCommit(true);
+            }
+        });
+    }
+
     public RewardStatus reconcileActionNow(UUID playerId, String rewardId, String actionId,
                                            RewardStatus newStatus, String auditReason) throws SQLException {
         return executeBlockingMeasured("storage.rewards.action-reconcile", () -> {

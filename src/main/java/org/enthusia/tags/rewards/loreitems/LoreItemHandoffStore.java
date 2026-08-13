@@ -209,20 +209,30 @@ public final class LoreItemHandoffStore implements AutoCloseable {
     }
 
     public synchronized void markRewardFinalized(
-        UUID playerId,
-        String rewardId,
+        String externalOperationId,
         long nowEpochMillis) throws SQLException {
-        Objects.requireNonNull(playerId, PARAM_PLAYER_ID);
-        String reward = canonicalId(rewardId, PARAM_REWARD_ID);
+        String operationId = requiredText(externalOperationId, "externalOperationId");
         try (PreparedStatement statement = connection.prepareStatement("""
             UPDATE lore_item_handoffs
                SET reward_finalized = 1, updated_at = ?
-             WHERE player_uuid = ? AND reward_id = ? AND state = 'ACCEPTED'
+             WHERE external_operation_id = ? AND state = 'ACCEPTED' AND reward_finalized = 0
             """)) {
             statement.setLong(1, nowEpochMillis);
-            statement.setString(2, playerId.toString());
-            statement.setString(3, reward);
-            statement.executeUpdate();
+            statement.setString(2, operationId);
+            int updated = statement.executeUpdate();
+            if (updated == EXPECTED_SINGLE_ROW) {
+                return;
+            }
+        }
+        LoreItemHandoffRecord existing = loadByOperationId(operationId);
+        if (existing == null) {
+            throw new SQLException("Lore-item handoff operation was not found: " + operationId);
+        }
+        if (existing.state() != LoreItemHandoffState.ACCEPTED) {
+            throw new SQLException("Lore-item handoff is not accepted: " + operationId);
+        }
+        if (!existing.rewardFinalized()) {
+            throw new SQLException("Lore-item handoff finalization marker was not persisted: " + operationId);
         }
     }
 

@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class LoreItemOperationKeyTest {
     private static final UUID PLAYER = UUID.fromString("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
     private static final String ACTION = "action";
+    private static final String REWARD = "reward";
 
     @Test
     void identityIsStableAcrossCaseAndWhitespaceNormalization() {
@@ -31,12 +32,12 @@ class LoreItemOperationKeyTest {
 
     @Test
     void distinctPlayerRewardOrActionProducesDistinctIdentity() {
-        String baseline = LoreItemOperationKey.forRewardAction(PLAYER, "reward", ACTION);
+        String baseline = LoreItemOperationKey.forRewardAction(PLAYER, REWARD, ACTION);
 
         assertNotEquals(baseline, LoreItemOperationKey.forRewardAction(
-            UUID.fromString("11111111-2222-3333-4444-555555555555"), "reward", ACTION));
+            UUID.fromString("11111111-2222-3333-4444-555555555555"), REWARD, ACTION));
         assertNotEquals(baseline, LoreItemOperationKey.forRewardAction(PLAYER, "reward-2", ACTION));
-        assertNotEquals(baseline, LoreItemOperationKey.forRewardAction(PLAYER, "reward", "action-2"));
+        assertNotEquals(baseline, LoreItemOperationKey.forRewardAction(PLAYER, REWARD, "action-2"));
     }
 
     @Test
@@ -54,6 +55,6 @@ class LoreItemOperationKeyTest {
         assertThrows(IllegalArgumentException.class,
             () -> LoreItemOperationKey.forRewardAction(PLAYER, " ", ACTION));
         assertThrows(IllegalArgumentException.class,
-            () -> LoreItemOperationKey.forRewardAction(PLAYER, "reward", " "));
+            () -> LoreItemOperationKey.forRewardAction(PLAYER, REWARD, " "));
     }
 }
