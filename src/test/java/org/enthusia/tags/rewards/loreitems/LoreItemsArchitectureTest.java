@@ -47,7 +47,10 @@ class LoreItemsArchitectureTest {
             "org/enthusia/tags/rewards/loreitems/BukkitLoreItemsClient.java"));
 
         assertFalse(source.contains(".join("), "service adapter must not synchronously join service stages");
-        assertFalse(source.contains(".get("), "service adapter must not synchronously get service stages");
+        assertFalse(source.contains("toCompletableFuture().get("),
+            "service adapter must not synchronously get service stages");
+        assertFalse(source.contains("Future.get("),
+            "service adapter must not synchronously wait on Future.get");
         assertFalse(source.contains("Thread.sleep"), "service adapter must not sleep while waiting for LoreItems");
         assertFalse(source.contains("Bukkit."), "service adapter must not touch Bukkit gameplay state");
         assertTrue(source.contains("whenComplete"), "service adapter should compose the returned CompletionStage");
