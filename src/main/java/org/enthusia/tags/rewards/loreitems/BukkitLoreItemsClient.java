@@ -15,6 +15,7 @@ import java.util.function.Supplier;
 
 public final class BukkitLoreItemsClient implements LoreItemsClient {
     static final long SERVICE_TIMEOUT_MILLIS = 10_000L;
+    private static final long MIN_SERVICE_TIMEOUT_MILLIS = 1L;
 
     private final Supplier<LoreItemsServiceV1> serviceSupplier;
     private final long serviceTimeoutMillis;
@@ -32,7 +33,7 @@ public final class BukkitLoreItemsClient implements LoreItemsClient {
 
     BukkitLoreItemsClient(Supplier<LoreItemsServiceV1> serviceSupplier, long serviceTimeoutMillis) {
         this.serviceSupplier = Objects.requireNonNull(serviceSupplier, "serviceSupplier");
-        if (serviceTimeoutMillis <= 0L) {
+        if (serviceTimeoutMillis < MIN_SERVICE_TIMEOUT_MILLIS) {
             throw new IllegalArgumentException("serviceTimeoutMillis must be positive");
         }
         this.serviceTimeoutMillis = serviceTimeoutMillis;
@@ -43,15 +44,16 @@ public final class BukkitLoreItemsClient implements LoreItemsClient {
         String definitionKey,
         UUID playerId,
         String externalOperationId) {
-        if (definitionKey == null || definitionKey.isBlank()
-            || playerId == null || externalOperationId == null || externalOperationId.isBlank()) {
-            return CompletableFuture.completedFuture(new LoreItemsGatewayResult(
-                LoreItemsGatewayResult.Disposition.REVIEW,
-                LoreDeliveryStatus.VALIDATION_FAILURE.name(),
-                externalOperationId == null ? "" : externalOperationId,
-                "Tags rejected a blank LoreItems definition, player UUID, or external operation id"));
+        if (!validRequest(definitionKey, playerId, externalOperationId)) {
+            return reviewValidationFailure(externalOperationId);
         }
+        return queueValidated(definitionKey, playerId, externalOperationId);
+    }
 
+    private CompletionStage<LoreItemsGatewayResult> queueValidated(
+        String definitionKey,
+        UUID playerId,
+        String externalOperationId) {
         LoreItemsServiceV1 service;
         try {
             service = serviceSupplier.get();
@@ -62,7 +64,14 @@ public final class BukkitLoreItemsClient implements LoreItemsClient {
             return retry(externalOperationId, LoreDeliveryStatus.SERVICE_UNAVAILABLE.name(),
                 "LoreItemsServiceV1 is not registered");
         }
+        return invokeService(service, definitionKey, playerId, externalOperationId);
+    }
 
+    private CompletionStage<LoreItemsGatewayResult> invokeService(
+        LoreItemsServiceV1 service,
+        String definitionKey,
+        UUID playerId,
+        String externalOperationId) {
         CompletionStage<LoreDeliveryResult> stage;
         try {
             stage = service.queueDelivery(definitionKey, playerId, externalOperationId);
@@ -72,44 +81,76 @@ public final class BukkitLoreItemsClient implements LoreItemsClient {
         if (stage == null) {
             return retry(externalOperationId, "NULL_STAGE", "LoreItems returned a null completion stage");
         }
+        return observeStage(stage, externalOperationId);
+    }
 
+    private CompletionStage<LoreItemsGatewayResult> observeStage(
+        CompletionStage<LoreDeliveryResult> stage,
+        String externalOperationId) {
         CompletableFuture<LoreDeliveryResult> bounded = new CompletableFuture<>();
         try {
-            stage.whenComplete((result, failure) -> {
-                if (failure != null) {
-                    bounded.completeExceptionally(failure);
-                } else {
-                    bounded.complete(result);
-                }
-            });
+            stage.whenComplete((result, failure) -> completeObservedStage(bounded, result, failure));
         } catch (RuntimeException ex) {
             return retry(externalOperationId, "STAGE_REGISTRATION_FAILURE", safeMessage(ex));
         }
+        return bounded.orTimeout(serviceTimeoutMillis, TimeUnit.MILLISECONDS)
+            .handle((result, failure) -> mapCompletion(result, failure, externalOperationId));
+    }
 
-        return bounded.orTimeout(serviceTimeoutMillis, TimeUnit.MILLISECONDS).handle((result, failure) -> {
-            if (failure != null) {
-                return new LoreItemsGatewayResult(
-                    LoreItemsGatewayResult.Disposition.RETRY,
-                    failure instanceof java.util.concurrent.TimeoutException ? "TIMEOUT" : "ASYNC_FAILURE",
-                    externalOperationId,
-                    safeMessage(failure));
-            }
-            if (result == null) {
-                return new LoreItemsGatewayResult(
-                    LoreItemsGatewayResult.Disposition.RETRY,
-                    "NULL_RESULT",
-                    externalOperationId,
-                    "LoreItems completed without a result");
-            }
-            if (!externalOperationId.equals(result.externalOperationId())) {
-                return new LoreItemsGatewayResult(
-                    LoreItemsGatewayResult.Disposition.REVIEW,
-                    "OPERATION_ID_MISMATCH",
-                    externalOperationId,
-                    "LoreItems response operation id did not match the submitted id");
-            }
-            return mapResult(result);
-        });
+    private static void completeObservedStage(
+        CompletableFuture<LoreDeliveryResult> bounded,
+        LoreDeliveryResult result,
+        Throwable failure) {
+        if (failure == null) {
+            bounded.complete(result);
+        } else {
+            bounded.completeExceptionally(failure);
+        }
+    }
+
+    private static LoreItemsGatewayResult mapCompletion(
+        LoreDeliveryResult result,
+        Throwable failure,
+        String externalOperationId) {
+        if (failure != null) {
+            return new LoreItemsGatewayResult(
+                LoreItemsGatewayResult.Disposition.RETRY,
+                failure instanceof java.util.concurrent.TimeoutException ? "TIMEOUT" : "ASYNC_FAILURE",
+                externalOperationId,
+                safeMessage(failure));
+        }
+        if (result == null) {
+            return new LoreItemsGatewayResult(
+                LoreItemsGatewayResult.Disposition.RETRY,
+                "NULL_RESULT",
+                externalOperationId,
+                "LoreItems completed without a result");
+        }
+        if (!externalOperationId.equals(result.externalOperationId())) {
+            return new LoreItemsGatewayResult(
+                LoreItemsGatewayResult.Disposition.REVIEW,
+                "OPERATION_ID_MISMATCH",
+                externalOperationId,
+                "LoreItems response operation id did not match the submitted id");
+        }
+        return mapResult(result);
+    }
+
+    private static boolean validRequest(
+        String definitionKey,
+        UUID playerId,
+        String externalOperationId) {
+        return definitionKey != null && !definitionKey.isBlank()
+            && playerId != null
+            && externalOperationId != null && !externalOperationId.isBlank();
+    }
+
+    private static CompletionStage<LoreItemsGatewayResult> reviewValidationFailure(String externalOperationId) {
+        return CompletableFuture.completedFuture(new LoreItemsGatewayResult(
+            LoreItemsGatewayResult.Disposition.REVIEW,
+            LoreDeliveryStatus.VALIDATION_FAILURE.name(),
+            externalOperationId == null ? "" : externalOperationId,
+            "Tags rejected a blank LoreItems definition, player UUID, or external operation id"));
     }
 
     private static LoreItemsGatewayResult mapResult(LoreDeliveryResult result) {
@@ -138,8 +179,10 @@ public final class BukkitLoreItemsClient implements LoreItemsClient {
 
     private static String safeMessage(Throwable throwable) {
         Throwable current = throwable;
-        while (current.getCause() != null && current != current.getCause()) {
-            current = current.getCause();
+        Throwable cause = current.getCause();
+        while (cause != null && !Objects.equals(current, cause)) {
+            current = cause;
+            cause = current.getCause();
         }
         String message = current.getMessage();
         return message == null || message.isBlank() ? current.getClass().getSimpleName() : message;
