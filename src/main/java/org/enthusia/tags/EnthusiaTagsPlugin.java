@@ -18,6 +18,9 @@ import org.enthusia.tags.rewards.loreitems.LoreItemRewardRuntime;
 import org.enthusia.tags.daily.DailyService;
 
 public final class EnthusiaTagsPlugin extends JavaPlugin {
+    private static final int SINGLE_ARGUMENT_COUNT = 1;
+    private static final int NESTED_COMMAND_ARGUMENT_COUNT = 2;
+
     private TagService tagService;
     private Messages messages;
     private RewardService rewardService;
@@ -44,8 +47,6 @@ public final class EnthusiaTagsPlugin extends JavaPlugin {
             loreItemRewardRuntime = LoreItemRewardRuntime.enable(this);
             loreItemRewardAdmin = new LoreItemRewardAdmin(this, messages, loreItemRewardRuntime);
         } catch (java.sql.SQLException ex) {
-            loreItemRewardRuntime = null;
-            loreItemRewardAdmin = null;
             getLogger().severe("Lore-item rewards are disabled because durable handoff storage failed: "
                 + ex.getMessage());
         }
@@ -103,8 +104,6 @@ public final class EnthusiaTagsPlugin extends JavaPlugin {
         }
         if (loreItemRewardRuntime != null) {
             loreItemRewardRuntime.close();
-            loreItemRewardRuntime = null;
-            loreItemRewardAdmin = null;
         }
         if (cosmeticsService != null) {
             cosmeticsService.disable();
@@ -212,25 +211,25 @@ public final class EnthusiaTagsPlugin extends JavaPlugin {
                         .deserialize(messages.get("no-permission")));
                     return true;
                 }
-                if (args.length == 1 && args[0].equalsIgnoreCase("reload")) {
+                if (args.length == SINGLE_ARGUMENT_COUNT && args[0].equalsIgnoreCase("reload")) {
                     reloadAllFiles();
                     sender.sendMessage(net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer.legacyAmpersand()
                         .deserialize(messages.get("config-reloaded")));
                     return true;
                 }
-                if (args.length == 1 && args[0].equalsIgnoreCase("performance")) {
+                if (args.length == SINGLE_ARGUMENT_COUNT && args[0].equalsIgnoreCase("performance")) {
                     performanceMonitor.sendTo(sender);
                     sender.sendMessage("Reward sync: " + rewardService.syncStatus());
                     return true;
                 }
-                if (args.length >= 2 && args[0].equalsIgnoreCase("rewards")) {
+                if (args.length >= NESTED_COMMAND_ARGUMENT_COUNT && args[0].equalsIgnoreCase("rewards")) {
                     String[] rewardArgs = java.util.Arrays.copyOfRange(args, 1, args.length);
                     if (loreItemRewardAdmin != null && loreItemRewardAdmin.handles(rewardArgs)) {
                         return loreItemRewardAdmin.handle(sender, rewardArgs);
                     }
                     return rewardService.handleAdminCommand(sender, rewardArgs);
                 }
-                if (args.length >= 2 && args[0].equalsIgnoreCase("daily")) {
+                if (args.length >= NESTED_COMMAND_ARGUMENT_COUNT && args[0].equalsIgnoreCase("daily")) {
                     if (dailyService == null) {
                         sender.sendMessage(net.kyori.adventure.text.Component.text(
                             "Daily rewards are unavailable because storage did not initialize."));
@@ -245,10 +244,11 @@ public final class EnthusiaTagsPlugin extends JavaPlugin {
                 if (!sender.hasPermission("enthusia.tags.admin")) {
                     return java.util.List.of();
                 }
-                if (args.length == 1) {
+                if (args.length == SINGLE_ARGUMENT_COUNT) {
                     return java.util.List.of("reload", "performance", "rewards", "daily");
                 }
-                if (args.length >= 2 && args[0].equalsIgnoreCase("rewards") && loreItemRewardAdmin != null) {
+                if (args.length >= NESTED_COMMAND_ARGUMENT_COUNT
+                    && args[0].equalsIgnoreCase("rewards") && loreItemRewardAdmin != null) {
                     return loreItemRewardAdmin.tabComplete(
                         sender,
                         java.util.Arrays.copyOfRange(args, 1, args.length));
