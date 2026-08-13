@@ -9,8 +9,10 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class LoreItemHandoffStoreTest {
     private static final UUID PLAYER = UUID.fromString("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
@@ -88,8 +90,8 @@ class LoreItemHandoffStoreTest {
             List<LoreItemHandoffRecord> remaining = store.listAcceptedPendingFinalization(10);
             assertEquals(1, remaining.size());
             assertEquals(second.externalOperationId(), remaining.getFirst().externalOperationId());
-            assertEquals(true, store.loadByOperationId(first.externalOperationId()).rewardFinalized());
-            assertEquals(false, store.loadByOperationId(second.externalOperationId()).rewardFinalized());
+            assertTrue(store.loadByOperationId(first.externalOperationId()).rewardFinalized());
+            assertFalse(store.loadByOperationId(second.externalOperationId()).rewardFinalized());
         }
     }
 
