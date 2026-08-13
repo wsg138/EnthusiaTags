@@ -2244,6 +2244,9 @@ public final class RewardService {
         loreItemFinalizationRunning.set(false);
     }
 
+    // Paper plugins are not J2EE webapps. This dispatch uses the existing dedicated claim
+    // executor so accepted-handoff recovery never blocks or mutates gameplay state on the main thread.
+    @SuppressWarnings("PMD.DoNotUseThreads")
     private void queueAcceptedLoreItemFinalization() {
         if (lifecycle.get() != ServiceLifecycle.RUNNING
             || claimExecutor == null
