@@ -34,6 +34,8 @@ api_get() {
   local path="$1"
   curl --fail-with-body --silent --show-error \
     --proto '=https' --tlsv1.2 \
+    --connect-timeout 10 --max-time 30 \
+    --retry 5 --retry-delay 2 --retry-max-time 90 --retry-all-errors \
     -H 'Accept: application/vnd.github+json' \
     -H "Authorization: Bearer ${GITHUB_TOKEN}" \
     -H "X-GitHub-Api-Version: ${API_VERSION}" \
