@@ -1,15 +1,24 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+on_exit() {
+  local status=$?
+  if [[ ${status} -ne 0 ]]; then
+    printf '::error title=LoreItems release bootstrap failed::line=%s command=%s\n' "${BASH_LINENO[0]:-unknown}" "${BASH_COMMAND:-unknown}"
+  fi
+  exit "${status}"
+}
+trap on_exit EXIT
+
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${ROOT_DIR}"
 
 RELEASE_VERSION="$(sed -n 's:.*<loreitems.release.version>\(.*\)</loreitems.release.version>.*:\1:p' pom.xml)"
-RELEASE_ASSET_API_URL="$(sed -n 's:.*<loreitems.release.url>\(.*\)</loreitems.release.url>.*:\1:p' pom.xml)"
+RELEASE_URL="$(sed -n 's:.*<loreitems.release.url>\(.*\)</loreitems.release.url>.*:\1:p' pom.xml)"
 RELEASE_SHA="$(sed -n 's:.*<loreitems.release.sha256>\(.*\)</loreitems.release.sha256>.*:\1:p' pom.xml)"
 DESTINATION="${ROOT_DIR}/.wp06-deps/EnthusiaLoreItems.jar"
 
-if [[ -z "${RELEASE_VERSION}" || -z "${RELEASE_ASSET_API_URL}" || -z "${RELEASE_SHA}" ]]; then
+if [[ -z "${RELEASE_VERSION}" || -z "${RELEASE_URL}" || -z "${RELEASE_SHA}" ]]; then
   echo "LoreItems release pin is incomplete in pom.xml" >&2
   exit 1
 fi
@@ -17,13 +26,10 @@ fi
 mkdir -p "$(dirname "${DESTINATION}")"
 rm -f "${DESTINATION}"
 
-echo "Downloading pinned EnthusiaLoreItems v${RELEASE_VERSION} release asset..."
-curl --fail-with-body --silent --show-error --location --retry 3 --retry-delay 2 \
-  --proto '=https' --tlsv1.2 \
-  --header 'Accept: application/octet-stream' \
-  --header 'X-GitHub-Api-Version: 2022-11-28' \
+echo "Downloading pinned EnthusiaLoreItems v${RELEASE_VERSION} production release..."
+curl -fL --retry 3 --retry-delay 2 --connect-timeout 20 --max-time 120 \
   --user-agent 'enthusiatags-wp06-ci' \
-  "${RELEASE_ASSET_API_URL}" -o "${DESTINATION}"
+  "${RELEASE_URL}" -o "${DESTINATION}"
 
 ACTUAL_BYTES="$(wc -c < "${DESTINATION}" | tr -d ' ')"
 echo "Downloaded ${ACTUAL_BYTES} bytes."
@@ -35,6 +41,7 @@ if [[ "${ACTUAL_BYTES}" -lt 1000000 ]]; then
   exit 1
 fi
 
+echo "Verifying pinned production SHA-256..."
 printf '%s  %s\n' "${RELEASE_SHA}" "${DESTINATION}" | sha256sum --check --strict
 
 BOOTSTRAP_DIR="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/enthusiatags-loreitems-bootstrap"
@@ -51,6 +58,7 @@ cat > "${BOOTSTRAP_DIR}/pom.xml" <<'POM'
 </project>
 POM
 
+echo "Installing checksum-verified release into the runner-local Maven repository..."
 mvn --batch-mode --no-transfer-progress -f "${BOOTSTRAP_DIR}/pom.xml" \
   org.apache.maven.plugins:maven-install-plugin:3.1.3:install-file \
   -Dfile="${DESTINATION}" \
