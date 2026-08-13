@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 class ReloadingLoreItemsClientTest {
     private static final UUID PLAYER = UUID.fromString("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
+    private static final String HOURGLASS = "hourglass";
     private static final String OPERATION = "enthusiatags:loreitem:v1:test";
 
     @Test
@@ -32,16 +33,16 @@ class ReloadingLoreItemsClientTest {
             });
 
         assertEquals(LoreItemsGatewayResult.Disposition.RETRY,
-            client.queue("hourglass", PLAYER, OPERATION).toCompletableFuture().join().disposition());
+            client.queue(HOURGLASS, PLAYER, OPERATION).toCompletableFuture().join().disposition());
         assertEquals(0, adapterCreations.get());
 
         Object firstProvider = new Object();
         provider.set(new ReloadingLoreItemsClient.ProviderSnapshot(firstProvider, true));
         assertEquals(LoreItemsGatewayResult.Disposition.ACCEPTED,
-            client.queue("hourglass", PLAYER, OPERATION).toCompletableFuture().join().disposition());
+            client.queue(HOURGLASS, PLAYER, OPERATION).toCompletableFuture().join().disposition());
         assertEquals(1, adapterCreations.get());
 
-        client.queue("hourglass", PLAYER, OPERATION).toCompletableFuture().join();
+        client.queue(HOURGLASS, PLAYER, OPERATION).toCompletableFuture().join();
         assertEquals(1, adapterCreations.get(), "same enabled provider should reuse the typed adapter");
     }
 
@@ -64,16 +65,16 @@ class ReloadingLoreItemsClientTest {
                         "accepted"));
             });
 
-        client.queue("hourglass", PLAYER, OPERATION).toCompletableFuture().join();
+        client.queue(HOURGLASS, PLAYER, OPERATION).toCompletableFuture().join();
         assertEquals(1, adapterCreations.get());
 
         provider.set(new ReloadingLoreItemsClient.ProviderSnapshot(firstProvider, false));
         assertEquals(LoreItemsGatewayResult.Disposition.RETRY,
-            client.queue("hourglass", PLAYER, OPERATION).toCompletableFuture().join().disposition());
+            client.queue(HOURGLASS, PLAYER, OPERATION).toCompletableFuture().join().disposition());
 
         provider.set(new ReloadingLoreItemsClient.ProviderSnapshot(replacementProvider, true));
         assertEquals(LoreItemsGatewayResult.Disposition.ACCEPTED,
-            client.queue("hourglass", PLAYER, OPERATION).toCompletableFuture().join().disposition());
+            client.queue(HOURGLASS, PLAYER, OPERATION).toCompletableFuture().join().disposition());
         assertEquals(2, adapterCreations.get(), "replacement provider must receive a fresh adapter lookup");
     }
 }
