@@ -3,40 +3,41 @@
 
 from __future__ import annotations
 
+import http.client
 import json
 import os
+import re
 import sys
 import time
-import urllib.error
-import urllib.request
 
-API_ORIGIN = "https://api.github.com"
+API_HOST = "api.github.com"
 API_VERSION = "2022-11-28"
 CHECK_NAME = "Codacy Static Code Analysis"
 POLL_SECONDS = 10
 TIMEOUT_SECONDS = 300
 REQUEST_TIMEOUT_SECONDS = 30
+REPOSITORY_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 
 
 def request_json(path: str) -> object:
     if not path.startswith("/repos/"):
         raise ValueError("GitHub API path must target a repository")
-    request = urllib.request.Request(
-        API_ORIGIN + path,
-        headers={
-            "Accept": "application/vnd.github+json",
-            "Authorization": f"Bearer {os.environ['GITHUB_TOKEN']}",
-            "X-GitHub-Api-Version": API_VERSION,
-            "User-Agent": "enthusia-tags-ci",
-        },
-        method="GET",
-    )
+    connection = http.client.HTTPSConnection(API_HOST, timeout=REQUEST_TIMEOUT_SECONDS)
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "Authorization": f"Bearer {os.environ['GITHUB_TOKEN']}",
+        "X-GitHub-Api-Version": API_VERSION,
+        "User-Agent": "enthusia-tags-ci",
+    }
     try:
-        with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
-            return json.load(response)
-    except urllib.error.HTTPError as exc:
-        body = exc.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"GitHub API request failed with {exc.code}: {body}") from exc
+        connection.request("GET", path, headers=headers)
+        response = connection.getresponse()
+        body = response.read().decode("utf-8", errors="replace")
+        if response.status >= http.client.BAD_REQUEST:
+            raise RuntimeError(f"GitHub API request failed with {response.status}: {body}")
+        return json.loads(body)
+    finally:
+        connection.close()
 
 
 def require_current_head(repository: str, pull_request: int, expected_head: str) -> None:
@@ -108,21 +109,22 @@ def print_annotations(entries: list[dict[str, object]]) -> None:
         print(f"{path}:{line}: [{level}] {title}: {message}", file=sys.stderr)
 
 
-def main() -> int:
-    repository = os.environ.get("GITHUB_REPOSITORY")
-    head_sha = os.environ.get("PULL_REQUEST_HEAD_SHA")
-    pull_request_text = os.environ.get("PULL_REQUEST_NUMBER")
+def load_context() -> tuple[str, int, str]:
+    repository = os.environ.get("GITHUB_REPOSITORY", "")
+    head_sha = os.environ.get("PULL_REQUEST_HEAD_SHA", "")
+    pull_request_text = os.environ.get("PULL_REQUEST_NUMBER", "")
     if not repository or not head_sha or not pull_request_text:
-        print("Missing repository, pull-request number, or pull-request head SHA.", file=sys.stderr)
-        return 2
-    try:
-        pull_request = int(pull_request_text)
-        require_current_head(repository, pull_request, head_sha)
-        check = wait_for_check(repository, head_sha)
-        require_current_head(repository, pull_request, head_sha)
-    except (RuntimeError, ValueError) as exc:
-        print(str(exc), file=sys.stderr)
-        return 1
+        raise ValueError("Missing repository, pull-request number, or pull-request head SHA.")
+    if not REPOSITORY_PATTERN.fullmatch(repository):
+        raise ValueError("GITHUB_REPOSITORY is not a valid owner/repository name")
+    return repository, int(pull_request_text), head_sha
+
+
+def evaluate_check(
+    repository: str,
+    head_sha: str,
+    check: dict[str, object] | None,
+) -> int:
     if check is None:
         print(f"Timed out waiting for {CHECK_NAME} on {head_sha}.", file=sys.stderr)
         return 1
@@ -142,6 +144,18 @@ def main() -> int:
     print(f"{CHECK_NAME} concluded {conclusion!r} on exact head {head_sha}.", file=sys.stderr)
     print_annotations(annotations)
     return 1
+
+
+def main() -> int:
+    try:
+        repository, pull_request, head_sha = load_context()
+        require_current_head(repository, pull_request, head_sha)
+        check = wait_for_check(repository, head_sha)
+        require_current_head(repository, pull_request, head_sha)
+    except (RuntimeError, ValueError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    return evaluate_check(repository, head_sha, check)
 
 
 if __name__ == "__main__":
