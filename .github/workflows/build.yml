@@ -50,6 +50,9 @@ jobs:
           mkdir -p .wp06-deps
           curl --fail --location --retry 3 --retry-delay 2 \
             --proto '=https' --tlsv1.2 \
+            --header 'Accept: application/octet-stream' \
+            --header 'X-GitHub-Api-Version: 2022-11-28' \
+            --user-agent 'enthusiatags-wp06-ci' \
             "${RELEASE_URL}" -o .wp06-deps/EnthusiaLoreItems.jar
           printf '%s  %s\n' "${RELEASE_SHA}" '.wp06-deps/EnthusiaLoreItems.jar' | sha256sum --check --strict
           mvn --batch-mode --no-transfer-progress \
