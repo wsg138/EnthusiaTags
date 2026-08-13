@@ -55,14 +55,18 @@ jobs:
             --user-agent 'enthusiatags-wp06-ci' \
             "${RELEASE_URL}" -o .wp06-deps/EnthusiaLoreItems.jar
           printf '%s  %s\n' "${RELEASE_SHA}" '.wp06-deps/EnthusiaLoreItems.jar' | sha256sum --check --strict
-          mvn --batch-mode --no-transfer-progress \
-            org.apache.maven.plugins:maven-install-plugin:3.1.3:install-file \
-            -Dfile=.wp06-deps/EnthusiaLoreItems.jar \
-            -DgroupId=net.enthusia \
-            -DartifactId=EnthusiaLoreItems-released \
-            -Dversion="${RELEASE_VERSION}" \
-            -Dpackaging=jar \
-            -DgeneratePom=true
+          JAR_PATH="${GITHUB_WORKSPACE}/.wp06-deps/EnthusiaLoreItems.jar"
+          (
+            cd "${RUNNER_TEMP}"
+            mvn --batch-mode --no-transfer-progress \
+              org.apache.maven.plugins:maven-install-plugin:3.1.3:install-file \
+              -Dfile="${JAR_PATH}" \
+              -DgroupId=net.enthusia \
+              -DartifactId=EnthusiaLoreItems-released \
+              -Dversion="${RELEASE_VERSION}" \
+              -Dpackaging=jar \
+              -DgeneratePom=true
+          )
 
       - name: Test and package
         shell: bash
