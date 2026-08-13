@@ -47,35 +47,44 @@ public final class LoreItemHandoffCoordinator {
         String actionId,
         String definitionKey) {
         String operationId = LoreItemOperationKey.forRewardAction(playerId, rewardId, actionId);
-        while (true) {
-            CompletableFuture<LoreItemHandoffRecord> existing = inFlight.get(operationId);
-            if (existing != null) {
-                return existing;
-            }
-
-            CompletableFuture<LoreItemHandoffRecord> reserved = new CompletableFuture<>();
-            if (inFlight.putIfAbsent(operationId, reserved) != null) {
-                continue;
-            }
-
-            try {
-                CompletableFuture
-                    .supplyAsync(() -> prepare(playerId, rewardId, actionId, definitionKey), ioExecutor)
-                    .thenCompose(this::submitIfDue)
-                    .whenComplete((result, failure) -> {
-                        if (failure != null) {
-                            reserved.completeExceptionally(failure);
-                        } else {
-                            reserved.complete(result);
-                        }
-                        inFlight.remove(operationId, reserved);
-                    });
-            } catch (RuntimeException ex) {
-                reserved.completeExceptionally(ex);
-                inFlight.remove(operationId, reserved);
-            }
-            return reserved;
+        CompletableFuture<LoreItemHandoffRecord> reserved = new CompletableFuture<>();
+        CompletableFuture<LoreItemHandoffRecord> existing = inFlight.putIfAbsent(operationId, reserved);
+        if (existing != null) {
+            return existing;
         }
+        startHandoff(operationId, reserved, playerId, rewardId, actionId, definitionKey);
+        return reserved;
+    }
+
+    private void startHandoff(
+        String operationId,
+        CompletableFuture<LoreItemHandoffRecord> reserved,
+        UUID playerId,
+        String rewardId,
+        String actionId,
+        String definitionKey) {
+        try {
+            CompletableFuture
+                .supplyAsync(() -> prepare(playerId, rewardId, actionId, definitionKey), ioExecutor)
+                .thenCompose(this::submitIfDue)
+                .whenComplete((result, failure) -> completeHandoff(operationId, reserved, result, failure));
+        } catch (RuntimeException ex) {
+            reserved.completeExceptionally(ex);
+            inFlight.remove(operationId, reserved);
+        }
+    }
+
+    private void completeHandoff(
+        String operationId,
+        CompletableFuture<LoreItemHandoffRecord> reserved,
+        LoreItemHandoffRecord result,
+        Throwable failure) {
+        if (failure == null) {
+            reserved.complete(result);
+        } else {
+            reserved.completeExceptionally(failure);
+        }
+        inFlight.remove(operationId, reserved);
     }
 
     public CompletionStage<List<LoreItemHandoffRecord>> retryDue(int requestedLimit) {
@@ -84,18 +93,20 @@ public final class LoreItemHandoffCoordinator {
             return CompletableFuture.completedFuture(List.of());
         }
         return CompletableFuture.supplyAsync(() -> listDue(limit), ioExecutor)
-            .thenCompose(records -> {
-                List<CompletableFuture<LoreItemHandoffRecord>> retries = new ArrayList<>();
-                for (LoreItemHandoffRecord record : records) {
-                    retries.add(handoff(
-                        record.playerId(),
-                        record.rewardId(),
-                        record.actionId(),
-                        record.definitionKey()).toCompletableFuture());
-                }
-                return CompletableFuture.allOf(retries.toArray(CompletableFuture[]::new))
-                    .thenApply(ignored -> retries.stream().map(CompletableFuture::join).toList());
-            });
+            .thenCompose(this::submitRetries);
+    }
+
+    private CompletionStage<List<LoreItemHandoffRecord>> submitRetries(List<LoreItemHandoffRecord> records) {
+        List<CompletableFuture<LoreItemHandoffRecord>> retries = new ArrayList<>(records.size());
+        for (LoreItemHandoffRecord record : records) {
+            retries.add(handoff(
+                record.playerId(),
+                record.rewardId(),
+                record.actionId(),
+                record.definitionKey()).toCompletableFuture());
+        }
+        return CompletableFuture.allOf(retries.toArray(CompletableFuture[]::new))
+            .thenApply(ignored -> retries.stream().map(CompletableFuture::join).toList());
     }
 
     private CompletionStage<LoreItemHandoffRecord> submitIfDue(LoreItemHandoffRecord record) {
@@ -202,6 +213,8 @@ public final class LoreItemHandoffCoordinator {
     }
 
     public static final class LoreItemHandoffException extends RuntimeException {
+        private static final long serialVersionUID = 1L;
+
         public LoreItemHandoffException(String message, Throwable cause) {
             super(message, cause);
         }
