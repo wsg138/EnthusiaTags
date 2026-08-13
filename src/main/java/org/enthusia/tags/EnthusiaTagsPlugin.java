@@ -13,6 +13,8 @@ import org.enthusia.tags.rewards.RewardListener;
 import org.enthusia.tags.rewards.RewardService;
 import org.enthusia.tags.rewards.RewardTracker;
 import org.enthusia.tags.rewards.RewardsCommand;
+import org.enthusia.tags.rewards.loreitems.LoreItemRewardAdmin;
+import org.enthusia.tags.rewards.loreitems.LoreItemRewardRuntime;
 import org.enthusia.tags.daily.DailyService;
 
 public final class EnthusiaTagsPlugin extends JavaPlugin {
@@ -25,6 +27,8 @@ public final class EnthusiaTagsPlugin extends JavaPlugin {
     private PerformanceMonitor performanceMonitor;
     private ConfigMigrator configMigrator;
     private DailyService dailyService;
+    private LoreItemRewardRuntime loreItemRewardRuntime;
+    private LoreItemRewardAdmin loreItemRewardAdmin;
 
     @Override
     public void onEnable() {
@@ -35,6 +39,16 @@ public final class EnthusiaTagsPlugin extends JavaPlugin {
         messages.reload();
         reloadConfig();
         performanceMonitor.reload();
+
+        try {
+            loreItemRewardRuntime = LoreItemRewardRuntime.enable(this);
+            loreItemRewardAdmin = new LoreItemRewardAdmin(this, messages, loreItemRewardRuntime);
+        } catch (java.sql.SQLException ex) {
+            loreItemRewardRuntime = null;
+            loreItemRewardAdmin = null;
+            getLogger().severe("Lore-item rewards are disabled because durable handoff storage failed: "
+                + ex.getMessage());
+        }
 
         tagService = new TagService(this, messages, performanceMonitor);
         cosmeticsService = new CosmeticsService(this, messages, performanceMonitor);
@@ -87,6 +101,11 @@ public final class EnthusiaTagsPlugin extends JavaPlugin {
         if (rewardService != null) {
             rewardService.disable();
         }
+        if (loreItemRewardRuntime != null) {
+            loreItemRewardRuntime.close();
+            loreItemRewardRuntime = null;
+            loreItemRewardAdmin = null;
+        }
         if (cosmeticsService != null) {
             cosmeticsService.disable();
         }
@@ -118,6 +137,10 @@ public final class EnthusiaTagsPlugin extends JavaPlugin {
         return performanceMonitor;
     }
 
+    public LoreItemRewardRuntime getLoreItemRewardRuntime() {
+        return loreItemRewardRuntime;
+    }
+
     public void reloadAllFiles() {
         ConfigMigrator.MigrationReport migrationReport = configMigrator.migrateAll();
         reloadConfig();
@@ -125,6 +148,9 @@ public final class EnthusiaTagsPlugin extends JavaPlugin {
         messages.reload();
         tagService.reloadAll();
         rewardService.reload();
+        if (loreItemRewardRuntime != null) {
+            loreItemRewardRuntime.kickRetries();
+        }
         if (dailyService != null) {
             dailyService.reload();
         }
@@ -198,7 +224,11 @@ public final class EnthusiaTagsPlugin extends JavaPlugin {
                     return true;
                 }
                 if (args.length >= 2 && args[0].equalsIgnoreCase("rewards")) {
-                    return rewardService.handleAdminCommand(sender, java.util.Arrays.copyOfRange(args, 1, args.length));
+                    String[] rewardArgs = java.util.Arrays.copyOfRange(args, 1, args.length);
+                    if (loreItemRewardAdmin != null && loreItemRewardAdmin.handles(rewardArgs)) {
+                        return loreItemRewardAdmin.handle(sender, rewardArgs);
+                    }
+                    return rewardService.handleAdminCommand(sender, rewardArgs);
                 }
                 if (args.length >= 2 && args[0].equalsIgnoreCase("daily")) {
                     if (dailyService == null) {
@@ -211,9 +241,20 @@ public final class EnthusiaTagsPlugin extends JavaPlugin {
                 sender.sendMessage(net.kyori.adventure.text.Component.text("Usage: /enthusiatags reload"));
                 return true;
             });
-            root.setTabCompleter((sender, command, alias, args) -> args.length == 1 && sender.hasPermission("enthusia.tags.admin")
-                ? java.util.List.of("reload", "performance", "rewards", "daily")
-                : java.util.List.of());
+            root.setTabCompleter((sender, command, alias, args) -> {
+                if (!sender.hasPermission("enthusia.tags.admin")) {
+                    return java.util.List.of();
+                }
+                if (args.length == 1) {
+                    return java.util.List.of("reload", "performance", "rewards", "daily");
+                }
+                if (args.length >= 2 && args[0].equalsIgnoreCase("rewards") && loreItemRewardAdmin != null) {
+                    return loreItemRewardAdmin.tabComplete(
+                        sender,
+                        java.util.Arrays.copyOfRange(args, 1, args.length));
+                }
+                return java.util.List.of();
+            });
         }
     }
 }
