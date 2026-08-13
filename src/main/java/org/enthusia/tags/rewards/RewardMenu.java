@@ -224,6 +224,8 @@ public final class RewardMenu {
                 .replace("{item}", itemDisplayName(action));
             case COMMAND -> rewardService.getMessage("rewards-rewards-line-unlock")
                 .replace("{unlock}", actionLabel(action, "rewards-rewards-unlock-default"));
+            case LORE_ITEM -> rewardService.getMessage("rewards-rewards-line-lore-item")
+                .replace("{item}", actionLabel(action, "rewards-rewards-lore-item-default"));
         };
     }
 
