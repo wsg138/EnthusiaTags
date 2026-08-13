@@ -18,6 +18,7 @@ import org.bukkit.entity.Player;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitTask;
+import org.enthusia.tags.EnthusiaTagsPlugin;
 import org.enthusia.tags.IntegrationStatus;
 import org.enthusia.tags.Messages;
 import org.enthusia.tags.PerformanceMonitor;
@@ -25,6 +26,10 @@ import org.enthusia.tags.PlaceholderApiHook;
 import org.enthusia.tags.PlayerLookup;
 import org.enthusia.tags.TagDefinition;
 import org.enthusia.tags.TagService;
+import org.enthusia.tags.rewards.loreitems.LoreItemActionConfig;
+import org.enthusia.tags.rewards.loreitems.LoreItemHandoffRecord;
+import org.enthusia.tags.rewards.loreitems.LoreItemHandoffState;
+import org.enthusia.tags.rewards.loreitems.LoreItemRewardRuntime;
 
 import java.io.File;
 import java.sql.SQLException;
@@ -78,6 +83,7 @@ public final class RewardService {
     private final PlaytimeHook playtimeHook = new PlaytimeHook();
     private final PlaceholderApiHook placeholderApiHook = new PlaceholderApiHook();
     private final PlayerLookup playerLookup;
+    private final LoreItemRewardRuntime loreItemRewardRuntime;
     private volatile Map<String, RewardDefinition> rewards = Map.of();
     private final Map<UUID, RewardPlayerState> playerStates = new ConcurrentHashMap<>();
     private final Map<UUID, CompletableFuture<Void>> pendingLoads = new ConcurrentHashMap<>();
@@ -116,6 +122,8 @@ public final class RewardService {
         this.messages = messages;
         this.performanceMonitor = performanceMonitor;
         this.playerLookup = new PlayerLookup(plugin);
+        this.loreItemRewardRuntime = plugin instanceof EnthusiaTagsPlugin tagsPlugin
+            ? tagsPlugin.getLoreItemRewardRuntime() : null;
     }
 
     public void enable() {
@@ -480,8 +488,9 @@ public final class RewardService {
         Map<String, RewardStorage.ActionLedgerEntry> ledger =
             storage.loadActionLedgerNow(playerId, rewardId);
         boolean unresolvedHistoricalAction = ledger.values().stream().anyMatch(entry ->
-            entry.status() == RewardStatus.CLAIM_PENDING
-                || entry.status() == RewardStatus.REQUIRES_RECONCILIATION);
+            entry.status() == RewardStatus.REQUIRES_RECONCILIATION
+                || (entry.status() == RewardStatus.CLAIM_PENDING
+                    && !isRecoverableLorePending(reward, entry)));
         if (unresolvedHistoricalAction) {
             state.setOverall(rewardId, RewardStatus.REQUIRES_RECONCILIATION);
             persistStateBarrier(playerId, state);
@@ -507,8 +516,9 @@ public final class RewardService {
                 anyActionDelivered = true;
                 continue;
             }
-            if (existing != null && (existing.status() == RewardStatus.CLAIM_PENDING
-                || existing.status() == RewardStatus.REQUIRES_RECONCILIATION
+            if (existing != null && (existing.status() == RewardStatus.REQUIRES_RECONCILIATION
+                || (existing.status() == RewardStatus.CLAIM_PENDING
+                    && !isRecoverableLorePending(reward, existing))
                 || (existing.status() == RewardStatus.CLAIMED && !existing.fingerprint().equals(fingerprint)))) {
                 state.setOverall(rewardId, RewardStatus.REQUIRES_RECONCILIATION);
                 persistStateBarrier(playerId, state);
@@ -567,6 +577,12 @@ public final class RewardService {
                     evidence = itemResult == ItemDeliveryResult.DELIVERED
                         ? "Inserted into the live player inventory" : "Item delivery failed before insertion";
                 }
+                case LORE_ITEM -> {
+                    LoreItemDeliveryAttempt loreAttempt = deliverLoreItem(playerId, rewardId, action);
+                    delivered = loreAttempt.delivered();
+                    ambiguous = loreAttempt.requiresReview();
+                    evidence = loreAttempt.evidence();
+                }
                 default -> delivered = false;
             }
             if (!delivered) {
@@ -575,7 +591,7 @@ public final class RewardService {
                 storage.saveActionLedgerNow(playerId, rewardId, action, fingerprint,
                     failureStatus, vaultResult, evidence);
                 state.setOverall(rewardId, failureStatus);
-                if (!anyActionDelivered && !ambiguous) {
+                if (!anyActionDelivered && !ambiguous && action.getType() != RewardActionType.LORE_ITEM) {
                     storage.releaseIpClaimAsync(playerId, rewardId, ipAddress);
                 }
                 persistStateBarrier(playerId, state);
@@ -598,6 +614,75 @@ public final class RewardService {
         } finally {
             inFlightClaims.remove(claimKey);
         }
+    }
+
+    private boolean isRecoverableLorePending(
+        RewardDefinition reward,
+        RewardStorage.ActionLedgerEntry entry) {
+        if (reward == null || entry == null || entry.status() != RewardStatus.CLAIM_PENDING) {
+            return false;
+        }
+        for (RewardAction action : reward.getActions()) {
+            if (action.getType() == RewardActionType.LORE_ITEM
+                && action.getActionId().equals(entry.actionId())
+                && actionFingerprint(action).equals(entry.fingerprint())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private LoreItemDeliveryAttempt deliverLoreItem(
+        UUID playerId,
+        String rewardId,
+        RewardAction action) {
+        if (loreItemRewardRuntime == null || !loreItemRewardRuntime.isOpen()) {
+            return new LoreItemDeliveryAttempt(false, false,
+                "Lore-item runtime is unavailable; handoff was not attempted");
+        }
+        try {
+            LoreItemHandoffRecord record = loreItemRewardRuntime
+                .handoff(playerId, rewardId, action.getActionId(), action.getValue())
+                .toCompletableFuture()
+                .get(12, TimeUnit.SECONDS);
+            if (record == null) {
+                return new LoreItemDeliveryAttempt(false, false,
+                    "Lore-item runtime completed without a durable handoff record");
+            }
+            String evidence = "operation=" + record.externalOperationId()
+                + " state=" + record.state()
+                + " outcome=" + blankAuditValue(record.lastOutcome())
+                + " attempts=" + record.attempts()
+                + " error=" + blankAuditValue(record.lastError());
+            if (record.state() == LoreItemHandoffState.ACCEPTED) {
+                return new LoreItemDeliveryAttempt(true, false, evidence);
+            }
+            if (record.state() == LoreItemHandoffState.REVIEW) {
+                return new LoreItemDeliveryAttempt(false, true, evidence);
+            }
+            return new LoreItemDeliveryAttempt(false, false, evidence);
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            return new LoreItemDeliveryAttempt(false, false,
+                "Interrupted waiting for durable LoreItems handoff; retry uses the same operation identity");
+        } catch (ExecutionException | TimeoutException ex) {
+            Throwable cause = ex instanceof ExecutionException && ex.getCause() != null ? ex.getCause() : ex;
+            return new LoreItemDeliveryAttempt(false, false,
+                "LoreItems handoff did not complete in the claim worker: " + safeThrowableMessage(cause));
+        }
+    }
+
+    private static String blankAuditValue(String value) {
+        return value == null || value.isBlank() ? "-" : value;
+    }
+
+    private static String safeThrowableMessage(Throwable throwable) {
+        Throwable current = throwable;
+        while (current.getCause() != null && current != current.getCause()) {
+            current = current.getCause();
+        }
+        String message = current.getMessage();
+        return message == null || message.isBlank() ? current.getClass().getSimpleName() : message;
     }
 
     private <T> T callOnMain(java.util.concurrent.Callable<T> callable) throws SQLException {
@@ -900,6 +985,10 @@ public final class RewardService {
         if (action.getType() == RewardActionType.MONEY) {
             return String.valueOf(action.getAmount());
         }
+        if (action.getType() == RewardActionType.LORE_ITEM) {
+            return action.getLabel() == null || action.getLabel().isBlank()
+                ? messages.get("rewards-rewards-lore-item-default") : action.getLabel();
+        }
         return "";
     }
 
@@ -1162,8 +1251,10 @@ public final class RewardService {
         if (overrideActionId != null && overrideActionStatus != null) {
             statuses.put(overrideActionId, overrideActionStatus);
         }
-        boolean unresolved = legacyUnmapped || statuses.values().stream().anyMatch(status ->
-            status == RewardStatus.CLAIM_PENDING || status == RewardStatus.REQUIRES_RECONCILIATION);
+        boolean unresolved = legacyUnmapped || statuses.entrySet().stream().anyMatch(entry ->
+            entry.getValue() == RewardStatus.REQUIRES_RECONCILIATION
+                || (entry.getValue() == RewardStatus.CLAIM_PENDING
+                    && !isRecoverableLorePending(reward, ledger.get(entry.getKey()))));
         for (RewardStorage.ItemOverflowEntry item : items) {
             String status = item.actionId().equals(overrideActionId) && overrideItemStatus != null
                 ? overrideItemStatus : item.status();
@@ -1962,6 +2053,10 @@ public final class RewardService {
         if (reward.getActions().stream().anyMatch(action -> !action.isValid())) {
             return false;
         }
+        if (reward.getActions().stream().anyMatch(action -> action.getType() == RewardActionType.LORE_ITEM)
+            && (loreItemRewardRuntime == null || !loreItemRewardRuntime.isOpen())) {
+            return false;
+        }
         if (!vaultHook.isAvailable()) {
             return reward.getActions().stream().noneMatch(action -> action.getType() == RewardActionType.MONEY);
         }
@@ -2217,6 +2312,14 @@ public final class RewardService {
             integrationStatus.addWarning("&cEnthusiaTags warning: Baltop integration plugin '" + config.baltopPluginName()
                 + "' is unavailable. Baltop rewards are blocked.");
         }
+        if (usesLoreItemRewards() && (loreItemRewardRuntime == null || !loreItemRewardRuntime.isOpen())) {
+            integrationStatus.addWarning("&cEnthusiaTags warning: durable LoreItems handoff storage is unavailable. Lore-item rewards are blocked.");
+        } else if (usesLoreItemRewards()) {
+            Plugin loreItems = Bukkit.getPluginManager().getPlugin("EnthusiaLoreItems");
+            if (loreItems == null || !loreItems.isEnabled()) {
+                integrationStatus.addWarning("&eEnthusiaTags warning: EnthusiaLoreItems is not currently enabled. Lore-item claims will remain durably pending and retry automatically.");
+            }
+        }
     }
 
     private boolean usesPlaytimeRewards() {
@@ -2239,6 +2342,12 @@ public final class RewardService {
         return rewards.values().stream()
             .flatMap(reward -> reward.getCriteria().stream())
             .anyMatch(criterion -> criterion.getType() == RewardCriterionType.BALTOP_TOP3);
+    }
+
+    private boolean usesLoreItemRewards() {
+        return rewards.values().stream()
+            .flatMap(reward -> reward.getActions().stream())
+            .anyMatch(action -> action.getType() == RewardActionType.LORE_ITEM);
     }
 
     private boolean initStorage() {
@@ -2584,7 +2693,7 @@ public final class RewardService {
         EntityType entityType = parseEnum(EntityType.class, entry.getString("entity", ""), path + ".entity");
         CriterionSource resolved = resolveCriterionSource(type, sourceType, statistic, material, counterKey);
         boolean valid = validateCriterionSource(resolved.sourceType(), resolved.statistic(), resolved.material(), entityType,
-            resolved.key(), path);
+            resolved.key(), maxY, path);
         String label = entry.getString("label", defaultLabel(type, resolved.material(), resolved.key()));
         return new RewardCriterion(type, resolved.sourceType(), amount, resolved.material(), resolved.statistic(), entityType,
             resolved.key(), maxY, label, valid);
@@ -2635,7 +2744,10 @@ public final class RewardService {
                     "Invalid action type", null, 0, "", List.of(), false));
                 continue;
             }
-            String value = entry.getString("id", "");
+            LoreItemActionConfig.Validation loreValidation = type == RewardActionType.LORE_ITEM
+                ? LoreItemActionConfig.validate(entry) : null;
+            String value = type == RewardActionType.LORE_ITEM
+                ? loreValidation.definitionKey() : entry.getString("id", "");
             double amount = entry.getDouble("amount", 0.0);
             String label = entry.getString("label", "");
             Material itemMaterial = type == RewardActionType.ITEM
@@ -2645,7 +2757,9 @@ public final class RewardService {
             String displayName = entry.getString("display-name", "");
             List<String> lore = entry.getStringList("lore");
             boolean validId = actionId.matches("[a-z0-9][a-z0-9._-]{0,63}") && actionIds.add(actionId);
-            String invalidReason = validateActionDefinition(type, value, amount, itemMaterial, itemAmount);
+            String invalidReason = type == RewardActionType.LORE_ITEM
+                ? loreValidation.error()
+                : validateActionDefinition(type, value, amount, itemMaterial, itemAmount);
             boolean valid = validId && invalidReason == null;
             if (!validId) {
                 plugin.getLogger().warning("Invalid or duplicate action-id '" + actionId
@@ -2680,6 +2794,7 @@ public final class RewardService {
                 if (itemAmount > 2304) yield "item amount exceeds the 36-slot inventory safety limit";
                 yield null;
             }
+            case LORE_ITEM -> null;
         };
     }
 
@@ -2745,6 +2860,7 @@ public final class RewardService {
                                             Material material,
                                             EntityType entityType,
                                             String key,
+                                            int maxY,
                                             String path) {
         boolean valid = validateStatisticSource(sourceType, statistic, material, entityType, path)
             && validateCounterSource(sourceType, key, path);
@@ -2905,5 +3021,8 @@ public final class RewardService {
     }
 
     private record ReconciliationPlan(RewardStatus overall, boolean finalizeReward) {
+    }
+
+    private record LoreItemDeliveryAttempt(boolean delivered, boolean requiresReview, String evidence) {
     }
 }
