@@ -77,18 +77,18 @@ class LoreItemsEndToEndIdempotencyTest {
 
     private static final class CountingIdempotentService implements LoreItemsServiceV1 {
         private final Set<String> acceptedOperations = new HashSet<>();
-        private int serviceInvocationCount;
-        private int physicalAwardCount;
+        private int serviceRequests;
+        private int awardedItems;
 
         @Override
         public CompletionStage<LoreDeliveryResult> queueDelivery(
             String definitionKey,
             UUID playerId,
             String externalOperationId) {
-            serviceInvocationCount++;
+            serviceRequests++;
             boolean firstAcceptance = acceptedOperations.add(externalOperationId);
             if (firstAcceptance) {
-                physicalAwardCount++;
+                awardedItems++;
             }
             LoreDeliveryStatus status = firstAcceptance
                 ? LoreDeliveryStatus.ACCEPTED_QUEUED
@@ -100,11 +100,11 @@ class LoreItemsEndToEndIdempotencyTest {
         }
 
         int serviceInvocationCount() {
-            return serviceInvocationCount;
+            return serviceRequests;
         }
 
         int physicalAwardCount() {
-            return physicalAwardCount;
+            return awardedItems;
         }
     }
 }
