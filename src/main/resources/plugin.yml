@@ -9,6 +9,7 @@ softdepend:
   - Vault
   - EnthusiaCurrency
   - EnthusiaPlaytime
+  - EnthusiaLoreItems
 commands:
   tags:
     description: Open the tag selection menu.
@@ -102,5 +103,10 @@ permissions:
       enthusia.cosmetics.quit_clean: true
       enthusia.cosmetics.km_gg: true
   enthusia.tags.admin:
-    description: Allows managing player tags.
+    description: Allows managing player tags and administrative plugin operations.
+    default: op
+    children:
+      enthusia.tags.rewards.loreitems.admin: true
+  enthusia.tags.rewards.loreitems.admin:
+    description: Allows inspecting and retrying LoreItems reward handoffs.
     default: op
