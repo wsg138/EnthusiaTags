@@ -145,6 +145,7 @@ public final class LoreItemRewardAdmin {
             .replace("{state}", record.state().name())
             .replace("{outcome}", blank(record.lastOutcome()))
             .replace("{attempts}", Integer.toString(record.attempts()))
+            .replace("{finalized}", Boolean.toString(record.rewardFinalized()))
             .replace("{error}", blank(record.lastError()));
     }
 
