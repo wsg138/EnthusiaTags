@@ -45,8 +45,8 @@ echo "Verifying pinned production SHA-256..."
 ACTUAL_SHA="$(sha256sum "${DESTINATION}" | awk '{print $1}')"
 if [[ "${ACTUAL_SHA}" != "${RELEASE_SHA}" ]]; then
   echo "Release checksum mismatch: expected=${RELEASE_SHA} actual=${ACTUAL_SHA} bytes=${ACTUAL_BYTES}" >&2
-  printf '::error title=LoreItems release checksum mismatch::expected=%s actual=%s bytes=%s\n' \
-    "${RELEASE_SHA}" "${ACTUAL_SHA}" "${ACTUAL_BYTES}"
+  printf '::error title=LoreItems actual SHA %s bytes %s::expected %s\n' \
+    "${ACTUAL_SHA}" "${ACTUAL_BYTES}" "${RELEASE_SHA}"
   exit 1
 fi
 echo "${DESTINATION}: OK"
