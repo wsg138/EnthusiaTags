@@ -1,0 +1,258 @@
+package org.enthusia.tags.rewards.loreitems;
+
+import java.nio.file.Path;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Statement;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
+import java.util.Objects;
+import java.util.UUID;
+
+public final class LoreItemHandoffStore implements AutoCloseable {
+    private final Connection connection;
+
+    public LoreItemHandoffStore(Path databasePath) throws SQLException {
+        Objects.requireNonNull(databasePath, "databasePath");
+        connection = DriverManager.getConnection("jdbc:sqlite:" + databasePath.toAbsolutePath());
+        configure();
+        createSchema();
+    }
+
+    public synchronized LoreItemHandoffRecord prepare(
+        UUID playerId,
+        String rewardId,
+        String actionId,
+        String definitionKey,
+        long nowEpochMillis) throws SQLException {
+        Objects.requireNonNull(playerId, "playerId");
+        String reward = canonicalId(rewardId, "rewardId");
+        String action = canonicalId(actionId, "actionId");
+        String definition = requiredText(definitionKey, "definitionKey");
+        String operationId = LoreItemOperationKey.forRewardAction(playerId, reward, action);
+
+        LoreItemHandoffRecord existing = load(playerId, reward, action);
+        if (existing != null) {
+            verifyIdentity(existing, definition, operationId);
+            return existing;
+        }
+
+        try (PreparedStatement statement = connection.prepareStatement("""
+            INSERT INTO lore_item_handoffs (
+                player_uuid, reward_id, action_id, definition_key, external_operation_id,
+                state, last_outcome, attempts, last_error, next_attempt_at, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, '', 0, '', 0, ?, ?)
+            """)) {
+            statement.setString(1, playerId.toString());
+            statement.setString(2, reward);
+            statement.setString(3, action);
+            statement.setString(4, definition);
+            statement.setString(5, operationId);
+            statement.setString(6, LoreItemHandoffState.PENDING.name());
+            statement.setLong(7, nowEpochMillis);
+            statement.setLong(8, nowEpochMillis);
+            statement.executeUpdate();
+        }
+        LoreItemHandoffRecord inserted = load(playerId, reward, action);
+        if (inserted == null) {
+            throw new SQLException("Lore-item handoff disappeared after insert");
+        }
+        return inserted;
+    }
+
+    public synchronized LoreItemHandoffRecord recordOutcome(
+        String externalOperationId,
+        LoreItemHandoffState state,
+        String outcome,
+        String error,
+        long nextAttemptAtEpochMillis,
+        long nowEpochMillis) throws SQLException {
+        String operationId = requiredText(externalOperationId, "externalOperationId");
+        Objects.requireNonNull(state, "state");
+        try (PreparedStatement statement = connection.prepareStatement("""
+            UPDATE lore_item_handoffs
+               SET state = ?, last_outcome = ?, attempts = attempts + 1, last_error = ?,
+                   next_attempt_at = ?, updated_at = ?
+             WHERE external_operation_id = ?
+            """)) {
+            statement.setString(1, state.name());
+            statement.setString(2, outcome == null ? "" : outcome);
+            statement.setString(3, error == null ? "" : error);
+            statement.setLong(4, nextAttemptAtEpochMillis);
+            statement.setLong(5, nowEpochMillis);
+            statement.setString(6, operationId);
+            if (statement.executeUpdate() != 1) {
+                throw new SQLException("Lore-item handoff operation was not found: " + operationId);
+            }
+        }
+        LoreItemHandoffRecord updated = loadByOperationId(operationId);
+        if (updated == null) {
+            throw new SQLException("Lore-item handoff disappeared after outcome update");
+        }
+        return updated;
+    }
+
+    public synchronized LoreItemHandoffRecord load(UUID playerId, String rewardId, String actionId)
+        throws SQLException {
+        Objects.requireNonNull(playerId, "playerId");
+        String reward = canonicalId(rewardId, "rewardId");
+        String action = canonicalId(actionId, "actionId");
+        try (PreparedStatement statement = connection.prepareStatement("""
+            SELECT player_uuid, reward_id, action_id, definition_key, external_operation_id,
+                   state, last_outcome, attempts, last_error, next_attempt_at, created_at, updated_at
+              FROM lore_item_handoffs
+             WHERE player_uuid = ? AND reward_id = ? AND action_id = ?
+            """)) {
+            statement.setString(1, playerId.toString());
+            statement.setString(2, reward);
+            statement.setString(3, action);
+            try (ResultSet result = statement.executeQuery()) {
+                return result.next() ? read(result) : null;
+            }
+        }
+    }
+
+    public synchronized LoreItemHandoffRecord loadByOperationId(String externalOperationId) throws SQLException {
+        String operationId = requiredText(externalOperationId, "externalOperationId");
+        try (PreparedStatement statement = connection.prepareStatement("""
+            SELECT player_uuid, reward_id, action_id, definition_key, external_operation_id,
+                   state, last_outcome, attempts, last_error, next_attempt_at, created_at, updated_at
+              FROM lore_item_handoffs
+             WHERE external_operation_id = ?
+            """)) {
+            statement.setString(1, operationId);
+            try (ResultSet result = statement.executeQuery()) {
+                return result.next() ? read(result) : null;
+            }
+        }
+    }
+
+    public synchronized List<LoreItemHandoffRecord> listDue(long nowEpochMillis, int limit) throws SQLException {
+        if (limit <= 0) {
+            return List.of();
+        }
+        List<LoreItemHandoffRecord> records = new ArrayList<>();
+        try (PreparedStatement statement = connection.prepareStatement("""
+            SELECT player_uuid, reward_id, action_id, definition_key, external_operation_id,
+                   state, last_outcome, attempts, last_error, next_attempt_at, created_at, updated_at
+              FROM lore_item_handoffs
+             WHERE state IN ('PENDING', 'RETRY') AND next_attempt_at <= ?
+             ORDER BY next_attempt_at ASC, created_at ASC
+             LIMIT ?
+            """)) {
+            statement.setLong(1, nowEpochMillis);
+            statement.setInt(2, limit);
+            try (ResultSet result = statement.executeQuery()) {
+                while (result.next()) {
+                    records.add(read(result));
+                }
+            }
+        }
+        return List.copyOf(records);
+    }
+
+    public synchronized List<LoreItemHandoffRecord> listForReward(UUID playerId, String rewardId)
+        throws SQLException {
+        Objects.requireNonNull(playerId, "playerId");
+        String reward = canonicalId(rewardId, "rewardId");
+        List<LoreItemHandoffRecord> records = new ArrayList<>();
+        try (PreparedStatement statement = connection.prepareStatement("""
+            SELECT player_uuid, reward_id, action_id, definition_key, external_operation_id,
+                   state, last_outcome, attempts, last_error, next_attempt_at, created_at, updated_at
+              FROM lore_item_handoffs
+             WHERE player_uuid = ? AND reward_id = ?
+             ORDER BY action_id ASC
+            """)) {
+            statement.setString(1, playerId.toString());
+            statement.setString(2, reward);
+            try (ResultSet result = statement.executeQuery()) {
+                while (result.next()) {
+                    records.add(read(result));
+                }
+            }
+        }
+        return List.copyOf(records);
+    }
+
+    private void configure() throws SQLException {
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("PRAGMA busy_timeout = 5000");
+            statement.execute("PRAGMA journal_mode = WAL");
+            statement.execute("PRAGMA synchronous = FULL");
+        }
+    }
+
+    private void createSchema() throws SQLException {
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("""
+                CREATE TABLE IF NOT EXISTS lore_item_handoffs (
+                    player_uuid TEXT NOT NULL,
+                    reward_id TEXT NOT NULL,
+                    action_id TEXT NOT NULL,
+                    definition_key TEXT NOT NULL,
+                    external_operation_id TEXT NOT NULL UNIQUE,
+                    state TEXT NOT NULL,
+                    last_outcome TEXT NOT NULL DEFAULT '',
+                    attempts INTEGER NOT NULL DEFAULT 0,
+                    last_error TEXT NOT NULL DEFAULT '',
+                    next_attempt_at INTEGER NOT NULL DEFAULT 0,
+                    created_at INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL,
+                    PRIMARY KEY (player_uuid, reward_id, action_id)
+                )
+                """);
+            statement.execute("""
+                CREATE INDEX IF NOT EXISTS idx_lore_item_handoffs_due
+                    ON lore_item_handoffs (state, next_attempt_at)
+                """);
+        }
+    }
+
+    private static LoreItemHandoffRecord read(ResultSet result) throws SQLException {
+        return new LoreItemHandoffRecord(
+            UUID.fromString(result.getString("player_uuid")),
+            result.getString("reward_id"),
+            result.getString("action_id"),
+            result.getString("definition_key"),
+            result.getString("external_operation_id"),
+            LoreItemHandoffState.valueOf(result.getString("state")),
+            result.getString("last_outcome"),
+            result.getInt("attempts"),
+            result.getString("last_error"),
+            result.getLong("next_attempt_at"),
+            result.getLong("created_at"),
+            result.getLong("updated_at"));
+    }
+
+    private static void verifyIdentity(
+        LoreItemHandoffRecord existing,
+        String definitionKey,
+        String externalOperationId) throws SQLException {
+        if (!existing.definitionKey().equals(definitionKey)) {
+            throw new SQLException("Lore-item definition changed for an existing reward action; staff review is required");
+        }
+        if (!existing.externalOperationId().equals(externalOperationId)) {
+            throw new SQLException("Lore-item external operation identity changed for an existing reward action");
+        }
+    }
+
+    private static String canonicalId(String value, String name) {
+        return requiredText(value, name).toLowerCase(Locale.ROOT);
+    }
+
+    private static String requiredText(String value, String name) {
+        if (value == null || value.isBlank()) {
+            throw new IllegalArgumentException(name + " must not be blank");
+        }
+        return value.trim();
+    }
+
+    @Override
+    public synchronized void close() throws SQLException {
+        connection.close();
+    }
+}
