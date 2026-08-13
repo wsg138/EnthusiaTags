@@ -37,11 +37,51 @@ jobs:
           java-version: '21'
           cache: maven
 
+      - name: Bootstrap pinned production LoreItems release
+        shell: bash
+        run: |
+          set -euo pipefail
+          RELEASE_VERSION="$(sed -n 's:.*<loreitems.release.version>\(.*\)</loreitems.release.version>.*:\1:p' pom.xml)"
+          RELEASE_URL="$(sed -n 's:.*<loreitems.release.url>\(.*\)</loreitems.release.url>.*:\1:p' pom.xml)"
+          RELEASE_SHA="$(sed -n 's:.*<loreitems.release.sha256>\(.*\)</loreitems.release.sha256>.*:\1:p' pom.xml)"
+          test -n "${RELEASE_VERSION}"
+          test -n "${RELEASE_URL}"
+          test -n "${RELEASE_SHA}"
+          mkdir -p .wp06-deps
+          curl --fail --location --retry 3 --retry-delay 2 \
+            --proto '=https' --tlsv1.2 \
+            "${RELEASE_URL}" -o .wp06-deps/EnthusiaLoreItems.jar
+          printf '%s  %s\n' "${RELEASE_SHA}" '.wp06-deps/EnthusiaLoreItems.jar' | sha256sum --check --strict
+          mvn --batch-mode --no-transfer-progress \
+            org.apache.maven.plugins:maven-install-plugin:3.1.3:install-file \
+            -Dfile=.wp06-deps/EnthusiaLoreItems.jar \
+            -DgroupId=net.enthusia \
+            -DartifactId=EnthusiaLoreItems-released \
+            -Dversion="${RELEASE_VERSION}" \
+            -Dpackaging=jar \
+            -DgeneratePom=true
+
       - name: Test and package
-        run: mvn --batch-mode --no-transfer-progress clean test package
+        shell: bash
+        run: |
+          set -o pipefail
+          mvn --batch-mode --no-transfer-progress clean test package 2>&1 | tee /tmp/enthusiatags-maven.log
+
+      - name: Preserve Maven failure summary
+        if: failure()
+        shell: bash
+        run: |
+          if [ -f /tmp/enthusiatags-maven.log ]; then
+            {
+              echo '### Maven failure tail'
+              echo '```text'
+              tail -n 120 /tmp/enthusiatags-maven.log
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Verify exact-head Codacy
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' && success()
         env:
           GITHUB_TOKEN: ${{ github.token }}
           PULL_REQUEST_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
@@ -49,6 +89,7 @@ jobs:
         run: python3 tools/check_codacy.py
 
       - name: Upload plugin JAR
+        if: success()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: EnthusiaTags-${{ github.event.pull_request.head.sha || github.sha }}
