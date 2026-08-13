@@ -1,0 +1,37 @@
+name: WP06 One-Shot RewardService Patch
+
+on:
+  push:
+    branches:
+      - agent/wp-06-loreitems-integration
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out exact branch head
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: agent/wp-06-loreitems-integration
+          fetch-depth: 0
+
+      - name: Apply assertion-guarded RewardService patch
+        run: python3 tools/wp06_patch_reward_service.py
+
+      - name: Remove one-shot helper and workflow
+        run: |
+          rm tools/wp06_patch_reward_service.py
+          rm .github/workflows/wp06-one-shot-patch.yml
+
+      - name: Commit exact patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/main/java/org/enthusia/tags/rewards/RewardService.java tools/wp06_patch_reward_service.py .github/workflows/wp06-one-shot-patch.yml
+          git diff --cached --exit-code && { echo "Expected patch produced no changes" >&2; exit 1; } || true
+          git commit -m "WP-06: simplify LoreItems reward handoff handling"
+          git push origin HEAD:agent/wp-06-loreitems-integration
