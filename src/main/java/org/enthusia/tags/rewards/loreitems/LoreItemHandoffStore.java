@@ -96,6 +96,35 @@ public final class LoreItemHandoffStore implements AutoCloseable {
         return updated;
     }
 
+    public synchronized LoreItemHandoffRecord requestRetry(
+        UUID playerId,
+        String rewardId,
+        String actionId,
+        long nowEpochMillis) throws SQLException {
+        LoreItemHandoffRecord existing = load(playerId, rewardId, actionId);
+        if (existing == null || existing.state() == LoreItemHandoffState.ACCEPTED) {
+            return existing;
+        }
+        try (PreparedStatement statement = connection.prepareStatement("""
+            UPDATE lore_item_handoffs
+               SET state = ?, next_attempt_at = ?, updated_at = ?
+             WHERE external_operation_id = ?
+            """)) {
+            statement.setString(1, LoreItemHandoffState.RETRY.name());
+            statement.setLong(2, nowEpochMillis);
+            statement.setLong(3, nowEpochMillis);
+            statement.setString(4, existing.externalOperationId());
+            if (statement.executeUpdate() != 1) {
+                throw new SQLException("Lore-item handoff disappeared while requesting retry");
+            }
+        }
+        LoreItemHandoffRecord updated = loadByOperationId(existing.externalOperationId());
+        if (updated == null) {
+            throw new SQLException("Lore-item handoff disappeared after retry request");
+        }
+        return updated;
+    }
+
     public synchronized LoreItemHandoffRecord load(UUID playerId, String rewardId, String actionId)
         throws SQLException {
         Objects.requireNonNull(playerId, "playerId");
