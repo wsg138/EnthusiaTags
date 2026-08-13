@@ -4,5 +4,6 @@ public enum RewardActionType {
     TAG,
     MONEY,
     COMMAND,
-    ITEM
+    ITEM,
+    LORE_ITEM
 }
