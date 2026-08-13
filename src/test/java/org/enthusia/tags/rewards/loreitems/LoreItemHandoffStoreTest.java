@@ -13,24 +13,27 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class LoreItemHandoffStoreTest {
+    private static final UUID PLAYER = UUID.fromString("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
+    private static final String ACTION = "action";
+    private static final String HOURGLASS = "hourglass";
+
     @TempDir
     Path tempDir;
 
     @Test
     void intentAndOperationIdentitySurviveStoreRestart() throws Exception {
-        UUID player = UUID.fromString("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
         Path database = tempDir.resolve("lore-handoffs.db");
         String operation;
 
         try (LoreItemHandoffStore store = new LoreItemHandoffStore(database)) {
-            LoreItemHandoffRecord prepared = store.prepare(player, "Reward-One", "Action-One", "hourglass", 1000L);
+            LoreItemHandoffRecord prepared = store.prepare(PLAYER, "Reward-One", "Action-One", HOURGLASS, 1000L);
             operation = prepared.externalOperationId();
             assertEquals(LoreItemHandoffState.PENDING, prepared.state());
             assertEquals(0, prepared.attempts());
         }
 
         try (LoreItemHandoffStore restarted = new LoreItemHandoffStore(database)) {
-            LoreItemHandoffRecord replay = restarted.prepare(player, "reward-one", "action-one", "hourglass", 2000L);
+            LoreItemHandoffRecord replay = restarted.prepare(PLAYER, "reward-one", "action-one", HOURGLASS, 2000L);
             assertEquals(operation, replay.externalOperationId());
             assertEquals(1000L, replay.createdAtEpochMillis());
         }
@@ -38,22 +41,20 @@ class LoreItemHandoffStoreTest {
 
     @Test
     void changedDefinitionForExistingClaimRequiresReviewInsteadOfNewIdentity() throws Exception {
-        UUID player = UUID.fromString("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
         try (LoreItemHandoffStore store = new LoreItemHandoffStore(tempDir.resolve("definition-change.db"))) {
-            store.prepare(player, "reward", "action", "hourglass", 1000L);
+            store.prepare(PLAYER, "reward", ACTION, HOURGLASS, 1000L);
 
             assertThrows(SQLException.class,
-                () -> store.prepare(player, "reward", "action", "dragon-breath", 2000L));
+                () -> store.prepare(PLAYER, "reward", ACTION, "dragon-breath", 2000L));
         }
     }
 
     @Test
     void retryQueueIsOrderedBoundedAndOnlyReturnsDueRows() throws Exception {
-        UUID firstPlayer = UUID.fromString("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
         UUID secondPlayer = UUID.fromString("11111111-2222-3333-4444-555555555555");
         try (LoreItemHandoffStore store = new LoreItemHandoffStore(tempDir.resolve("retry.db"))) {
-            LoreItemHandoffRecord first = store.prepare(firstPlayer, "reward-a", "action", "hourglass", 1000L);
-            LoreItemHandoffRecord second = store.prepare(secondPlayer, "reward-b", "action", "star", 1100L);
+            LoreItemHandoffRecord first = store.prepare(PLAYER, "reward-a", ACTION, HOURGLASS, 1000L);
+            LoreItemHandoffRecord second = store.prepare(secondPlayer, "reward-b", ACTION, "star", 1100L);
             assertNotEquals(first.externalOperationId(), second.externalOperationId());
 
             store.recordOutcome(first.externalOperationId(), LoreItemHandoffState.RETRY,
@@ -71,20 +72,19 @@ class LoreItemHandoffStoreTest {
 
     @Test
     void staffRetryCanRequeueReviewButNeverReopensAcceptedOperation() throws Exception {
-        UUID player = UUID.fromString("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
         try (LoreItemHandoffStore store = new LoreItemHandoffStore(tempDir.resolve("staff-retry.db"))) {
-            LoreItemHandoffRecord review = store.prepare(player, "reward", "action", "hourglass", 1000L);
+            LoreItemHandoffRecord review = store.prepare(PLAYER, "reward", ACTION, HOURGLASS, 1000L);
             review = store.recordOutcome(review.externalOperationId(), LoreItemHandoffState.REVIEW,
                 "UNKNOWN_DEFINITION", "missing definition", 0L, 1100L);
 
-            LoreItemHandoffRecord retry = store.requestRetry(player, "reward", "action", 2000L);
+            LoreItemHandoffRecord retry = store.requestRetry(PLAYER, "reward", ACTION, 2000L);
             assertEquals(LoreItemHandoffState.RETRY, retry.state());
             assertEquals(review.externalOperationId(), retry.externalOperationId());
             assertEquals(2000L, retry.nextAttemptAtEpochMillis());
 
             LoreItemHandoffRecord accepted = store.recordOutcome(retry.externalOperationId(), LoreItemHandoffState.ACCEPTED,
                 "ALREADY_ACCEPTED", "accepted", 0L, 2100L);
-            LoreItemHandoffRecord protectedAccepted = store.requestRetry(player, "reward", "action", 3000L);
+            LoreItemHandoffRecord protectedAccepted = store.requestRetry(PLAYER, "reward", ACTION, 3000L);
 
             assertEquals(LoreItemHandoffState.ACCEPTED, protectedAccepted.state());
             assertEquals(accepted.externalOperationId(), protectedAccepted.externalOperationId());
