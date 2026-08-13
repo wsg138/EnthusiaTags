@@ -9,10 +9,12 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class LoreItemActionConfigTest {
+    private static final String DEFINITION_KEY_FIELD = "definition-key";
+
     @Test
     void validDefinitionKeyIsCanonicalizedWithoutExposingImplementationDetails() {
         ConfigurationSection section = actionSection();
-        section.set("definition-key", " Hourglass_One ");
+        section.set(DEFINITION_KEY_FIELD, " Hourglass_One ");
         section.set("label", "&eHourglass");
 
         LoreItemActionConfig.Validation validation = LoreItemActionConfig.validate(section);
@@ -27,18 +29,18 @@ class LoreItemActionConfigTest {
         assertFalse(LoreItemActionConfig.validate(missing).valid());
 
         ConfigurationSection blank = actionSection();
-        blank.set("definition-key", "  ");
+        blank.set(DEFINITION_KEY_FIELD, "  ");
         assertFalse(LoreItemActionConfig.validate(blank).valid());
 
         ConfigurationSection malformed = actionSection();
-        malformed.set("definition-key", "bad key!");
+        malformed.set(DEFINITION_KEY_FIELD, "bad key!");
         assertFalse(LoreItemActionConfig.validate(malformed).valid());
     }
 
     @Test
     void unknownLoreItemFieldsAreRejected() {
         ConfigurationSection section = actionSection();
-        section.set("definition-key", "hourglass");
+        section.set(DEFINITION_KEY_FIELD, "hourglass");
         section.set("id", "legacy-field-must-not-be-accepted");
 
         LoreItemActionConfig.Validation validation = LoreItemActionConfig.validate(section);
@@ -50,11 +52,11 @@ class LoreItemActionConfigTest {
     @Test
     void definitionKeyLengthIsBoundedToReleasedContractGrammar() {
         ConfigurationSection sixtyFour = actionSection();
-        sixtyFour.set("definition-key", "a".repeat(64));
+        sixtyFour.set(DEFINITION_KEY_FIELD, "a".repeat(64));
         assertTrue(LoreItemActionConfig.validate(sixtyFour).valid());
 
         ConfigurationSection sixtyFive = actionSection();
-        sixtyFive.set("definition-key", "a".repeat(65));
+        sixtyFive.set(DEFINITION_KEY_FIELD, "a".repeat(65));
         assertFalse(LoreItemActionConfig.validate(sixtyFive).valid());
     }
 
