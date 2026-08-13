@@ -42,7 +42,14 @@ if [[ "${ACTUAL_BYTES}" -lt 1000000 ]]; then
 fi
 
 echo "Verifying pinned production SHA-256..."
-printf '%s  %s\n' "${RELEASE_SHA}" "${DESTINATION}" | sha256sum --check --strict
+ACTUAL_SHA="$(sha256sum "${DESTINATION}" | awk '{print $1}')"
+if [[ "${ACTUAL_SHA}" != "${RELEASE_SHA}" ]]; then
+  echo "Release checksum mismatch: expected=${RELEASE_SHA} actual=${ACTUAL_SHA} bytes=${ACTUAL_BYTES}" >&2
+  printf '::error title=LoreItems release checksum mismatch::expected=%s actual=%s bytes=%s\n' \
+    "${RELEASE_SHA}" "${ACTUAL_SHA}" "${ACTUAL_BYTES}"
+  exit 1
+fi
+echo "${DESTINATION}: OK"
 
 BOOTSTRAP_DIR="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/enthusiatags-loreitems-bootstrap"
 mkdir -p "${BOOTSTRAP_DIR}"
