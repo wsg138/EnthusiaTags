@@ -45,7 +45,7 @@ The service result mapping is:
 | `UNKNOWN_DEFINITION` / `VALIDATION_FAILURE` | `REVIEW` | not delivered; explicit staff review required |
 | response operation ID mismatch | `REVIEW` | not delivered; explicit staff review required |
 
-The handoff ledger also records attempt count, last service outcome, last error/detail, next retry time, created time, and updated time. A persisted definition key cannot silently change for an existing logical action; such a change is rejected so staff can reconcile the old operation explicitly.
+The handoff ledger also records attempt count, last service outcome, last error/detail, next retry time, created time, updated time, and whether that exact accepted operation has been reconciled back into the Tags reward ledger. A persisted definition key cannot silently change for an existing logical action; such a change is rejected so staff can reconcile the old operation explicitly.
 
 ## Retry and reload behavior
 
@@ -54,6 +54,8 @@ Tags performs bounded asynchronous retry sweeps. A sweep processes at most 50 du
 The retry worker runs outside the Paper main thread. Reward claims already execute on Tags claim workers, and the LoreItems `CompletionStage` is awaited there, never on the primary server thread. The service adapter re-checks whether the LoreItems plugin is enabled on each call and refreshes its cached adapter if the provider plugin instance changes.
 
 On Tags enable and reload, due handoffs are kicked immediately in addition to the periodic sweep. On a server restart, the SQLite handoff ledger is reopened and the same pending identities resume. A current matching lore-item `CLAIM_PENDING` row is recoverable; unrelated historical pending rows retain the existing Tags reconciliation protections.
+
+A service retry can become accepted after the original reward claim has already returned `DELIVERY_FAILED`. Tags therefore also runs a bounded accepted-handoff finalization sweep. For each accepted operation, Tags verifies that the current reward/action and action fingerprint still match the persisted handoff, durably transitions that exact action in `rewards.db` to `CLAIMED`, refreshes the normal overall reward state, and only then marks that external operation finalized in `lore-item-handoffs.db`. The finalization marker is per operation, not per reward, so multiple LoreItems actions in one reward cannot acknowledge each other. If the process stops anywhere before that marker is written, the accepted operation remains visible and the same reconciliation is retried safely after restart. A changed or missing reward/action is left unfinalized and logged for staff review rather than silently credited against different configuration.
 
 ## Staff inspection and retry
 
@@ -90,8 +92,8 @@ mvn --batch-mode --no-transfer-progress clean test package
 3. Deploy the WP-06 Tags build. Confirm both plugins enable without dependency errors and Tags does not report durable LoreItems storage unavailable.
 4. Configure a controlled reward with a known LoreItems definition and a clearly recognizable player-facing label.
 5. Claim it once and verify `lorestatus` reports `ACCEPTED` with `ACCEPTED_QUEUED`.
-6. Retry the exact logical action or exercise the crash/restart recovery path and verify the same caller operation ID reaches `ALREADY_ACCEPTED` rather than producing another LoreItems acceptance.
-7. Test LoreItems disabled-before-Tags, LoreItems enabled-after-Tags, Tags reload, and a full server restart. Pending work must remain pending/retryable and later recover without marking a failed handoff delivered.
+6. Retry the exact logical action or exercise the crash/restart recovery path and verify the same caller operation ID reaches `ALREADY_ACCEPTED` rather than producing another physical LoreItems award.
+7. Test LoreItems disabled-before-Tags, LoreItems enabled-after-Tags, Tags reload, and a full server restart. Pending work must remain pending/retryable and, after LoreItems becomes available, the background handoff/finalization sweeps must advance the Tags action and overall reward ledgers without requiring another player claim.
 8. Test an unknown definition in staging. Tags must place it in staff review and must not mark the reward claimed.
 9. Keep the exact-head Maven, Codacy, and independent review evidence attached to the WP-06 pull request before production promotion.
 
