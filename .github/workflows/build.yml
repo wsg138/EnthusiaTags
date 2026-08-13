@@ -76,7 +76,7 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           PULL_REQUEST_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           PULL_REQUEST_NUMBER: ${{ github.event.pull_request.number }}
-        run: python3 tools/check_codacy.py
+        run: bash tools/check_codacy.sh
 
       - name: Upload plugin JAR
         if: success()
