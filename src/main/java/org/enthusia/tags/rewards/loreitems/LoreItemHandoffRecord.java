@@ -14,6 +14,7 @@ public record LoreItemHandoffRecord(
     int attempts,
     String lastError,
     long nextAttemptAtEpochMillis,
+    boolean rewardFinalized,
     long createdAtEpochMillis,
     long updatedAtEpochMillis) {
 
