@@ -4,9 +4,10 @@
 - Active package: WP-06 — EnthusiaTags integration with LoreItems service API.
 - Status: `IN_PROGRESS`.
 - Canonical branch: `agent/wp-06-loreitems-integration`.
-- Canonical PR: pending immediate creation after this first branch commit; GitHub rejected a zero-diff PR before the checkpoint existed.
+- Canonical PR: #15 — `WP-06: integrate EnthusiaTags with LoreItems service API` (draft at claim verification).
 - Exact EnthusiaTags `main` SHA at claim: `36bd6c51b7db6a94c866e5ce938b08e696050235`.
-- Exact implementation/evidence head being checkpointed: `36bd6c51b7db6a94c866e5ce938b08e696050235` (claim base; no WP-06 implementation changes existed before this metadata checkpoint).
+- Exact claim checkpoint head: `bf3bd3762e0483dfde5fe69db57b463a7660e5b9`.
+- Exact implementation/evidence head being checkpointed: `36bd6c51b7db6a94c866e5ce938b08e696050235` (claim base; no WP-06 implementation changes existed before the claim metadata commit).
 - Exact EnthusiaLoreItems live `main` reconciled for dependency routing: `ed91b1d46751544ed86fa7fa7de43cc769fc68a6`.
 
 ## Routing and dependency reconciliation
@@ -15,7 +16,8 @@
 - LoreItems has no `docs/wp-06-complete` or `agent/wp-06-loreitems-api-blocker` ref at claim time.
 - EnthusiaTags had no open pull requests and no `agent/wp-06-loreitems-integration` branch before this claim.
 - Existing open LoreItems PRs #21, #23, #24, and #25 were reconciled as documentation/review-only work rather than unfinished canonical package locks; inspected review threads were resolved and they do not reopen WP-05.
-- Therefore WP-06 is the lowest READY package and this Tags branch is the sole canonical WP-06 primary lock.
+- Therefore WP-06 is the lowest READY package and this Tags branch/PR pair is the sole canonical WP-06 primary lock.
+- GitHub initially rejected draft PR creation on the zero-diff branch (`No commits between main and agent/wp-06-loreitems-integration`). The required claim checkpoint was therefore the first branch commit, and draft PR #15 was opened immediately afterward from that checkpoint.
 
 ## Selected contract and integration boundary
 The live WP-06 contract in `wsg138/EnthusiaLoreItems/ai-agents/work-packages/WP-06-enthusiatags-integration.md` requires Tags to use the released stable Bukkit service boundary only:
@@ -41,6 +43,7 @@ The live WP-06 contract in `wsg138/EnthusiaLoreItems/ai-agents/work-packages/WP-
 - [x] Read the live WP-06 package contract and the relevant LoreItems requirements, architecture, implementation plan, public API, service signature, and outcome enum.
 - [x] Read Tags README/build metadata, plugin metadata, reward action model, and current reward-service execution/recovery structure sufficiently to establish the integration direction.
 - [x] Created the canonical WP-06 branch from exact Tags `main` SHA `36bd6c51b7db6a94c866e5ce938b08e696050235`.
+- [x] Opened canonical draft PR #15 with the required package/scope/migration/risk/validation/rollback fields.
 
 ## Remaining package criteria
 - Add validated `LORE_ITEM` configuration/action support.
@@ -60,7 +63,7 @@ The live WP-06 contract in `wsg138/EnthusiaLoreItems/ai-agents/work-packages/WP-
 
 ## Known findings / blocker
 - No external blocker is established.
-- The zero-diff draft PR creation attempt returned GitHub validation error `No commits between main and agent/wp-06-loreitems-integration`; this checkpoint intentionally creates the first branch delta so the required draft PR can be opened immediately next.
+- The first zero-diff draft-PR attempt failed only because GitHub requires a branch delta before PR creation; the canonical lock now exists durably as branch + draft PR #15.
 
 ## Exact next action
-Open the canonical draft PR titled `WP-06: integrate EnthusiaTags with LoreItems service API`, update this checkpoint with the PR number and exact checkpoint head, re-fetch branch/PR/head to verify the atomic claim, then begin the durable reward-action and persistence integration on this branch.
+Re-fetch canonical branch and PR #15 to verify they still agree with this claim, then implement the first coherent WP-06 section: `LORE_ITEM` action/config validation plus the stable LoreItems service adapter and persistence-compatible handoff model. Publish implementation and tests to this branch before stopping.
