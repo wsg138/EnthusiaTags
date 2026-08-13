@@ -15,7 +15,7 @@
         <loreitems.release.version>1.0.0</loreitems.release.version>
         <loreitems.release.url>https://github.com/wsg138/EnthusiaLoreItems/releases/download/v1.0.0/EnthusiaLoreItems.jar</loreitems.release.url>
         <loreitems.release.sha256>7c862b0ae545d710a33267ad6e19a4ae26d97323e97f40707c1475c9f9ba7063</loreitems.release.sha256>
-        <loreitems.release.jar>${project.build.directory}/loreitems/EnthusiaLoreItems.jar</loreitems.release.jar>
+        <loreitems.release.jar>${project.basedir}/.wp06-deps/EnthusiaLoreItems.jar</loreitems.release.jar>
     </properties>
 
     <repositories>
@@ -70,62 +70,6 @@
     <build>
         <finalName>EnthusiaTags</finalName>
         <plugins>
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-antrun-plugin</artifactId>
-                <version>3.1.0</version>
-                <executions>
-                    <execution>
-                        <id>download-released-loreitems</id>
-                        <phase>validate</phase>
-                        <goals>
-                            <goal>run</goal>
-                        </goals>
-                        <configuration>
-                            <target>
-                                <mkdir dir="${project.build.directory}/loreitems" />
-                                <get src="${loreitems.release.url}"
-                                     dest="${loreitems.release.jar}"
-                                     verbose="false"
-                                     usetimestamp="true" />
-                                <checksum file="${loreitems.release.jar}"
-                                          algorithm="SHA-256"
-                                          property="loreitems.release.actual.sha256" />
-                                <fail message="Downloaded EnthusiaLoreItems v${loreitems.release.version} JAR checksum did not match the pinned production release">
-                                    <condition>
-                                        <not>
-                                            <equals arg1="${loreitems.release.actual.sha256}"
-                                                    arg2="${loreitems.release.sha256}" />
-                                        </not>
-                                    </condition>
-                                </fail>
-                            </target>
-                        </configuration>
-                    </execution>
-                </executions>
-            </plugin>
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-install-plugin</artifactId>
-                <version>3.1.3</version>
-                <executions>
-                    <execution>
-                        <id>install-released-loreitems-api</id>
-                        <phase>initialize</phase>
-                        <goals>
-                            <goal>install-file</goal>
-                        </goals>
-                        <configuration>
-                            <file>${loreitems.release.jar}</file>
-                            <groupId>net.enthusia</groupId>
-                            <artifactId>EnthusiaLoreItems-released</artifactId>
-                            <version>${loreitems.release.version}</version>
-                            <packaging>jar</packaging>
-                            <generatePom>true</generatePom>
-                        </configuration>
-                    </execution>
-                </executions>
-            </plugin>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
