@@ -16,6 +16,7 @@ import java.util.concurrent.CompletionStage;
 public final class ReloadingLoreItemsClient implements LoreItemsClient {
     private final JavaPlugin plugin;
     private volatile LoreItemsClient delegate;
+    private volatile Plugin provider;
 
     public ReloadingLoreItemsClient(JavaPlugin plugin) {
         this.plugin = Objects.requireNonNull(plugin, "plugin");
@@ -29,18 +30,24 @@ public final class ReloadingLoreItemsClient implements LoreItemsClient {
         Plugin loreItems = plugin.getServer().getPluginManager().getPlugin("EnthusiaLoreItems");
         if (loreItems == null || !loreItems.isEnabled()) {
             delegate = null;
+            provider = null;
             return unavailable(externalOperationId, "EnthusiaLoreItems is not enabled");
         }
 
         LoreItemsClient current = delegate;
-        if (current == null) {
+        if (current == null || provider != loreItems) {
             try {
                 current = new BukkitLoreItemsClient(plugin);
                 delegate = current;
+                provider = loreItems;
             } catch (LinkageError error) {
+                delegate = null;
+                provider = null;
                 return unavailable(externalOperationId,
                     "LoreItems V1 API is not linkable from the current plugin classloader: " + safeMessage(error));
             } catch (RuntimeException ex) {
+                delegate = null;
+                provider = null;
                 return unavailable(externalOperationId,
                     "LoreItems V1 API adapter could not initialize: " + safeMessage(ex));
             }
@@ -50,6 +57,7 @@ public final class ReloadingLoreItemsClient implements LoreItemsClient {
             return current.queue(definitionKey, playerId, externalOperationId);
         } catch (LinkageError error) {
             delegate = null;
+            provider = null;
             return unavailable(externalOperationId,
                 "LoreItems V1 API linkage changed during reload: " + safeMessage(error));
         }
