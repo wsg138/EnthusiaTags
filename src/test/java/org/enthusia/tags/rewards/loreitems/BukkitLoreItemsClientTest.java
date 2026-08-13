@@ -10,6 +10,8 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class BukkitLoreItemsClientTest {
     private static final UUID PLAYER = UUID.fromString("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
@@ -44,6 +46,37 @@ class BukkitLoreItemsClientTest {
 
         assertEquals(LoreItemsGatewayResult.Disposition.RETRY, result.disposition());
         assertEquals("ASYNC_FAILURE", result.serviceStatus());
+    }
+
+    @Test
+    void queueReturnsWithoutWaitingForServiceCompletion() {
+        CompletableFuture<LoreDeliveryResult> serviceStage = new CompletableFuture<>();
+        LoreItemsServiceV1 service = (definition, player, operation) -> serviceStage;
+        BukkitLoreItemsClient client = new BukkitLoreItemsClient(() -> service, 5_000L);
+
+        CompletableFuture<LoreItemsGatewayResult> result = client
+            .queue("definition", PLAYER, OPERATION)
+            .toCompletableFuture();
+
+        assertFalse(result.isDone());
+        serviceStage.complete(new LoreDeliveryResult(
+            LoreDeliveryStatus.ACCEPTED_QUEUED,
+            OPERATION,
+            "accepted"));
+        assertEquals(LoreItemsGatewayResult.Disposition.ACCEPTED, result.join().disposition());
+    }
+
+    @Test
+    void stalledServiceStageTimesOutAsRetryable() {
+        LoreItemsServiceV1 service = (definition, player, operation) -> new CompletableFuture<>();
+        BukkitLoreItemsClient client = new BukkitLoreItemsClient(() -> service, 25L);
+
+        LoreItemsGatewayResult result = client.queue("definition", PLAYER, OPERATION)
+            .toCompletableFuture().join();
+
+        assertEquals(LoreItemsGatewayResult.Disposition.RETRY, result.disposition());
+        assertEquals("TIMEOUT", result.serviceStatus());
+        assertTrue(result.detail().toLowerCase().contains("timeout"));
     }
 
     @Test
