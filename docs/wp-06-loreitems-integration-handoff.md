@@ -6,66 +6,75 @@
 - Canonical branch: `agent/wp-06-loreitems-integration`.
 - Canonical PR: #15 — `WP-06: integrate EnthusiaTags with LoreItems service API`.
 - Exact EnthusiaTags `main` dependency/base SHA: `36bd6c51b7db6a94c866e5ce938b08e696050235`.
-- Exact implementation/static-analysis head immediately before this checkpoint: `ebd613da262d90bed249bb2e3df6af4f8b0c89d8`.
+- Exact implementation/test head immediately before this checkpoint: `8211f72230ce821cd77559d06fee3c8188f4ed89`.
 - Exact EnthusiaLoreItems live `main` dependency SHA: `ed91b1d46751544ed86fa7fa7de43cc769fc68a6`.
 - Production LoreItems release pin: `v1.0.0`, JAR SHA-256 `7c862b0ae545d710a33267ad6e19a4ae26d97323e97f40707c1475c9f9ba7063`.
 
 ## Routing and dependency reconciliation
 - LoreItems WP-01 through WP-05 are contained in live `main`; WP-05 was normally merged as `ed91b1d46751544ed86fa7fa7de43cc769fc68a6`.
-- Production LoreItems `v1.0.0` is a published non-draft, non-prerelease release targeting that exact live-main merge commit.
-- LoreItems post-merge `main` CI and the release workflow succeeded before WP-06 work resumed.
-- No `docs/wp-06-complete` or `agent/wp-06-loreitems-api-blocker` ref existed when WP-06 was resumed.
-- Tags PR #15 / `agent/wp-06-loreitems-integration` was the sole unfinished canonical package lock, so it was resumed rather than creating another package or branch.
-- The branch was reconciled against live PR state before implementation work continued; no simultaneous canonical LoreItems WP-06 blocker/finalization branch was active.
+- Production LoreItems `v1.0.0` is a published non-draft, non-prerelease release targeting that exact live-main merge commit. LoreItems post-merge `main` CI and release workflow succeeded before WP-06 resumed.
+- No `docs/wp-06-complete` or `agent/wp-06-loreitems-api-blocker` ref existed when WP-06 resumed.
+- Tags PR #15 / `agent/wp-06-loreitems-integration` was the sole unfinished canonical package lock and was resumed. No second package or competing canonical WP-06 branch was created.
 
 ## Completed implementation
-- Added `LORE_ITEM` as a first-class Tags reward action and strict configuration validation. The only accepted LoreItems action fields are `action-id`, `type`, `definition-key`, and `label`; definition keys are canonicalized and bounded to the released contract grammar.
-- Added typed `LoreItemsServiceV1` integration through Bukkit `ServicesManager`. Tags imports only the released `net.enthusia.loreitems.api.v1` surface and contains no LoreItems command fallback, direct LoreItems SQLite access, or implementation/domain package dependency.
-- Added a deterministic caller-owned operation identity derived from `(player UUID, reward ID, action ID)`. The identity uses length-delimited canonical parts and is reused for the same logical action across retry, reload, restart, timeout, and crash recovery.
-- Added `lore-item-handoffs.db` as a durable Tags-owned handoff ledger. Intent is persisted before the cross-plugin request; the ledger records definition, operation ID, state, outcome, attempts, error/detail, retry time, finalization marker, and timestamps.
-- Added bounded retry behavior: at most 50 due operations per sweep, 5-second exponential retry delay capped at 5 minutes, 10-second LoreItems service-stage timeout, immediate retry kick on enable/reload, and persisted restart recovery.
-- Added reload/provider-order resilience. The service adapter tolerates LoreItems missing at Tags startup, rechecks provider enablement, and discards/recreates the typed adapter when the provider instance changes.
-- Added reward-claim integration that treats `ACCEPTED_QUEUED` and `ALREADY_ACCEPTED` as accepted, transient/service-unavailable/timeout failures as retryable, and unknown-definition/validation/operation-ID mismatch as staff review. A LoreItems action is not marked delivered until the durable handoff reports accepted.
-- Added privileged `lorestatus` and `loreretry` administration under `enthusia.tags.rewards.loreitems.admin`; accepted operations cannot be reopened. Player-facing reward rendering uses the configured label/fallback rather than exposing operation IDs or internal delivery identifiers.
-- Added `EnthusiaLoreItems` as a soft dependency and documented configuration, runtime semantics, staged deployment, restart/reload/order tests, recovery, and rollback in `docs/loreitems-integration.md` and the README.
-- Pinned compilation/tests to the exact production LoreItems v1.0.0 JAR and checksum rather than a source checkout. Added bootstrap checksum verification and a released-artifact API contract test.
-- Upgraded the PR build workflow to verify the exact checked-out head and require the exact-head Codacy result before accepting the package artifact. The Codacy helper also rechecks that the PR head did not change while it waited.
+- Added `LORE_ITEM` as a first-class Tags reward action with strict configuration validation. Accepted action fields are only `action-id`, `type`, `definition-key`, and `label`; definition keys are canonicalized and bounded to the released V1 grammar.
+- Added typed `LoreItemsServiceV1` discovery through Bukkit `ServicesManager`. Tags imports only the released `net.enthusia.loreitems.api.v1` surface and contains no LoreItems command fallback, direct LoreItems database access, or implementation/domain coupling.
+- Added deterministic caller-owned operation identity derived from `(player UUID, reward ID, action ID)` using length-delimited canonical parts. The same operation ID is reused across retry, timeout, reload, restart, and crash recovery.
+- Added `lore-item-handoffs.db` as a Tags-owned durable handoff ledger. Intent is stored before the cross-plugin request; the ledger records definition, operation ID, state, outcome, attempts, error/detail, retry time, exact-operation Tags-finalization marker, and timestamps.
+- Added bounded retry behavior: at most 50 due handoffs per sweep, 5-second exponential retry delay capped at 5 minutes, 10-second LoreItems service-stage timeout, immediate retry kick on enable/reload, and persisted restart recovery.
+- Added reload/provider-order resilience. Tags can enable before LoreItems; the adapter rechecks provider enablement and replaces its typed client if the provider plugin instance changes.
+- Added reward-claim outcome mapping: `ACCEPTED_QUEUED` / `ALREADY_ACCEPTED` are accepted; missing/unavailable/timeout/transient failures are retryable; unknown definition, validation failure, and operation-ID mismatch require staff review.
+- Added recovery for a substantive pre-review defect: a background handoff retry can become accepted after the original Tags claim returned `DELIVERY_FAILED`. A bounded finalization sweep now verifies the current reward/action/fingerprint, durably transitions that exact Tags action to `CLAIMED`, refreshes normal overall reward state, and only then marks that exact external operation finalized in the handoff ledger. A crash before the marker safely replays the reconciliation. Changed/missing configuration remains unfinalized and operator-visible instead of being silently credited.
+- Finalization is per external operation, not per reward, so multiple LoreItems actions under one reward cannot acknowledge one another. The claim-key guard also prevents the background finalizer from racing an active claim for the same reward.
+- Added privileged `lorestatus` and `loreretry` administration under `enthusia.tags.rewards.loreitems.admin`. Accepted operations cannot be reopened. `lorestatus` now includes `tags-finalized=true|false`, distinguishing LoreItems acceptance from completion of Tags reward-ledger reconciliation.
+- Added `EnthusiaLoreItems` soft dependency and operator documentation for configuration, service ordering, automatic recovery, staged deployment, restart/reload, audit, rollback, and the accepted-but-not-finalized state.
+- Pinned compilation/tests to the exact production LoreItems v1.0.0 JAR and checksum rather than a source checkout. Added checksum bootstrap and released-artifact V1 contract tests.
+- PR CI verifies exact checkout and requires an exact-head Codacy result before uploading the package artifact. The original Python poller was replaced by a fixed-domain `curl`/`jq` verifier that validates repository/PR/SHA inputs, confirms the live PR head before and after polling, and requires Codacy success with zero annotations.
 
-## Test and static-analysis evidence
-- Exact head `74991125dd517a5a91433e73fb5db06b62774411`: Maven `Test and package` completed successfully; the only failing workflow step was Codacy.
-- Exact head `5bccad29112fd67602f7da8bd80646ffc3cd728b`: Maven `Test and package` again completed successfully after the major adapter/runtime/admin/store refactors; the only failing workflow step was Codacy.
-- Codacy findings were reduced from 64 to 19 and then remediated without disabling the project gate. Narrow PMD suppressions remain only where the generic rule conflicts with the intentional Paper plugin threading / single-connection SQLite serialization model, with inline justification.
-- Exact implementation head `ebd613da262d90bed249bb2e3df6af4f8b0c89d8`: `Codacy Static Code Analysis` completed `success` with zero annotations.
-- The bot-authored self-cleaning RewardService patch commit did not execute the GitHub Actions build, so no build pass is claimed for `ebd613da262d90bed249bb2e3df6af4f8b0c89d8`. This checkpoint intentionally creates a normal new PR head so the full exact-head build/test/package/Codacy gate can run again.
-- A temporary assertion-guarded one-shot patch workflow/helper was used only to apply four exact replacements to the very large `RewardService.java` through the connector. Both temporary files deleted themselves in the resulting commit. Comparing pre-workaround `d1dbfabefbd6b58b05d059040b31f461dac951aa` to `ebd613da262d90bed249bb2e3df6af4f8b0c89d8` shows the aggregate workaround diff contains only `RewardService.java` (30 additions, 23 deletions); neither temporary file is present in the final PR diff.
+## Validation evidence
+- `74991125dd517a5a91433e73fb5db06b62774411`: production-artifact bootstrap and Maven test/package passed; only Codacy failed.
+- `5bccad29112fd67602f7da8bd80646ffc3cd728b`: Maven test/package passed after major adapter/runtime/admin/store refactors; only Codacy failed.
+- Codacy findings were reduced from 64 to 19 and then remediated without disabling the project gate. Narrow PMD suppressions remain only where generic J2EE/synchronization rules conflict with intentional Paper plugin threading and single-connection SQLite serialization, with inline justification.
+- `ebd613da262d90bed249bb2e3df6af4f8b0c89d8`: `Codacy Static Code Analysis` succeeded with zero annotations. That bot-authored self-cleaning patch commit did not execute the full GitHub Actions build, so no build pass is claimed for it.
+- `e66d16bd8e7d38b649eea8536ec148244b8d1715`: exact checkout, pinned release bootstrap, and Maven clean/test/package passed. Codacy exposed four remaining findings, and the independent pre-review then found the accepted-handoff/Tags-ledger resumption defect.
+- `015b992aad2faca7ede36e1b7dc6dfc42c59170e`: after the recovery bridge, per-operation finalization test, shell exact-head verifier, and end-to-end idempotency test, the push exact-head build/test/package/JAR path succeeded; the PR build also reached exact-head Codacy after Maven success.
+- `d18a441886466a3df21cf64e4544a3ade44bca01`: exact checkout, pinned production release bootstrap, and Maven test/package passed on the PR run before the subsequent evidence commit superseded that head.
+- `8211f72230ce821cd77559d06fee3c8188f4ed89`: exact checkout, pinned production release bootstrap, and Maven test/package passed, including the new direct `RewardStorage` recovery test. Its PR workflow had entered the exact-head Codacy poll when this checkpoint was written.
+- This checkpoint intentionally creates a new normal PR head. No exact-head build/static pass is claimed for the checkpoint commit until GitHub Actions and Codacy finish on that exact SHA.
 
 ## Acceptance coverage implemented
-- Stable released V1 API and checksum contract tests.
-- Strict LoreItems action configuration/unknown-field tests.
-- Deterministic operation-key normalization/collision-boundary tests.
-- Durable handoff store restart, retry ordering, staff-retry, and accepted-operation protection tests.
-- Coordinator transient retry/backoff, crash-after-acceptance replay, and permanent-review outcome tests.
-- Adapter accepted/replay/transient/timeout/review/operation-mismatch behavior tests.
-- Reload-order/provider replacement tests.
-- Architecture tests preventing implementation-package imports, command fallback, synchronous service-adapter waits, Bukkit gameplay access in the adapter, and main-thread LoreItems waiting.
+- Released V1 JAR checksum/API/status-enum contract.
+- Strict LoreItems action configuration and unknown-field rejection.
+- Deterministic operation-key normalization, delimiter/collision-boundary, distinct-input, blank-input, and maximum-length behavior.
+- Durable handoff store restart, retry ordering, staff retry, accepted-operation protection, and exact-operation finalization persistence.
+- Coordinator transient retry/backoff, crash-after-acceptance replay, permanent-review outcome, and no-repeat-after-accepted behavior.
+- Adapter accepted/replay/transient/timeout/review/operation-mismatch behavior.
+- Reload-order/provider replacement behavior.
+- Architecture guards against implementation-package imports, command fallback, synchronous service-adapter waits, Bukkit gameplay access in the adapter, and main-thread LoreItems waiting.
+- End-to-end idempotency against a fake released-V1 service: a repeated logical claim after persisted acceptance makes one service request and one physical award; a crash after service acceptance but before Tags records it replays the same external operation, receives `ALREADY_ACCEPTED`, makes two logical service invocations but still records one physical award.
+- Direct `RewardStorage` recovery: a failed LoreItems action cannot be credited with a mismatched fingerprint; the matching accepted handoff moves it durably to `CLAIMED`; replay of the same accepted handoff remains idempotent.
 
 ## Review findings resolved during this session
-- Fixed a branch-local test seam mismatch where `ReloadingLoreItemsClientTest` expected injectable provider/client suppliers but production exposed only the `JavaPlugin` constructor.
-- Fixed an overbroad architecture assertion that banned every `.get(` substring and therefore incorrectly rejected legitimate `Supplier.get()` service discovery; the test now bans synchronous `CompletionStage`/`Future` waiting specifically.
-- Refactored adapter, coordinator, runtime, admin, store, verifier, and tests to satisfy exact Codacy findings while preserving service discovery, durability, idempotency, bounded retry, and Paper threading semantics.
-- Simplified the LoreItems reward handoff handling in `RewardService`, removed an unused validator parameter, and retained `maxY` on the actual `RewardCriterion` where it remains behaviorally relevant.
-- No unresolved submitted review thread or requested-changes review was present at the last review reconciliation before this checkpoint.
+- Fixed a test seam mismatch where reload-order tests required injectable provider/client suppliers but production exposed only the `JavaPlugin` constructor.
+- Fixed an overbroad architecture assertion that banned every `.get(` substring, replacing it with specific synchronous `CompletionStage`/`Future` wait checks.
+- Refactored adapter, coordinator, runtime, admin, store, verifier, tests, and the LoreItems portion of `RewardService` to satisfy concrete Codacy findings while preserving service discovery, durability, idempotency, bounds, and Paper threading semantics.
+- Replaced the Python exact-head Codacy verifier after the verifier itself triggered static warnings; the shell verifier keeps the exact-head/staleness guarantees without a dynamic-network API surface.
+- Independent pre-review found and fixed the accepted-handoff recovery defect described above. Recovery now uses the existing Tags reward ledger instead of inventing a parallel reward state machine.
+- Finalization acknowledgement was narrowed from reward-wide to exact-operation scope and tested with two accepted LoreItems actions under the same reward.
+- Staff audit output now exposes whether an accepted operation has been reconciled into Tags (`tags-finalized`).
+- Temporary assertion-guarded one-shot GitHub Actions helpers used solely to patch the very large `RewardService.java` through the connector self-deleted. Aggregate comparisons confirmed the resulting canonical diffs contain only intended Java changes; no helper/workflow remains in the PR.
+- No submitted requested-changes review or unresolved review thread was present at the latest reconciliation. CodeRabbit is intentionally skipped while PR #15 remains draft; that is not counted as independent review.
 
 ## Remaining package criteria
-1. Verify the new checkpoint head with the full exact-head GitHub Actions build: production-artifact bootstrap, Maven clean/test/package, exact-head Codacy gate, and JAR artifact upload.
-2. Move PR #15 out of draft and obtain the independent review required by the WP-06 contract; inspect all review comments/threads/checks and resolve every actionable finding on the same canonical branch.
-3. Re-run exact-head gates after any review fix and merge PR #15 with a normal merge commit only when build, static analysis, and review are all clean.
-4. Verify the exact Tags `main` merge commit and its post-merge build.
+1. Require the exact checkpoint head produced by this handoff commit to pass: exact checkout, production-artifact bootstrap, Maven clean/test/package, zero-annotation exact-head Codacy, and JAR upload.
+2. Move PR #15 out of draft only after that exact-head gate is clean. Obtain the independent WP-06 review and inspect every review, thread, PR comment, and relevant check. Resolve every actionable finding on the same branch.
+3. Re-run exact-head gates after any review fix. Merge PR #15 with a normal merge commit only when exact-head build/static analysis and independent review are all clean; no squash, rebase, force-push, or auto-merge.
+4. Verify the exact Tags `main` merge commit and its post-merge Build.
 5. Create LoreItems `docs/wp-06-complete` from exact live `main`, open exact-title PR `WP-06: record final remaining-work completion`, and change only `ai-agents/WORKSPACE-STATE.md`, `ai-agents/WORK-QUEUE.md`, and `ai-agents/reports/agent-handoffs/latest.md`.
-6. Verify that LoreItems finalization PR on its exact head, normally merge it, verify live `main`, and stop. Do not reopen WP-01 through WP-05.
+6. Verify that LoreItems finalization PR on its exact head, normally merge it, verify LoreItems live `main`, and stop. Do not reopen WP-01 through WP-05.
 
 ## Known blocker
-- None. The package is not blocked; it is entering exact-head validation/review.
+- None declared. The package is not externally blocked. The only incomplete gates are exact-head static/build artifact validation on this checkpoint, independent review, normal merge/main verification, and the mandated LoreItems finalization PR.
 
 ## Exact next action
-Re-fetch PR #15 and the checkpoint head produced by this handoff commit. Require the full exact-head Build workflow and zero-annotation Codacy result. If both are clean, mark PR #15 ready for review, trigger/obtain the independent review, resolve all findings, and continue only through the WP-06 merge/main-verification/finalization sequence defined above.
+Re-fetch PR #15 and this checkpoint SHA. Require the full exact-head PR Build and a fresh `Codacy Static Code Analysis` check with zero annotations. If clean, mark PR #15 ready for review, obtain the independent review, resolve all findings, and continue only through the WP-06 normal-merge/main-verification/LoreItems-finalization sequence above.
