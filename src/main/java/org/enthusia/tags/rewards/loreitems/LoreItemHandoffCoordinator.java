@@ -47,14 +47,35 @@ public final class LoreItemHandoffCoordinator {
         String actionId,
         String definitionKey) {
         String operationId = LoreItemOperationKey.forRewardAction(playerId, rewardId, actionId);
-        return inFlight.computeIfAbsent(operationId, ignored -> {
-            CompletableFuture<LoreItemHandoffRecord> future = CompletableFuture
-                .supplyAsync(() -> prepare(playerId, rewardId, actionId, definitionKey), ioExecutor)
-                .thenCompose(this::submitIfDue)
-                .toCompletableFuture();
-            future.whenComplete((result, failure) -> inFlight.remove(operationId, future));
-            return future;
-        });
+        while (true) {
+            CompletableFuture<LoreItemHandoffRecord> existing = inFlight.get(operationId);
+            if (existing != null) {
+                return existing;
+            }
+
+            CompletableFuture<LoreItemHandoffRecord> reserved = new CompletableFuture<>();
+            if (inFlight.putIfAbsent(operationId, reserved) != null) {
+                continue;
+            }
+
+            try {
+                CompletableFuture
+                    .supplyAsync(() -> prepare(playerId, rewardId, actionId, definitionKey), ioExecutor)
+                    .thenCompose(this::submitIfDue)
+                    .whenComplete((result, failure) -> {
+                        if (failure != null) {
+                            reserved.completeExceptionally(failure);
+                        } else {
+                            reserved.complete(result);
+                        }
+                        inFlight.remove(operationId, reserved);
+                    });
+            } catch (RuntimeException ex) {
+                reserved.completeExceptionally(ex);
+                inFlight.remove(operationId, reserved);
+            }
+            return reserved;
+        }
     }
 
     public CompletionStage<List<LoreItemHandoffRecord>> retryDue(int requestedLimit) {
