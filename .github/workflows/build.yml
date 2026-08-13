@@ -6,20 +6,32 @@ on:
     branches: [main]
 
 permissions:
+  checks: read
   contents: read
+  pull-requests: read
 
 concurrency:
-  group: enthusiatags-build-${{ github.workflow }}-${{ github.ref }}
+  group: enthusiatags-build-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
 
-      - uses: actions/setup-java@v4
+      - name: Verify exact checkout
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "${EXPECTED_HEAD}"
+
+      - uses: actions/setup-java@d7793b545071e98d581d3bf084a51c3213318a07 # v4
         with:
           distribution: temurin
           java-version: '21'
@@ -28,10 +40,18 @@ jobs:
       - name: Test and package
         run: mvn --batch-mode --no-transfer-progress clean test package
 
+      - name: Verify exact-head Codacy
+        if: github.event_name == 'pull_request'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PULL_REQUEST_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PULL_REQUEST_NUMBER: ${{ github.event.pull_request.number }}
+        run: python3 tools/check_codacy.py
+
       - name: Upload plugin JAR
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: EnthusiaTags-${{ github.sha }}
+          name: EnthusiaTags-${{ github.event.pull_request.head.sha || github.sha }}
           path: target/EnthusiaTags.jar
           if-no-files-found: error
           retention-days: 14
