@@ -21,6 +21,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 @SuppressWarnings("PMD.DoNotUseThreads")
 public final class LoreItemRewardRuntime implements AutoCloseable {
     private static final long RETRY_PERIOD_TICKS = 100L;
+    private static final String RUNTIME_CLOSED = "LoreItems reward runtime is closed";
 
     private final JavaPlugin plugin;
     private final LoreItemHandoffStore store;
@@ -74,14 +75,14 @@ public final class LoreItemRewardRuntime implements AutoCloseable {
         String actionId,
         String definitionKey) {
         if (!open.get()) {
-            return CompletableFuture.failedFuture(new IllegalStateException("LoreItems reward runtime is closed"));
+            return CompletableFuture.failedFuture(new IllegalStateException(RUNTIME_CLOSED));
         }
         return coordinator.handoff(playerId, rewardId, actionId, definitionKey);
     }
 
     public CompletionStage<List<LoreItemHandoffRecord>> inspect(UUID playerId, String rewardId) {
         if (!open.get()) {
-            return CompletableFuture.failedFuture(new IllegalStateException("LoreItems reward runtime is closed"));
+            return CompletableFuture.failedFuture(new IllegalStateException(RUNTIME_CLOSED));
         }
         return CompletableFuture.supplyAsync(() -> {
             try {
@@ -95,7 +96,7 @@ public final class LoreItemRewardRuntime implements AutoCloseable {
 
     public CompletionStage<List<LoreItemHandoffRecord>> acceptedPendingFinalization(int requestedLimit) {
         if (!open.get()) {
-            return CompletableFuture.failedFuture(new IllegalStateException("LoreItems reward runtime is closed"));
+            return CompletableFuture.failedFuture(new IllegalStateException(RUNTIME_CLOSED));
         }
         int limit = Math.max(0, Math.min(requestedLimit, LoreItemHandoffCoordinator.MAX_RETRY_BATCH));
         if (limit == 0) {
@@ -106,7 +107,7 @@ public final class LoreItemRewardRuntime implements AutoCloseable {
 
     public CompletionStage<Void> markRewardFinalized(String externalOperationId) {
         if (!open.get()) {
-            return CompletableFuture.failedFuture(new IllegalStateException("LoreItems reward runtime is closed"));
+            return CompletableFuture.failedFuture(new IllegalStateException(RUNTIME_CLOSED));
         }
         return CompletableFuture.runAsync(() -> {
             try {
@@ -132,7 +133,7 @@ public final class LoreItemRewardRuntime implements AutoCloseable {
         String rewardId,
         String actionId) {
         if (!open.get()) {
-            return CompletableFuture.failedFuture(new IllegalStateException("LoreItems reward runtime is closed"));
+            return CompletableFuture.failedFuture(new IllegalStateException(RUNTIME_CLOSED));
         }
         return CompletableFuture.supplyAsync(() -> requestRetryRecord(playerId, rewardId, actionId), executor)
             .thenCompose(this::submitRequestedRetry);
