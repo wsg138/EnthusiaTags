@@ -6,7 +6,7 @@
 - Canonical branch: `agent/wp-06-loreitems-integration`.
 - Canonical PR: #15 — `WP-06: integrate EnthusiaTags with LoreItems service API`.
 - Exact EnthusiaTags `main` dependency/base SHA: `36bd6c51b7db6a94c866e5ce938b08e696050235`.
-- Exact implementation/static-cleanup head immediately before this checkpoint: `714b2f5047a1dfb6999e40e451a7a1408d369a9d`.
+- Exact implementation/CI head immediately before this checkpoint: `09b8a6e2026f6489d12cf04dc9af8418972a44bf`.
 - Exact EnthusiaLoreItems live `main` dependency SHA: `ed91b1d46751544ed86fa7fa7de43cc769fc68a6`.
 - Production LoreItems release pin: `v1.0.0`, JAR SHA-256 `7c862b0ae545d710a33267ad6e19a4ae26d97323e97f40707c1475c9f9ba7063`.
 
@@ -29,7 +29,7 @@
 - Added privileged `lorestatus` and `loreretry` administration under `enthusia.tags.rewards.loreitems.admin`. Accepted operations cannot be reopened. `lorestatus` includes `tags-finalized=true|false`, distinguishing LoreItems acceptance from completion of Tags reward-ledger reconciliation.
 - Added `EnthusiaLoreItems` soft dependency and operator documentation for configuration, service ordering, automatic recovery, staged deployment, restart/reload, audit, rollback, and the accepted-but-not-finalized state.
 - Pinned compilation/tests to the exact production LoreItems v1.0.0 JAR and checksum rather than a source checkout. Added checksum bootstrap and released-artifact V1 contract tests.
-- PR CI verifies exact checkout and requires an exact-head Codacy result before uploading the package artifact. The exact-head verifier uses a fixed GitHub API domain, validates repository/PR/SHA inputs, confirms the live PR head before and after polling, and requires Codacy success with zero annotations.
+- PR CI verifies exact checkout and requires an exact-head Codacy result before uploading the package artifact. The exact-head verifier uses a fixed GitHub API domain, validates repository/PR/SHA inputs, confirms the live PR head before and after polling, requires Codacy success with zero annotations, and now retries bounded transient GitHub API transport failures rather than terminating the gate prematurely.
 
 ## Validation evidence
 - `74991125dd517a5a91433e73fb5db06b62774411`: production-artifact bootstrap and Maven test/package passed; only Codacy failed.
@@ -39,10 +39,11 @@
 - `e66d16bd8e7d38b649eea8536ec148244b8d1715`: exact checkout, pinned release bootstrap, and Maven clean/test/package passed. Codacy exposed four remaining findings, and independent pre-review then found the accepted-handoff/Tags-ledger resumption defect.
 - `015b992aad2faca7ede36e1b7dc6dfc42c59170e`: after the recovery bridge, per-operation finalization test, shell exact-head verifier, and end-to-end idempotency test, the push exact-head build/test/package/JAR path succeeded; PR Maven also succeeded.
 - `8211f72230ce821cd77559d06fee3c8188f4ed89`: exact checkout, production-release bootstrap, and Maven test/package passed including direct `RewardStorage` recovery coverage.
-- `dbcaca2e3d528d5f36e9897ff8708f797b29bf29`: exact checkout, production-release bootstrap, and Maven clean/test/package passed. Fresh exact-head Codacy returned six concrete findings: one Paper/J2EE thread-rule false positive in the accepted-handoff dispatcher, NPath plus a literal-row-count finding in the new storage recovery method, one duplicated runtime-closed message, and two insufficiently distinct test counter names.
-- The six `dbcaca2e...` findings were resolved narrowly: the existing claim-executor dispatch now has a method-level documented `PMD.DoNotUseThreads` suppression because Paper plugins are not J2EE and the executor intentionally keeps recovery off the main thread; `RewardStorage` recovery was extracted into smaller transaction helpers and uses an `EXPECTED_SINGLE_ROW` constant; the runtime-closed message is a constant; and the idempotency test counters were renamed distinctly.
+- `dbcaca2e3d528d5f36e9897ff8708f797b29bf29`: exact checkout, production-release bootstrap, and Maven clean/test/package passed. Fresh exact-head Codacy returned six concrete findings. They were resolved narrowly with a documented Paper-only PMD suppression on the existing off-main claim executor, storage recovery method extraction plus a named single-row constant, a runtime closed-message constant, and distinct idempotency-test counter names.
 - The final large-file cleanup used an assertion-guarded self-cleaning workflow because the connector has no partial patch API for the large service/storage files. Comparing pre-helper `eccfd22f35dcdc7e4d7a1999f06636b60ecb74fb` to bot result `714b2f5047a1dfb6999e40e451a7a1408d369a9d` shows the aggregate diff contains exactly `RewardService.java` and `RewardStorage.java`; both temporary helper/workflow files cancel completely.
-- This checkpoint intentionally creates a normal non-bot PR head after `714b2f50...`. No exact-head build/static pass is claimed for the checkpoint commit until GitHub Actions and Codacy finish on that exact SHA.
+- `cd5df2a6379969504d20db19564392e3fe99257f`: exact checkout, pinned production release bootstrap, and Maven clean/test/package all passed. The PR workflow's Codacy-verifier step terminated after about 22 seconds while GitHub continued to report the exact Codacy check itself as `in_progress` with zero annotations. Therefore this was a CI polling-transport failure, not a Codacy/static verdict; no Codacy pass or failure is claimed for that head.
+- `09b8a6e2026f6489d12cf04dc9af8418972a44bf`: hardened only the verifier transport with bounded `curl` connection/request timeouts and retries for transient errors while keeping the same exact-head/staleness/zero-annotation acceptance rules.
+- This checkpoint intentionally creates a normal PR head after the verifier fix. No exact-head build/static pass is claimed for the checkpoint commit until GitHub Actions and Codacy finish on that exact SHA.
 
 ## Acceptance coverage implemented
 - Released V1 JAR checksum/API/status-enum contract.
@@ -61,6 +62,7 @@
 - Fixed an overbroad architecture assertion that banned every `.get(` substring, replacing it with specific synchronous `CompletionStage`/`Future` wait checks.
 - Refactored adapter, coordinator, runtime, admin, store, verifier, tests, and the LoreItems portions of `RewardService`/`RewardStorage` to satisfy concrete Codacy findings while preserving service discovery, durability, idempotency, bounds, transaction ordering, and Paper threading semantics.
 - Replaced the Python exact-head Codacy verifier after the verifier itself triggered static warnings; the shell verifier retains the exact-head/staleness guarantees without a dynamic-network API surface.
+- Hardened the shell verifier against a reproduced transient polling failure without relaxing or short-circuiting the Codacy requirement.
 - Independent pre-review found and fixed the accepted-handoff recovery defect. Recovery uses the existing Tags reward ledger rather than a parallel reward state machine.
 - Finalization acknowledgement was narrowed from reward-wide to exact-operation scope and tested with two accepted LoreItems actions under the same reward.
 - Staff audit output exposes whether an accepted operation has been reconciled into Tags (`tags-finalized`).
