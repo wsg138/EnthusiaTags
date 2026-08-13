@@ -20,6 +20,7 @@ public final class LoreItemHandoffStore implements AutoCloseable {
     private static final String PARAM_PLAYER_ID = "playerId";
     private static final String PARAM_REWARD_ID = "rewardId";
     private static final String PARAM_ACTION_ID = "actionId";
+    private static final String SELECT_PREFIX = "SELECT ";
     private static final String FROM_HANDOFFS = " FROM lore_item_handoffs ";
     private static final int EXPECTED_SINGLE_ROW = 1;
     private static final String SELECT_COLUMNS = """
@@ -146,7 +147,7 @@ public final class LoreItemHandoffStore implements AutoCloseable {
         String reward = canonicalId(rewardId, PARAM_REWARD_ID);
         String action = canonicalId(actionId, PARAM_ACTION_ID);
         try (PreparedStatement statement = connection.prepareStatement(
-            "SELECT " + SELECT_COLUMNS + FROM_HANDOFFS
+            SELECT_PREFIX + SELECT_COLUMNS + FROM_HANDOFFS
                 + "WHERE player_uuid = ? AND reward_id = ? AND action_id = ?")) {
             statement.setString(1, playerId.toString());
             statement.setString(2, reward);
@@ -160,7 +161,7 @@ public final class LoreItemHandoffStore implements AutoCloseable {
     public synchronized LoreItemHandoffRecord loadByOperationId(String externalOperationId) throws SQLException {
         String operationId = requiredText(externalOperationId, "externalOperationId");
         try (PreparedStatement statement = connection.prepareStatement(
-            "SELECT " + SELECT_COLUMNS + FROM_HANDOFFS + "WHERE external_operation_id = ?")) {
+            SELECT_PREFIX + SELECT_COLUMNS + FROM_HANDOFFS + "WHERE external_operation_id = ?")) {
             statement.setString(1, operationId);
             try (ResultSet result = statement.executeQuery()) {
                 return result.next() ? read(result) : null;
@@ -174,7 +175,7 @@ public final class LoreItemHandoffStore implements AutoCloseable {
         }
         List<LoreItemHandoffRecord> records = new ArrayList<>();
         try (PreparedStatement statement = connection.prepareStatement(
-            "SELECT " + SELECT_COLUMNS + FROM_HANDOFFS
+            SELECT_PREFIX + SELECT_COLUMNS + FROM_HANDOFFS
                 + "WHERE state IN ('PENDING', 'RETRY') AND next_attempt_at <= ? "
                 + "ORDER BY next_attempt_at ASC, created_at ASC LIMIT ?")) {
             statement.setLong(1, nowEpochMillis);
@@ -194,7 +195,7 @@ public final class LoreItemHandoffStore implements AutoCloseable {
         }
         List<LoreItemHandoffRecord> records = new ArrayList<>();
         try (PreparedStatement statement = connection.prepareStatement(
-            "SELECT " + SELECT_COLUMNS + FROM_HANDOFFS
+            SELECT_PREFIX + SELECT_COLUMNS + FROM_HANDOFFS
                 + "WHERE state = 'ACCEPTED' AND reward_finalized = 0 "
                 + "ORDER BY updated_at ASC, created_at ASC LIMIT ?")) {
             statement.setInt(1, limit);
@@ -231,7 +232,7 @@ public final class LoreItemHandoffStore implements AutoCloseable {
         String reward = canonicalId(rewardId, PARAM_REWARD_ID);
         List<LoreItemHandoffRecord> records = new ArrayList<>();
         try (PreparedStatement statement = connection.prepareStatement(
-            "SELECT " + SELECT_COLUMNS + FROM_HANDOFFS
+            SELECT_PREFIX + SELECT_COLUMNS + FROM_HANDOFFS
                 + "WHERE player_uuid = ? AND reward_id = ? ORDER BY action_id ASC")) {
             statement.setString(1, playerId.toString());
             statement.setString(2, reward);
