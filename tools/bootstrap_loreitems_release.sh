@@ -13,9 +13,9 @@ trap on_exit EXIT
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${ROOT_DIR}"
 
-RELEASE_VERSION="$(sed -n 's:.*<loreitems.release.version>\(.*\)</loreitems.release.version>.*:\1:p' pom.xml)"
-RELEASE_URL="$(sed -n 's:.*<loreitems.release.url>\(.*\)</loreitems.release.url>.*:\1:p' pom.xml)"
-RELEASE_SHA="$(sed -n 's:.*<loreitems.release.sha256>\(.*\)</loreitems.release.sha256>.*:\1:p' pom.xml)"
+RELEASE_VERSION="$(sed -n 's:.*<loreitems.release.version>\(.*\)</loreitems.release.version>.*:\1:p' pom.xml | head -n 1)"
+RELEASE_URL="$(sed -n 's:.*<loreitems.release.url>\(.*\)</loreitems.release.url>.*:\1:p' pom.xml | head -n 1)"
+RELEASE_SHA="$(sed -n 's:.*<loreitems.release.sha256>\(.*\)</loreitems.release.sha256>.*:\1:p' pom.xml | head -n 1)"
 DESTINATION="${ROOT_DIR}/.wp06-deps/EnthusiaLoreItems.jar"
 
 if [[ -z "${RELEASE_VERSION}" || -z "${RELEASE_URL}" || -z "${RELEASE_SHA}" ]]; then
