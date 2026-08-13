@@ -14,18 +14,28 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
 public final class BukkitLoreItemsClient implements LoreItemsClient {
-    static final long SERVICE_TIMEOUT_SECONDS = 10L;
+    static final long SERVICE_TIMEOUT_MILLIS = 10_000L;
 
     private final Supplier<LoreItemsServiceV1> serviceSupplier;
+    private final long serviceTimeoutMillis;
 
     public BukkitLoreItemsClient(JavaPlugin plugin) {
         Objects.requireNonNull(plugin, "plugin");
         ServicesManager services = plugin.getServer().getServicesManager();
         this.serviceSupplier = () -> services.load(LoreItemsServiceV1.class);
+        this.serviceTimeoutMillis = SERVICE_TIMEOUT_MILLIS;
     }
 
     BukkitLoreItemsClient(Supplier<LoreItemsServiceV1> serviceSupplier) {
+        this(serviceSupplier, SERVICE_TIMEOUT_MILLIS);
+    }
+
+    BukkitLoreItemsClient(Supplier<LoreItemsServiceV1> serviceSupplier, long serviceTimeoutMillis) {
         this.serviceSupplier = Objects.requireNonNull(serviceSupplier, "serviceSupplier");
+        if (serviceTimeoutMillis <= 0L) {
+            throw new IllegalArgumentException("serviceTimeoutMillis must be positive");
+        }
+        this.serviceTimeoutMillis = serviceTimeoutMillis;
     }
 
     @Override
@@ -76,7 +86,7 @@ public final class BukkitLoreItemsClient implements LoreItemsClient {
             return retry(externalOperationId, "STAGE_REGISTRATION_FAILURE", safeMessage(ex));
         }
 
-        return bounded.orTimeout(SERVICE_TIMEOUT_SECONDS, TimeUnit.SECONDS).handle((result, failure) -> {
+        return bounded.orTimeout(serviceTimeoutMillis, TimeUnit.MILLISECONDS).handle((result, failure) -> {
             if (failure != null) {
                 return new LoreItemsGatewayResult(
                     LoreItemsGatewayResult.Disposition.RETRY,
