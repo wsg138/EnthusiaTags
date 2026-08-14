@@ -10,35 +10,101 @@ permissions:
 
 jobs:
   patch:
-    if: github.actor != 'github-actions[bot]'
+    if: false # armed only after the checkpoint and current-head patch payload are durable
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - name: Check out exact branch head
+      - name: Check out exact checkpoint head
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: agent/wp-06-loreitems-integration
+          ref: ${{ github.sha }}
           fetch-depth: 0
 
-      - name: Apply assertion-guarded review fixes
+      - name: Verify canonical branch has not moved
+        shell: bash
+        env:
+          CHECKPOINT_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          remote_head="$(git ls-remote origin refs/heads/agent/wp-06-loreitems-integration | awk '{print $1}')"
+          test "${remote_head}" = "${CHECKPOINT_SHA}"
+
+      - name: Apply assertion-guarded current-head review fixes
         run: python3 tools/wp06_review_fix_patch.py
 
-      - name: Remove one-shot helper and workflow
+      - name: Validate exact remediation tree
+        shell: bash
         run: |
-          rm tools/wp06_review_fix_patch.py
-          rm .github/workflows/wp06-review-fix-one-shot.yml
+          set -euo pipefail
+          bash tools/bootstrap_loreitems_release.sh
+          mvn --batch-mode --no-transfer-progress clean test package
+          git diff --check
 
-      - name: Commit exact fixes
+      - name: Commit remediation and self-clean helpers
+        id: remediation
+        shell: bash
         run: |
+          set -euo pipefail
+          rm -f tools/wp06_review_fix_patch.py
+          rm -f tools/wp06_review_guardrail_patch.py
+          rm -f .github/workflows/wp06-review-fix-one-shot.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src/main/java/org/enthusia/tags/rewards/loreitems/LoreItemHandoffCoordinator.java \
-            src/main/java/org/enthusia/tags/rewards/loreitems/LoreItemHandoffStore.java \
-            src/main/java/org/enthusia/tags/rewards/loreitems/LoreItemRewardRuntime.java \
-            src/main/java/org/enthusia/tags/rewards/RewardService.java \
-            src/main/resources/config.yml \
-            src/test/java/org/enthusia/tags/rewards/loreitems/LoreItemHandoffCoordinatorTest.java \
-            src/test/java/org/enthusia/tags/rewards/loreitems/BukkitLoreItemsClientTest.java \
-            tools/wp06_review_fix_patch.py .github/workflows/wp06-review-fix-one-shot.yml
-          git diff --cached --exit-code && { echo "Expected review patch produced no changes" >&2; exit 1; } || true
-          git commit -m "WP-06: resolve runtime review findings"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "Expected WP-06 review remediation produced no changes" >&2
+            exit 1
+          fi
+          git commit -m "WP-06: resolve independent review findings"
+          source_sha="$(git rev-parse HEAD)"
+          echo "source_sha=${source_sha}" >> "$GITHUB_OUTPUT"
+
+      - name: Record exact remediation checkpoint
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ steps.remediation.outputs.source_sha }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+
+          path = Path("docs/wp-06-loreitems-integration-handoff.md")
+          text = path.read_text(encoding="utf-8")
+          text = text.replace("- Status: `IN_PROGRESS`.", "- Status: `IN_REVIEW`.", 1)
+          old = "- Exact pre-remediation branch head: `ef70f0ba68d2bb2fcae5d8687cec2e7a48f2b122`."
+          new = f"- Exact implementation/remediation head: `{os.environ['SOURCE_SHA']}`."
+          if old not in text:
+              raise SystemExit("handoff exact-head marker missing")
+          text = text.replace(old, new, 1)
+          marker = "## Exact next action\n"
+          evidence = (
+              "## Current-session validation\n"
+              "- The one-shot remediation workflow applied the accepted review fixes on the exact checkpoint tree, "
+              "then ran `tools/bootstrap_loreitems_release.sh`, `mvn --batch-mode --no-transfer-progress clean test package`, "
+              "and `git diff --check` successfully before creating the implementation commit.\n"
+              "- Exact-head PR Build/Codacy and independent review still must be re-evaluated on the final checkpoint commit; "
+              "no later gate is pre-claimed here.\n\n"
+          )
+          if marker not in text:
+              raise SystemExit("handoff next-action marker missing")
+          text = text.replace(marker, evidence + marker, 1)
+          text = text.replace(
+              "Apply the accepted review remediation on this same branch, remove the temporary one-shot helpers, run Maven/package validation, and publish an exact implementation checkpoint.",
+              "Require exact-head Build/Codacy on this checkpoint, obtain a fresh independent review, resolve every remaining actionable thread/comment, and only then normally merge PR #15.",
+              1,
+          )
+          path.write_text(text, encoding="utf-8")
+          PY
+          git add docs/wp-06-loreitems-integration-handoff.md
+          git commit -m "WP-06: checkpoint review remediation"
+
+      - name: Publish only if canonical head is unchanged
+        shell: bash
+        env:
+          CHECKPOINT_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          remote_head="$(git ls-remote origin refs/heads/agent/wp-06-loreitems-integration | awk '{print $1}')"
+          test "${remote_head}" = "${CHECKPOINT_SHA}"
           git push origin HEAD:agent/wp-06-loreitems-integration
