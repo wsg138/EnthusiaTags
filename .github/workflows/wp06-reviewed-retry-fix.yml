@@ -9,7 +9,7 @@ permissions:
 
 jobs:
   remediate:
-    if: github.event.head_commit.message == 'WP-06 arm reviewed-retry remediation'
+    if: github.event.head_commit.message == 'WP-06 retry recovery remediation'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -43,16 +43,8 @@ jobs:
 
           storage = Path('src/main/java/org/enthusia/tags/rewards/RewardStorage.java')
           text = storage.read_text()
-          old = '''    private static boolean isRecoverableLoreItemStatus(RewardStatus status) {
-              return status == RewardStatus.CLAIM_PENDING || status == RewardStatus.DELIVERY_FAILED;
-          }
-          '''
-          new = '''    private static boolean isRecoverableLoreItemStatus(RewardStatus status) {
-              return status == RewardStatus.CLAIM_PENDING
-                  || status == RewardStatus.DELIVERY_FAILED
-                  || status == RewardStatus.REQUIRES_RECONCILIATION;
-          }
-          '''
+          old = "    private static boolean isRecoverableLoreItemStatus(RewardStatus status) {\n        return status == RewardStatus.CLAIM_PENDING || status == RewardStatus.DELIVERY_FAILED;\n    }\n"
+          new = "    private static boolean isRecoverableLoreItemStatus(RewardStatus status) {\n        return status == RewardStatus.CLAIM_PENDING\n            || status == RewardStatus.DELIVERY_FAILED\n            || status == RewardStatus.REQUIRES_RECONCILIATION;\n    }\n"
           if text.count(old) != 1:
               raise SystemExit('RewardStorage recovery-status assertion failed')
           storage.write_text(text.replace(old, new))
@@ -60,122 +52,112 @@ jobs:
           test = Path('src/test/java/org/enthusia/tags/rewards/RewardStorageLoreItemRecoveryTest.java')
           text = test.read_text()
           import_anchor = 'import org.enthusia.tags.PerformanceMonitor;\n'
-          imports = '''import org.enthusia.tags.PerformanceMonitor;
-          import org.enthusia.tags.rewards.loreitems.LoreItemHandoffCoordinator;
-          import org.enthusia.tags.rewards.loreitems.LoreItemHandoffRecord;
-          import org.enthusia.tags.rewards.loreitems.LoreItemHandoffState;
-          import org.enthusia.tags.rewards.loreitems.LoreItemHandoffStore;
-          import org.enthusia.tags.rewards.loreitems.LoreItemsGatewayResult;
-          '''
+          imports = "import org.enthusia.tags.PerformanceMonitor;\nimport org.enthusia.tags.rewards.loreitems.LoreItemHandoffCoordinator;\nimport org.enthusia.tags.rewards.loreitems.LoreItemHandoffRecord;\nimport org.enthusia.tags.rewards.loreitems.LoreItemHandoffState;\nimport org.enthusia.tags.rewards.loreitems.LoreItemHandoffStore;\nimport org.enthusia.tags.rewards.loreitems.LoreItemsGatewayResult;\n"
           if text.count(import_anchor) != 1:
               raise SystemExit('test import assertion failed')
           text = text.replace(import_anchor, imports)
-          text = text.replace('import java.util.UUID;\n', 'import java.util.UUID;\nimport java.util.concurrent.CompletableFuture;\n')
+          uuid_import = 'import java.util.UUID;\n'
+          if text.count(uuid_import) != 1:
+              raise SystemExit('UUID import assertion failed')
+          text = text.replace(uuid_import, uuid_import + 'import java.util.concurrent.CompletableFuture;\n')
 
           class_anchor = 'class RewardStorageLoreItemRecoveryTest {\n'
-          constants = '''class RewardStorageLoreItemRecoveryTest {
-              private static final UUID PLAYER = UUID.fromString("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
-          '''
           if text.count(class_anchor) != 1:
               raise SystemExit('test class assertion failed')
-          text = text.replace(class_anchor, constants)
-          text = text.replace('    private static final String FINGERPRINT = "v1:lore-item:hourglass";\n',
-                              '    private static final String DEFINITION = "hourglass";\n'
-                              '    private static final String FINGERPRINT = "v1:lore-item:hourglass";\n')
-          text = text.replace('        UUID playerId = UUID.fromString("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");\n',
-                              '        UUID playerId = PLAYER;\n')
-          action_block = '''        RewardAction action = new RewardAction(
-              ACTION,
-              RewardActionType.LORE_ITEM,
-              "hourglass",
-              0.0D,
-              "Hourglass",
-              null,
-              0,
-              null,
-              List.of(),
-              true);
-          '''
-          if text.count(action_block) != 1:
-              raise SystemExit('existing action fixture assertion failed')
-          text = text.replace(action_block, '        RewardAction action = loreAction();\n')
+          text = text.replace(
+              class_anchor,
+              class_anchor + '    private static final UUID PLAYER = UUID.fromString("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");\n')
+          fingerprint_anchor = '    private static final String FINGERPRINT = "v1:lore-item:hourglass";\n'
+          if text.count(fingerprint_anchor) != 1:
+              raise SystemExit('fingerprint constant assertion failed')
+          text = text.replace(
+              fingerprint_anchor,
+              '    private static final String DEFINITION = "hourglass";\n' + fingerprint_anchor)
+          player_line = '        UUID playerId = UUID.fromString("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");\n'
+          if text.count(player_line) != 1:
+              raise SystemExit('existing player fixture assertion failed')
+          text = text.replace(player_line, '        UUID playerId = PLAYER;\n')
 
-          addition = '''
+          action_start = text.index('        RewardAction action = new RewardAction(')
+          action_end = text.index('\n\n        RewardStorage storage', action_start)
+          text = text[:action_start] + '        RewardAction action = loreAction();' + text[action_end:]
 
-              @Test
-              void staffRetryCanFinalizePreviouslyReviewedLoreItemAction(@TempDir Path tempDir) throws Exception {
-                  RewardAction action = loreAction();
-                  RewardStorage storage = new RewardStorage(
-                      tempDir.resolve("reviewed-retry-rewards.db").toFile(),
-                      new PerformanceMonitor(null));
-                  storage.init();
-                  try (LoreItemHandoffStore handoffs = new LoreItemHandoffStore(
-                      tempDir.resolve("reviewed-retry-handoffs.db"))) {
-                      storage.saveActionLedgerNow(
-                          PLAYER, REWARD, action, FINGERPRINT, RewardStatus.CLAIM_PENDING, null, null);
-                      storage.saveActionLedgerNow(
-                          PLAYER, REWARD, action, FINGERPRINT, RewardStatus.REQUIRES_RECONCILIATION, null,
-                          "LoreItems review required");
+          addition = r'''
 
-                      long now = System.currentTimeMillis();
-                      LoreItemHandoffRecord prepared = handoffs.prepare(
-                          PLAYER, REWARD, ACTION, DEFINITION, now);
-                      LoreItemHandoffRecord reviewed = handoffs.markReview(
-                          prepared.externalOperationId(),
-                          "UNKNOWN_DEFINITION",
-                          "definition corrected before staff retry",
-                          now);
-                      assertEquals(LoreItemHandoffState.REVIEW, reviewed.state());
+    @Test
+    void staffRetryCanFinalizePreviouslyReviewedLoreItemAction(@TempDir Path tempDir) throws Exception {
+        RewardAction action = loreAction();
+        RewardStorage storage = new RewardStorage(
+            tempDir.resolve("reviewed-retry-rewards.db").toFile(),
+            new PerformanceMonitor(null));
+        storage.init();
+        try (LoreItemHandoffStore handoffs = new LoreItemHandoffStore(
+            tempDir.resolve("reviewed-retry-handoffs.db"))) {
+            storage.saveActionLedgerNow(
+                PLAYER, REWARD, action, FINGERPRINT, RewardStatus.CLAIM_PENDING, null, null);
+            storage.saveActionLedgerNow(
+                PLAYER, REWARD, action, FINGERPRINT, RewardStatus.REQUIRES_RECONCILIATION, null,
+                "LoreItems review required");
 
-                      LoreItemHandoffRecord retried = handoffs.requestRetry(PLAYER, REWARD, ACTION, now);
-                      assertEquals(LoreItemHandoffState.RETRY, retried.state());
+            long now = System.currentTimeMillis();
+            LoreItemHandoffRecord prepared = handoffs.prepare(
+                PLAYER, REWARD, ACTION, DEFINITION, now);
+            LoreItemHandoffRecord reviewed = handoffs.markReview(
+                prepared.externalOperationId(),
+                "UNKNOWN_DEFINITION",
+                "definition corrected before staff retry",
+                now);
+            assertEquals(LoreItemHandoffState.REVIEW, reviewed.state());
 
-                      LoreItemHandoffCoordinator coordinator = new LoreItemHandoffCoordinator(
-                          handoffs,
-                          (definitionKey, targetPlayer, operationId) -> {
-                              assertEquals(DEFINITION, definitionKey);
-                              assertEquals(PLAYER, targetPlayer);
-                              assertEquals(prepared.externalOperationId(), operationId);
-                              return CompletableFuture.completedFuture(new LoreItemsGatewayResult(
-                                  LoreItemsGatewayResult.Disposition.ACCEPTED,
-                                  "ACCEPTED_QUEUED",
-                                  operationId,
-                                  "accepted after staff retry"));
-                          },
-                          Runnable::run);
-                      LoreItemHandoffRecord accepted = coordinator.handoff(
-                          PLAYER, REWARD, ACTION, DEFINITION).toCompletableFuture().join();
-                      assertEquals(LoreItemHandoffState.ACCEPTED, accepted.state());
+            LoreItemHandoffRecord retried = handoffs.requestRetry(PLAYER, REWARD, ACTION, now);
+            assertEquals(LoreItemHandoffState.RETRY, retried.state());
 
-                      assertTrue(storage.acceptLoreItemHandoffNow(
-                          PLAYER, REWARD, action, FINGERPRINT, "accepted after staff retry"));
-                      assertEquals(
-                          RewardStatus.CLAIMED,
-                          storage.loadActionLedgerNow(PLAYER, REWARD).get(ACTION).status());
+            LoreItemHandoffCoordinator coordinator = new LoreItemHandoffCoordinator(
+                handoffs,
+                (definitionKey, targetPlayer, operationId) -> {
+                    assertEquals(DEFINITION, definitionKey);
+                    assertEquals(PLAYER, targetPlayer);
+                    assertEquals(prepared.externalOperationId(), operationId);
+                    return CompletableFuture.completedFuture(new LoreItemsGatewayResult(
+                        LoreItemsGatewayResult.Disposition.ACCEPTED,
+                        "ACCEPTED_QUEUED",
+                        operationId,
+                        "accepted after staff retry"));
+                },
+                Runnable::run);
+            LoreItemHandoffRecord accepted = coordinator.handoff(
+                PLAYER, REWARD, ACTION, DEFINITION).toCompletableFuture().join();
+            assertEquals(LoreItemHandoffState.ACCEPTED, accepted.state());
 
-                      storage.finalizeRewardNow(PLAYER, REWARD);
-                      assertTrue(storage.loadNow(PLAYER).claims().contains(REWARD));
-                      handoffs.markRewardFinalized(accepted.externalOperationId(), System.currentTimeMillis());
-                      assertTrue(handoffs.loadByOperationId(accepted.externalOperationId()).rewardFinalized());
-                  } finally {
-                      storage.close();
-                  }
-              }
+            assertTrue(storage.acceptLoreItemHandoffNow(
+                PLAYER, REWARD, action, FINGERPRINT, "accepted after staff retry"));
+            assertEquals(
+                RewardStatus.CLAIMED,
+                storage.loadActionLedgerNow(PLAYER, REWARD).get(ACTION).status());
 
-              private static RewardAction loreAction() {
-                  return new RewardAction(
-                      ACTION,
-                      RewardActionType.LORE_ITEM,
-                      DEFINITION,
-                      0.0D,
-                      "Hourglass",
-                      null,
-                      0,
-                      null,
-                      List.of(),
-                      true);
-              }
-          '''
+            storage.finalizeRewardNow(PLAYER, REWARD);
+            assertTrue(storage.loadNow(PLAYER).claims().contains(REWARD));
+            handoffs.markRewardFinalized(accepted.externalOperationId(), System.currentTimeMillis());
+            assertTrue(handoffs.loadByOperationId(accepted.externalOperationId()).rewardFinalized());
+        } finally {
+            storage.close();
+        }
+    }
+
+    private static RewardAction loreAction() {
+        return new RewardAction(
+            ACTION,
+            RewardActionType.LORE_ITEM,
+            DEFINITION,
+            0.0D,
+            "Hourglass",
+            null,
+            0,
+            null,
+            List.of(),
+            true);
+    }
+'''
           if not text.endswith('\n}\n'):
               raise SystemExit('test file closing assertion failed')
           text = text[:-3] + addition + '\n}\n'
