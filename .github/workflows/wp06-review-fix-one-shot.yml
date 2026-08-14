@@ -43,6 +43,12 @@ jobs:
           python3 tools/wp06_patch_bootstrap.py
           python3 -m py_compile tools/wp06_review_fix_patch.py
           python3 tools/wp06_review_fix_patch.py
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("src/main/java/org/enthusia/tags/rewards/loreitems/LoreItemRewardRuntime.java")
+          path.write_text(path.read_text(encoding="utf-8").rstrip() + "\n", encoding="utf-8")
+          PY
 
       - name: Validate exact remediation tree
         shell: bash
@@ -50,6 +56,7 @@ jobs:
           set -euo pipefail
           bash tools/bootstrap_loreitems_release.sh
           mvn --batch-mode --no-transfer-progress clean test package
+          git restore --worktree --source=HEAD -- dependency-reduced-pom.xml 2>/dev/null || rm -f dependency-reduced-pom.xml
           git diff --check
 
       - name: Commit remediation and self-clean helpers
