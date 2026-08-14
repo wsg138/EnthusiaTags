@@ -9,7 +9,7 @@ permissions:
 
 jobs:
   remediate:
-    if: github.event.head_commit.message == 'WP-06: arm reviewed-retry remediation'
+    if: github.event.head_commit.message == 'WP-06 arm reviewed-retry remediation'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
