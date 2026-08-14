@@ -2,73 +2,76 @@
 
 ## Package state
 - Active package: WP-06 — EnthusiaTags integration with LoreItems service API.
-- Status: `BLOCKED`.
+- Status: `IN_PROGRESS`.
 - Canonical implementation repository: `wsg138/EnthusiaTags`.
 - Canonical branch: `agent/wp-06-loreitems-integration`.
 - Canonical PR: #15 — `WP-06: integrate EnthusiaTags with LoreItems service API`.
+- Exact resumed predecessor/checkpoint head: `2cb213a4a8f2bc23844ce48d6d038242aa1a4338`.
+- Final product implementation head before documentation checkpoints: `7222c6387973e7fbe9bd068b02aa49d448b4c6ea`.
 - Exact EnthusiaTags package base `main`: `36bd6c51b7db6a94c866e5ce938b08e696050235`.
-- Exact validated implementation/evidence head immediately before this checkpoint: `7222c6387973e7fbe9bd068b02aa49d448b4c6ea`.
-- Exact EnthusiaLoreItems dependency `main` used by WP-06: `ed91b1d46751544ed86fa7fa7de43cc769fc68a6`.
-- Production LoreItems release: `v1.0.0`.
+- Exact EnthusiaLoreItems dependency `main`: `ed91b1d46751544ed86fa7fa7de43cc769fc68a6`.
+- Production LoreItems release: `v1.0.0`, non-draft/non-prerelease and bound to the dependency SHA above.
 - Production LoreItems JAR SHA-256: `7c862b0ae545d710a33267ad6e19a4ae26d97323e97f40707c1475c9f9ba7063`.
 
 ## Routing reconciliation
-- LoreItems WP-01 through WP-05 are complete on verified live `main`; WP-06 remains the only unfinished fixed-program package.
-- The production `v1.0.0` release satisfies WP-06's released-API dependency gate.
-- `agent/wp-06-loreitems-integration` and PR #15 are the canonical unfinished WP-06 lock, so they must be resumed rather than replaced.
-- No next package exists after WP-06.
+- Live LoreItems `main`, merged WP-05 PR #26, and production release `v1.0.0` verify that WP-01 through WP-05 are complete and WP-06's released-API dependency is satisfied.
+- `agent/wp-06-loreitems-integration` and open PR #15 are the single canonical unfinished package lock and therefore must be resumed.
+- LoreItems branches `docs/wp-06-complete` and `agent/wp-06-loreitems-api-blocker` do not exist at this resume point, so there is no competing WP-06 finalization/API-blocker lock.
+- No package exists after WP-06.
 
 ## Implemented and validated scope
 - `LORE_ITEM` is a first-class Tags reward action with strict definition-key validation and stable action identity.
-- Tags uses only the released `net.enthusia.loreitems.api.v1.LoreItemsServiceV1` Bukkit service; there is no LoreItems command fallback, direct LoreItems database access, or implementation-package coupling.
-- A deterministic caller-owned external operation ID is reused across retry, timeout, reload, restart, and crash recovery.
-- Tags owns a durable SQLite handoff ledger that persists intent before cross-plugin delivery and tracks state, outcome, attempts, retry scheduling, audit detail, and exact-operation Tags finalization.
-- Retry sweeps are bounded and isolated per record; automatic attempts have a configured ceiling that moves exhausted operations to staff `REVIEW`.
-- Accepted handoffs reconcile into the normal Tags reward ledger before their exact external operation is marked finalized.
-- Unrecoverable accepted reconciliation moves to durable `REVIEW` instead of permanently occupying the finalization queue.
-- Staff `lorestatus` / `loreretry` controls preserve the same operation identity and expose durable status.
-- The final review-found recovery defect is fixed: an identity-verified LoreItems action already in Tags `REQUIRES_RECONCILIATION` may be recovered after explicit staff retry and later LoreItems acceptance.
-- Direct regression coverage now exercises `REQUIRES_RECONCILIATION` / handoff `REVIEW` → staff retry → `RETRY` → LoreItems `ACCEPTED` → Tags action `CLAIMED` → reward finalized → exact handoff finalization marker.
-- Release publication bootstraps the checksum-pinned LoreItems release and all third-party Actions used by the package workflows are pinned to immutable SHAs.
-- Temporary remediation workflows used during review repair were fully removed; comparing `b397afc9cc398e18d0ddb442b159b1e58ba06212` to final implementation head `7222c6387973e7fbe9bd068b02aa49d448b4c6ea` leaves net changes only in `RewardStorage.java` and `RewardStorageLoreItemRecoveryTest.java`.
+- Tags uses only released `net.enthusia.loreitems.api.v1.LoreItemsServiceV1` via Bukkit `ServicesManager`; there is no command fallback, direct LoreItems SQLite access, or implementation-class coupling.
+- A deterministic caller-owned external operation ID is reused across retry, timeout, reload, restart, staff retry, and crash recovery.
+- Tags persists handoff intent before the cross-plugin request in `lore-item-handoffs.db` and retains definition key, operation identity, state/outcome, attempts, retry scheduling, error detail, and exact-operation finalization state.
+- Retry/finalization sweeps are bounded; failures are isolated per record; automatic retries have a configured attempt ceiling that moves exhausted records to staff `REVIEW`.
+- Accepted handoffs reconcile into the normal Tags reward ledger before that exact external operation is marked finalized.
+- Permanently unrecoverable accepted reconciliation moves to `REVIEW` rather than blocking the finalization queue.
+- Privileged `lorestatus` / `loreretry` preserve operation identity and expose durable audit/recovery state.
+- The last review-found recovery defect is fixed: identity-verified Tags `REQUIRES_RECONCILIATION` can recover through handoff `REVIEW` → explicit staff retry → LoreItems acceptance → Tags action `CLAIMED` → reward finalized → exact handoff finalized.
+- Direct regression coverage exercises that complete recovery path.
+- Build and rolling-publication workflows bootstrap the checksum-pinned production LoreItems release and pin third-party Actions to immutable SHAs.
+- Temporary review-remediation workflow/helper machinery has been removed from the final net tree.
 
-## Exact validation evidence for implementation head `7222c6387973e7fbe9bd068b02aa49d448b4c6ea`
-- Pull-request Build run: `31822885467` — `completed/success`.
+## Exact predecessor validation evidence — `2cb213a4a8f2bc23844ce48d6d038242aa1a4338`
+- PR Build workflow run `31823276028`: `completed/success`.
 - Exact checkout verification: success.
-- Java 21 setup: success.
-- Production LoreItems `v1.0.0` bootstrap and SHA-256 verification: success.
+- Production LoreItems `v1.0.0` bootstrap/checksum verification: success.
 - Maven command: `mvn --batch-mode --no-transfer-progress clean test package`.
 - Maven result: `107` tests, `0` failures, `0` errors, `0` skipped; package success.
-- Exact-head Codacy verifier: success.
-- External Codacy Static Code Analysis check `94840333512`: success, `0` annotations / no issues.
-- JAR artifact upload: success.
-- Artifact ID: `9227669630`.
-- Artifact name: `EnthusiaTags-7222c6387973e7fbe9bd068b02aa49d448b4c6ea`.
-- Artifact ZIP SHA-256 reported by Actions: `de44ba72f2f858a653eafe7b9876d2f3b41a7c82c7d71c346f326f3b5c2c9444`.
-- PR #15 remained open, non-draft, mergeable, and based on unchanged Tags `main` `36bd6c51b7db6a94c866e5ce938b08e696050235` at the time of validation.
-- All existing inline review threads were resolved; unresolved thread count was zero.
+- External Codacy check `94841532667`: `completed/success`, zero annotations.
+- Exact-head Codacy verifier in Build: success.
+- JAR artifact ID `9227813016`, name `EnthusiaTags-2cb213a4a8f2bc23844ce48d6d038242aa1a4338`.
+- Artifact SHA-256: `4cd2ad18502b7fde53092e6c2a578e71c5d7a84d26602e0c1e965719bf86f028`.
+- PR #15 is open, non-draft, mergeable, and based on unchanged Tags `main` `36bd6c51b7db6a94c866e5ce938b08e696050235` at reconciliation time.
+- Review-thread reconciliation reports zero unresolved inline threads and no submitted `CHANGES_REQUESTED` review.
 
-## Independent-review history
-- Independent review on an earlier exact head found the remaining publish-workflow action-pin issue; it was fixed and revalidated.
-- A later independent review found the staff `loreretry` → accepted handoff → Tags `REQUIRES_RECONCILIATION` recovery defect described above.
-- That defect was fixed on the canonical branch and exact implementation head `7222c6387973e7fbe9bd068b02aa49d448b4c6ea` passed all build/static/artifact gates listed above.
-- A fresh independent review was explicitly requested for `7222c6387973e7fbe9bd068b02aa49d448b4c6ea` after all fixes and temporary-workflow cleanup.
+## Independent-review history and resume rationale
+- CodeRabbit's latest completed independent review of product implementation head `7222c6387973e7fbe9bd068b02aa49d448b4c6ea` reported no remaining actionable findings and verified the final recovery fix and regression path.
+- The later `2cb213a4...` commit changed only this durable handoff document to record an external review-quota blocker, so the package still requires a fresh independent review of the then-current exact checkpoint head before merge.
+- CodeRabbit's status on `2cb213a4...` is `success` with description `Review rate limited`; that status is not treated as review proof.
+- The prior blocker report said another review would be available approximately 109 minutes after the failed request. That retry window has elapsed by this resume session, so requesting a fresh review is now actionable. Elapsed time alone is not treated as proof that quota actually reset; the next CodeRabbit response must verify that.
 
-## Verified external blocker
-- CodeRabbit reported that the fresh review of exact head `7222c6387973e7fbe9bd068b02aa49d448b4c6ea` **could not start** because the PR review quota is exhausted.
-- CodeRabbit reported the next review availability as approximately `109 minutes` after the failed request on 2026-08-14.
-- The repository has no alternate collaborator who can provide an independent GitHub review; the collaborators API lists only owner `wsg138`.
-- Self-review by the package worker or repository owner is not substituted for the universal prompt's required independent-review gate.
-- The green/pending CodeRabbit commit status is not accepted as review evidence when the PR conversation explicitly says the review did not start.
+## Completed acceptance criteria
+- Full WP-06 implementation/configuration/documentation scope is present on the canonical branch.
+- Required cross-plugin idempotency, recovery, retry bounds, service-unavailable behavior, staff controls, dependency isolation, exact-release pinning, and regression tests are implemented.
+- Current predecessor exact-head Build/Maven/Codacy/artifact gates are successful.
+- All currently visible inline review threads are resolved and there is no submitted requested-changes review.
 
-## Remaining package criteria
-1. After the external review quota resets, reconcile live branch/PR/base state and require all applicable exact-head checks on the then-current canonical PR head to be successful.
-2. Request and obtain a fresh independent review that covers the package risk list and records no remaining actionable blocker or requested changes.
-3. Reconcile all review submissions/comments and require zero unresolved review threads.
+## Remaining acceptance criteria
+1. Re-fetch this resume checkpoint and require fresh exact-head Build/Maven/Codacy/artifact evidence because this documentation commit makes predecessor checks stale.
+2. Request and obtain the mandatory fresh independent review of that exact checkpoint head; require zero actionable findings and no requested changes.
+3. Reconcile review submissions, PR conversation comments, statuses/checks, and inline threads; unresolved thread count must remain zero.
 4. Normally merge PR #15 with GitHub's merge-commit method only; no squash, rebase, force-push, or auto-merge.
-5. Verify the exact EnthusiaTags `main` merge commit and all applicable post-merge workflows, including the normal Build and rolling latest publication.
+5. Verify exact EnthusiaTags live `main`, successful post-merge Build, and successful rolling `latest` publication from the merge.
 6. Create LoreItems branch `docs/wp-06-complete` from refreshed live LoreItems `main`, open exact-title PR `WP-06: record final remaining-work completion`, and change only `ai-agents/WORKSPACE-STATE.md`, `ai-agents/WORK-QUEUE.md`, and `ai-agents/reports/agent-handoffs/latest.md`.
-7. Record the exact Tags merge/evidence and final fixed-program progress as `6/6` complete, `0` remaining, `100%` weighted; verify/review the docs-only PR, normally merge it, verify LoreItems live `main`, and stop.
+7. Record exact Tags merge/evidence and final fixed-program state as 6/6 complete, 0 remaining, 100% weighted; run required LoreItems exact-head review/checks, normally merge, verify live LoreItems `main`, and stop.
+
+## Known findings
+None unresolved at this resume checkpoint.
+
+## Blocker
+None currently verified. The previous CodeRabbit rate-limit window has elapsed enough to justify a new request. If the new request is explicitly rate-limited again, WP-06 returns to `BLOCKED` with that fresh external evidence.
 
 ## Exact next action
-After CodeRabbit's external review quota resets, resume this same canonical WP-06 branch/PR. Reconcile the checkpoint head and current Tags `main`, require fresh exact-head build/static evidence if this checkpoint commit made the prior implementation-head evidence stale, then request the mandatory independent review. If clean, merge normally and complete the mandated LoreItems three-file finalization PR; do not begin any new package.
+Publish this resume checkpoint as a fast-forward child of exact head `2cb213a4a8f2bc23844ce48d6d038242aa1a4338`, immediately re-fetch branch/PR/main to exclude concurrent movement, require the resulting exact-head automated gates, then request the mandatory fresh independent review on that same exact SHA. If clean, merge normally and complete the required LoreItems three-file finalization PR. Do not create another package.
