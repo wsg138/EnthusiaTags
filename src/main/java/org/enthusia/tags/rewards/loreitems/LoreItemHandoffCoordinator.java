@@ -15,6 +15,7 @@ import java.util.function.LongSupplier;
 public final class LoreItemHandoffCoordinator {
     static final int MAX_RETRY_BATCH = 50;
     static final int DEFAULT_MAX_AUTOMATIC_ATTEMPTS = 48;
+    private static final int MIN_AUTOMATIC_ATTEMPTS = 1;
     private static final String STAFF_RETRY_REQUESTED = "STAFF_RETRY_REQUESTED";
     static final long BASE_RETRY_MILLIS = 5_000L;
     static final long MAX_RETRY_MILLIS = 300_000L;
@@ -52,7 +53,7 @@ public final class LoreItemHandoffCoordinator {
         this.client = Objects.requireNonNull(client, "client");
         this.ioExecutor = Objects.requireNonNull(ioExecutor, "ioExecutor");
         this.clock = Objects.requireNonNull(clock, "clock");
-        if (maxAutomaticAttempts < 1) {
+        if (maxAutomaticAttempts < MIN_AUTOMATIC_ATTEMPTS) {
             throw new IllegalArgumentException("maxAutomaticAttempts must be positive");
         }
         this.maxAutomaticAttempts = maxAutomaticAttempts;

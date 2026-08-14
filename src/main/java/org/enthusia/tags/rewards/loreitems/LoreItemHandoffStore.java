@@ -20,6 +20,7 @@ public final class LoreItemHandoffStore implements AutoCloseable {
     private static final String PARAM_PLAYER_ID = "playerId";
     private static final String PARAM_REWARD_ID = "rewardId";
     private static final String PARAM_ACTION_ID = "actionId";
+    private static final String PARAM_EXTERNAL_OPERATION_ID = "externalOperationId";
     private static final String SELECT_PREFIX = "SELECT ";
     private static final String FROM_HANDOFFS = " FROM lore_item_handoffs ";
     private static final int EXPECTED_SINGLE_ROW = 1;
@@ -87,7 +88,7 @@ public final class LoreItemHandoffStore implements AutoCloseable {
         String error,
         long nextAttemptAtEpochMillis,
         long nowEpochMillis) throws SQLException {
-        String operationId = requiredText(externalOperationId, "externalOperationId");
+        String operationId = requiredText(externalOperationId, PARAM_EXTERNAL_OPERATION_ID);
         Objects.requireNonNull(state, "state");
         try (PreparedStatement statement = connection.prepareStatement("""
             UPDATE lore_item_handoffs
@@ -117,7 +118,7 @@ public final class LoreItemHandoffStore implements AutoCloseable {
         String outcome,
         String detail,
         long nowEpochMillis) throws SQLException {
-        String operationId = requiredText(externalOperationId, "externalOperationId");
+        String operationId = requiredText(externalOperationId, PARAM_EXTERNAL_OPERATION_ID);
         try (PreparedStatement statement = connection.prepareStatement("""
             UPDATE lore_item_handoffs
                SET state = 'REVIEW', last_outcome = ?, last_error = ?, next_attempt_at = 0, updated_at = ?
@@ -186,7 +187,7 @@ public final class LoreItemHandoffStore implements AutoCloseable {
     }
 
     public synchronized LoreItemHandoffRecord loadByOperationId(String externalOperationId) throws SQLException {
-        String operationId = requiredText(externalOperationId, "externalOperationId");
+        String operationId = requiredText(externalOperationId, PARAM_EXTERNAL_OPERATION_ID);
         try (PreparedStatement statement = connection.prepareStatement(
             SELECT_PREFIX + SELECT_COLUMNS + FROM_HANDOFFS + "WHERE external_operation_id = ?")) {
             statement.setString(1, operationId);
@@ -238,7 +239,7 @@ public final class LoreItemHandoffStore implements AutoCloseable {
     public synchronized void markRewardFinalized(
         String externalOperationId,
         long nowEpochMillis) throws SQLException {
-        String operationId = requiredText(externalOperationId, "externalOperationId");
+        String operationId = requiredText(externalOperationId, PARAM_EXTERNAL_OPERATION_ID);
         try (PreparedStatement statement = connection.prepareStatement("""
             UPDATE lore_item_handoffs
                SET reward_finalized = 1, updated_at = ?

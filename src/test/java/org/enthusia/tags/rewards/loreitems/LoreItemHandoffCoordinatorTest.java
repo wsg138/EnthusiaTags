@@ -14,13 +14,15 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 class LoreItemHandoffCoordinatorTest {
     private static final String ACTION = "action";
     private static final String REWARD = "reward";
+    private static final String PLAYER_ID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+    private static final String HOURGLASS = "hourglass";
 
     @TempDir
     Path tempDir;
 
     @Test
     void unavailableServiceKeepsSameOperationPendingUntilDueRetrySucceeds() throws Exception {
-        UUID player = UUID.fromString("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
+        UUID player = UUID.fromString(PLAYER_ID);
         AtomicLong clock = new AtomicLong(10_000L);
         AtomicInteger calls = new AtomicInteger();
         LoreItemsClient client = (definition, playerId, operation) -> {
@@ -43,19 +45,19 @@ class LoreItemHandoffCoordinatorTest {
             LoreItemHandoffCoordinator coordinator = new LoreItemHandoffCoordinator(
                 store, client, Runnable::run, clock::get);
 
-            LoreItemHandoffRecord first = coordinator.handoff(player, REWARD, ACTION, "hourglass")
+            LoreItemHandoffRecord first = coordinator.handoff(player, REWARD, ACTION, HOURGLASS)
                 .toCompletableFuture().join();
             assertEquals(LoreItemHandoffState.RETRY, first.state());
             assertEquals(1, first.attempts());
             assertEquals(15_000L, first.nextAttemptAtEpochMillis());
 
-            LoreItemHandoffRecord tooSoon = coordinator.handoff(player, REWARD, ACTION, "hourglass")
+            LoreItemHandoffRecord tooSoon = coordinator.handoff(player, REWARD, ACTION, HOURGLASS)
                 .toCompletableFuture().join();
             assertEquals(first.externalOperationId(), tooSoon.externalOperationId());
             assertEquals(1, calls.get());
 
             clock.set(15_000L);
-            LoreItemHandoffRecord accepted = coordinator.handoff(player, REWARD, ACTION, "hourglass")
+            LoreItemHandoffRecord accepted = coordinator.handoff(player, REWARD, ACTION, HOURGLASS)
                 .toCompletableFuture().join();
             assertEquals(LoreItemHandoffState.ACCEPTED, accepted.state());
             assertEquals(first.externalOperationId(), accepted.externalOperationId());
@@ -66,7 +68,7 @@ class LoreItemHandoffCoordinatorTest {
 
     @Test
     void crashAfterLoreItemsAcceptanceReplaysPreparedIntentWithSameOperationId() throws Exception {
-        UUID player = UUID.fromString("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
+        UUID player = UUID.fromString(PLAYER_ID);
         Path database = tempDir.resolve("restart.db");
         String operationId;
 
@@ -103,7 +105,7 @@ class LoreItemHandoffCoordinatorTest {
 
     @Test
     void permanentServiceRejectionMovesClaimToReviewWithoutAutomaticRetry() throws Exception {
-        UUID player = UUID.fromString("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
+        UUID player = UUID.fromString(PLAYER_ID);
         AtomicInteger calls = new AtomicInteger();
         LoreItemsClient client = (definition, playerId, operation) -> {
             calls.incrementAndGet();
@@ -131,7 +133,7 @@ class LoreItemHandoffCoordinatorTest {
 
     @Test
     void automaticRetryLimitMovesHandoffToReviewAndStaffRetryCanTryAgain() throws Exception {
-        UUID player = UUID.fromString("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
+        UUID player = UUID.fromString(PLAYER_ID);
         AtomicLong clock = new AtomicLong(1000L);
         AtomicInteger calls = new AtomicInteger();
         LoreItemsClient client = (definition, playerId, operation) -> {
@@ -147,10 +149,10 @@ class LoreItemHandoffCoordinatorTest {
             LoreItemHandoffCoordinator coordinator = new LoreItemHandoffCoordinator(
                 store, client, Runnable::run, clock::get, 2);
 
-            LoreItemHandoffRecord first = coordinator.handoff(player, REWARD, ACTION, "hourglass")
+            LoreItemHandoffRecord first = coordinator.handoff(player, REWARD, ACTION, HOURGLASS)
                 .toCompletableFuture().join();
             clock.set(first.nextAttemptAtEpochMillis());
-            LoreItemHandoffRecord exhausted = coordinator.handoff(player, REWARD, ACTION, "hourglass")
+            LoreItemHandoffRecord exhausted = coordinator.handoff(player, REWARD, ACTION, HOURGLASS)
                 .toCompletableFuture().join();
 
             assertEquals(2, calls.get());
@@ -161,7 +163,7 @@ class LoreItemHandoffCoordinatorTest {
 
             LoreItemHandoffRecord staffRetry = store.requestRetry(player, REWARD, ACTION, clock.get());
             assertEquals("STAFF_RETRY_REQUESTED", staffRetry.lastOutcome());
-            LoreItemHandoffRecord afterStaffAttempt = coordinator.handoff(player, REWARD, ACTION, "hourglass")
+            LoreItemHandoffRecord afterStaffAttempt = coordinator.handoff(player, REWARD, ACTION, HOURGLASS)
                 .toCompletableFuture().join();
             assertEquals(3, calls.get());
             assertEquals(3, afterStaffAttempt.attempts());
@@ -171,7 +173,7 @@ class LoreItemHandoffCoordinatorTest {
 
     @Test
     void retrySweepKeepsSuccessfulRecordsWhenAnotherRecordThrows() throws Exception {
-        UUID firstPlayer = UUID.fromString("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
+        UUID firstPlayer = UUID.fromString(PLAYER_ID);
         UUID secondPlayer = UUID.fromString("11111111-2222-3333-4444-555555555555");
         AtomicInteger failures = new AtomicInteger();
         LoreItemsClient client = (definition, playerId, operation) -> {
