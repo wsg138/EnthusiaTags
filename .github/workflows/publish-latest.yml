@@ -24,6 +24,9 @@ jobs:
           java-version: '21'
           cache: maven
 
+      - name: Bootstrap pinned production LoreItems release
+        run: bash tools/bootstrap_loreitems_release.sh
+
       - name: Test and package
         run: mvn --batch-mode --no-transfer-progress clean test package
 
