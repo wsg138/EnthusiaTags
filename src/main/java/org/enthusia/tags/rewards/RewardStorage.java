@@ -1225,7 +1225,9 @@ public final class RewardStorage {
     }
 
     private static boolean isRecoverableLoreItemStatus(RewardStatus status) {
-        return status == RewardStatus.CLAIM_PENDING || status == RewardStatus.DELIVERY_FAILED;
+        return status == RewardStatus.CLAIM_PENDING
+            || status == RewardStatus.DELIVERY_FAILED
+            || status == RewardStatus.REQUIRES_RECONCILIATION;
     }
 
     public RewardStatus reconcileActionNow(UUID playerId, String rewardId, String actionId,
