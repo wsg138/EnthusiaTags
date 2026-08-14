@@ -12,6 +12,10 @@
         <maven.compiler.source>21</maven.compiler.source>
         <maven.compiler.target>21</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <loreitems.release.version>1.0.0</loreitems.release.version>
+        <loreitems.release.url>https://github.com/wsg138/EnthusiaLoreItems/releases/download/v1.0.0/EnthusiaLoreItems.jar</loreitems.release.url>
+        <loreitems.release.sha256>7c862b0ae545d710a33267ad6e19a4ae26d97323e97f40707c1475c9f9ba7063</loreitems.release.sha256>
+        <loreitems.release.jar>${project.basedir}/.wp06-deps/EnthusiaLoreItems.jar</loreitems.release.jar>
     </properties>
 
     <repositories>
@@ -45,6 +49,12 @@
             <scope>provided</scope>
         </dependency>
         <dependency>
+            <groupId>net.enthusia</groupId>
+            <artifactId>EnthusiaLoreItems-released</artifactId>
+            <version>${loreitems.release.version}</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
             <groupId>org.xerial</groupId>
             <artifactId>sqlite-jdbc</artifactId>
             <version>3.53.2.0</version>
@@ -60,6 +70,43 @@
     <build>
         <finalName>EnthusiaTags</finalName>
         <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-antrun-plugin</artifactId>
+                <version>3.1.0</version>
+                <executions>
+                    <execution>
+                        <id>verify-pinned-loreitems-release</id>
+                        <phase>validate</phase>
+                        <goals>
+                            <goal>run</goal>
+                        </goals>
+                        <configuration>
+                            <target>
+                                <checksum file="${loreitems.release.jar}" algorithm="SHA-256"
+                                          property="loreitems.actual.sha256"/>
+                                <condition property="loreitems.release.sha256.matches">
+                                    <equals arg1="${loreitems.actual.sha256}"
+                                            arg2="${loreitems.release.sha256}"/>
+                                </condition>
+                                <fail unless="loreitems.release.sha256.matches"
+                                      message="Pinned EnthusiaLoreItems release JAR checksum mismatch"/>
+                            </target>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.5.2</version>
+                <configuration>
+                    <systemPropertyVariables>
+                        <loreitems.release.jar>${loreitems.release.jar}</loreitems.release.jar>
+                        <loreitems.release.sha256>${loreitems.release.sha256}</loreitems.release.sha256>
+                    </systemPropertyVariables>
+                </configuration>
+            </plugin>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-shade-plugin</artifactId>

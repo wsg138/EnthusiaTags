@@ -24,6 +24,17 @@ ingots, blocks, raw-gold items, or raw-gold blocks as currency. The bundled payo
 50 to 5,000 raw gold, and the loader rejects any money action above the 5,000 per-action maximum.
 Only Two Thousand Hours, Ten Million Steps, and Ultimate Survivor use the maximum.
 
+## LoreItems rewards
+
+Rewards may use `type: LORE_ITEM` to hand a definition key to the stable `LoreItemsServiceV1`
+Bukkit service exposed by EnthusiaLoreItems v1.0.0. The integration persists a caller-owned
+operation ID before the cross-plugin call and reuses it across retries, reloads, restarts, and
+uncertain results. EnthusiaLoreItems is a soft dependency, so Tags may start while it is absent;
+unaccepted handoffs remain durable and retryable instead of being marked delivered.
+
+Configuration, staff status/retry commands, staged deployment, recovery, and rollback procedures are
+documented in [`docs/loreitems-integration.md`](docs/loreitems-integration.md).
+
 ## Daily rewards
 
 `/daily` uses calendar dates in `America/Indiana/Indianapolis` by default. The timezone, displayed
@@ -65,17 +76,20 @@ Text and sound settings are in `messages.yml` and `config.yml`.
 
 ## Build
 
-Use JDK 21 and Maven:
+Use JDK 21 and Maven. The LoreItems V1 compile boundary is pinned to the exact production v1.0.0
+release artifact, so bootstrap and checksum-verify that provided dependency first:
 
 ```bash
+bash tools/bootstrap_loreitems_release.sh
 mvn --batch-mode --no-transfer-progress clean test package
 ```
 
 The server-ready output is `target/EnthusiaTags.jar`.
 
-Every push and pull request runs the build workflow and uploads the JAR as a GitHub Actions artifact.
-Every push to `main` also replaces the rolling `latest` prerelease asset used by the download table.
-
+Every push and pull request performs the same release bootstrap, then runs the exact Maven command
+above and uploads the JAR as a GitHub Actions artifact. Pull-request builds also require exact-head
+Codacy verification before the artifact is accepted as package evidence. Every push to `main` also
+replaces the rolling `latest` prerelease asset used by the download table.
 
 ## Reward anti-farming and natural ores
 
