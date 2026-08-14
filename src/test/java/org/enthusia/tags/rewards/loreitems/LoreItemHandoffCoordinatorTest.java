@@ -130,6 +130,78 @@ class LoreItemHandoffCoordinatorTest {
     }
 
     @Test
+    void automaticRetryLimitMovesHandoffToReviewAndStaffRetryCanTryAgain() throws Exception {
+        UUID player = UUID.fromString("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
+        AtomicLong clock = new AtomicLong(1000L);
+        AtomicInteger calls = new AtomicInteger();
+        LoreItemsClient client = (definition, playerId, operation) -> {
+            calls.incrementAndGet();
+            return CompletableFuture.completedFuture(new LoreItemsGatewayResult(
+                LoreItemsGatewayResult.Disposition.RETRY,
+                "SERVICE_UNAVAILABLE",
+                operation,
+                "offline"));
+        };
+
+        try (LoreItemHandoffStore store = new LoreItemHandoffStore(tempDir.resolve("retry-limit.db"))) {
+            LoreItemHandoffCoordinator coordinator = new LoreItemHandoffCoordinator(
+                store, client, Runnable::run, clock::get, 2);
+
+            LoreItemHandoffRecord first = coordinator.handoff(player, REWARD, ACTION, "hourglass")
+                .toCompletableFuture().join();
+            clock.set(first.nextAttemptAtEpochMillis());
+            LoreItemHandoffRecord exhausted = coordinator.handoff(player, REWARD, ACTION, "hourglass")
+                .toCompletableFuture().join();
+
+            assertEquals(2, calls.get());
+            assertEquals(2, exhausted.attempts());
+            assertEquals(LoreItemHandoffState.REVIEW, exhausted.state());
+            assertEquals(0L, exhausted.nextAttemptAtEpochMillis());
+            assertEquals(java.util.List.of(), store.listDue(clock.get(), 10));
+
+            LoreItemHandoffRecord staffRetry = store.requestRetry(player, REWARD, ACTION, clock.get());
+            assertEquals("STAFF_RETRY_REQUESTED", staffRetry.lastOutcome());
+            LoreItemHandoffRecord afterStaffAttempt = coordinator.handoff(player, REWARD, ACTION, "hourglass")
+                .toCompletableFuture().join();
+            assertEquals(3, calls.get());
+            assertEquals(3, afterStaffAttempt.attempts());
+            assertEquals(LoreItemHandoffState.REVIEW, afterStaffAttempt.state());
+        }
+    }
+
+    @Test
+    void retrySweepKeepsSuccessfulRecordsWhenAnotherRecordThrows() throws Exception {
+        UUID firstPlayer = UUID.fromString("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
+        UUID secondPlayer = UUID.fromString("11111111-2222-3333-4444-555555555555");
+        AtomicInteger failures = new AtomicInteger();
+        LoreItemsClient client = (definition, playerId, operation) -> {
+            if ("boom".equals(definition)) {
+                throw new IllegalStateException("synthetic retry failure");
+            }
+            return CompletableFuture.completedFuture(new LoreItemsGatewayResult(
+                LoreItemsGatewayResult.Disposition.ACCEPTED,
+                "ACCEPTED_QUEUED",
+                operation,
+                "accepted"));
+        };
+
+        try (LoreItemHandoffStore store = new LoreItemHandoffStore(tempDir.resolve("isolated-retry.db"))) {
+            store.prepare(firstPlayer, "reward-a", ACTION, "boom", 1000L);
+            LoreItemHandoffRecord success = store.prepare(secondPlayer, "reward-b", ACTION, "star", 1001L);
+            LoreItemHandoffCoordinator coordinator = new LoreItemHandoffCoordinator(
+                store, client, Runnable::run, () -> 2000L);
+
+            java.util.List<LoreItemHandoffRecord> completed = coordinator.retryDue(10, ignored -> failures.incrementAndGet())
+                .toCompletableFuture().join();
+
+            assertEquals(1, failures.get());
+            assertEquals(1, completed.size());
+            assertEquals(success.externalOperationId(), completed.getFirst().externalOperationId());
+            assertEquals(LoreItemHandoffState.ACCEPTED, completed.getFirst().state());
+        }
+    }
+
+    @Test
     void retryBackoffIsBounded() {
         assertEquals(5_000L, LoreItemHandoffCoordinator.backoffMillis(1));
         assertEquals(10_000L, LoreItemHandoffCoordinator.backoffMillis(2));

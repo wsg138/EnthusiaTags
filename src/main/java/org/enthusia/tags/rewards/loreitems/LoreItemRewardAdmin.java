@@ -132,7 +132,10 @@ public final class LoreItemRewardAdmin {
             return List.of();
         }
         if (args.length == SUBCOMMAND_ARGUMENT_COUNT) {
-            return List.of(STATUS_COMMAND, RETRY_COMMAND);
+            String prefix = args[0].toLowerCase(java.util.Locale.ROOT);
+            return List.of(STATUS_COMMAND, RETRY_COMMAND).stream()
+                .filter(option -> option.startsWith(prefix))
+                .toList();
         }
         return List.of();
     }
@@ -161,21 +164,21 @@ public final class LoreItemRewardAdmin {
     }
 
     private void scheduleMain(Runnable action) {
-        plugin.getServer().getScheduler().runTask(plugin, action);
+        if (!plugin.isEnabled()) {
+            plugin.getLogger().warning("Could not deliver LoreItems admin output because the plugin is disabled.");
+            return;
+        }
+        try {
+            plugin.getServer().getScheduler().runTask(plugin, action);
+        } catch (RuntimeException ex) {
+            plugin.getLogger().warning(
+                "Could not deliver LoreItems admin output: " + ThrowableDescriptions.describe(ex));
+        }
     }
 
     private void sendError(CommandSender sender, Throwable failure) {
-        Throwable current = failure;
-        Throwable cause = current.getCause();
-        while (cause != null && !Objects.equals(current, cause)) {
-            current = cause;
-            cause = current.getCause();
-        }
-        String detail = current.getMessage();
-        if (detail == null || detail.isBlank()) {
-            detail = current.getClass().getSimpleName();
-        }
-        send(sender, messages.get("rewards-loreitems-admin-error").replace("{error}", detail));
+        send(sender, messages.get("rewards-loreitems-admin-error")
+            .replace("{error}", ThrowableDescriptions.describe(failure)));
     }
 
     private static String blank(String value) {

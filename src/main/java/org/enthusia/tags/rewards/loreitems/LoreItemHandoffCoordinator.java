@@ -9,10 +9,13 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
+import java.util.function.Consumer;
 import java.util.function.LongSupplier;
 
 public final class LoreItemHandoffCoordinator {
     static final int MAX_RETRY_BATCH = 50;
+    static final int DEFAULT_MAX_AUTOMATIC_ATTEMPTS = 48;
+    private static final String STAFF_RETRY_REQUESTED = "STAFF_RETRY_REQUESTED";
     static final long BASE_RETRY_MILLIS = 5_000L;
     static final long MAX_RETRY_MILLIS = 300_000L;
 
@@ -20,6 +23,7 @@ public final class LoreItemHandoffCoordinator {
     private final LoreItemsClient client;
     private final Executor ioExecutor;
     private final LongSupplier clock;
+    private final int maxAutomaticAttempts;
     private final ConcurrentHashMap<String, CompletableFuture<LoreItemHandoffRecord>> inFlight =
         new ConcurrentHashMap<>();
 
@@ -27,7 +31,7 @@ public final class LoreItemHandoffCoordinator {
         LoreItemHandoffStore store,
         LoreItemsClient client,
         Executor ioExecutor) {
-        this(store, client, ioExecutor, System::currentTimeMillis);
+        this(store, client, ioExecutor, System::currentTimeMillis, DEFAULT_MAX_AUTOMATIC_ATTEMPTS);
     }
 
     LoreItemHandoffCoordinator(
@@ -35,10 +39,23 @@ public final class LoreItemHandoffCoordinator {
         LoreItemsClient client,
         Executor ioExecutor,
         LongSupplier clock) {
+        this(store, client, ioExecutor, clock, DEFAULT_MAX_AUTOMATIC_ATTEMPTS);
+    }
+
+    LoreItemHandoffCoordinator(
+        LoreItemHandoffStore store,
+        LoreItemsClient client,
+        Executor ioExecutor,
+        LongSupplier clock,
+        int maxAutomaticAttempts) {
         this.store = Objects.requireNonNull(store, "store");
         this.client = Objects.requireNonNull(client, "client");
         this.ioExecutor = Objects.requireNonNull(ioExecutor, "ioExecutor");
         this.clock = Objects.requireNonNull(clock, "clock");
+        if (maxAutomaticAttempts < 1) {
+            throw new IllegalArgumentException("maxAutomaticAttempts must be positive");
+        }
+        this.maxAutomaticAttempts = maxAutomaticAttempts;
     }
 
     public CompletionStage<LoreItemHandoffRecord> handoff(
@@ -88,25 +105,64 @@ public final class LoreItemHandoffCoordinator {
     }
 
     public CompletionStage<List<LoreItemHandoffRecord>> retryDue(int requestedLimit) {
+        return retryDue(requestedLimit, ignored -> { });
+    }
+
+    public CompletionStage<List<LoreItemHandoffRecord>> retryDue(
+        int requestedLimit,
+        Consumer<Throwable> failureHandler) {
+        Objects.requireNonNull(failureHandler, "failureHandler");
         int limit = Math.max(0, Math.min(requestedLimit, MAX_RETRY_BATCH));
         if (limit == 0) {
             return CompletableFuture.completedFuture(List.of());
         }
         return CompletableFuture.supplyAsync(() -> listDue(limit), ioExecutor)
-            .thenCompose(this::submitRetries);
+            .thenCompose(records -> submitRetries(records, failureHandler));
     }
 
-    private CompletionStage<List<LoreItemHandoffRecord>> submitRetries(List<LoreItemHandoffRecord> records) {
+    private CompletionStage<List<LoreItemHandoffRecord>> submitRetries(
+        List<LoreItemHandoffRecord> records,
+        Consumer<Throwable> failureHandler) {
         List<CompletableFuture<LoreItemHandoffRecord>> retries = new ArrayList<>(records.size());
         for (LoreItemHandoffRecord record : records) {
-            retries.add(handoff(
+            retries.add(isolateRetry(record, failureHandler));
+        }
+        return CompletableFuture.allOf(retries.toArray(CompletableFuture[]::new))
+            .thenApply(ignored -> retries.stream()
+                .map(CompletableFuture::join)
+                .filter(Objects::nonNull)
+                .toList());
+    }
+
+    private CompletableFuture<LoreItemHandoffRecord> isolateRetry(
+        LoreItemHandoffRecord record,
+        Consumer<Throwable> failureHandler) {
+        try {
+            return handoff(
                 record.playerId(),
                 record.rewardId(),
                 record.actionId(),
-                record.definitionKey()).toCompletableFuture());
+                record.definitionKey())
+                .handle((result, failure) -> {
+                    if (failure != null) {
+                        reportRetryFailure(failureHandler, failure);
+                        return null;
+                    }
+                    return result;
+                })
+                .toCompletableFuture();
+        } catch (RuntimeException ex) {
+            reportRetryFailure(failureHandler, ex);
+            return CompletableFuture.completedFuture(null);
         }
-        return CompletableFuture.allOf(retries.toArray(CompletableFuture[]::new))
-            .thenApply(ignored -> retries.stream().map(CompletableFuture::join).toList());
+    }
+
+    private static void reportRetryFailure(Consumer<Throwable> failureHandler, Throwable failure) {
+        try {
+            failureHandler.accept(failure);
+        } catch (RuntimeException ignored) {
+            // A diagnostics callback must never make another durable handoff fail.
+        }
     }
 
     private CompletionStage<LoreItemHandoffRecord> submitIfDue(LoreItemHandoffRecord record) {
@@ -116,6 +172,10 @@ public final class LoreItemHandoffCoordinator {
             || !record.isRetryable(now)) {
             return CompletableFuture.completedFuture(record);
         }
+        if (record.attempts() >= maxAutomaticAttempts
+            && !STAFF_RETRY_REQUESTED.equals(record.lastOutcome())) {
+            return CompletableFuture.completedFuture(markRetryLimitReached(record, now));
+        }
         return client.queue(
                 record.definitionKey(),
                 record.playerId(),
@@ -123,54 +183,78 @@ public final class LoreItemHandoffCoordinator {
             .handleAsync((result, failure) -> persistResult(record, result, failure), ioExecutor);
     }
 
+    private LoreItemHandoffRecord markRetryLimitReached(
+        LoreItemHandoffRecord record,
+        long now) {
+        try {
+            return store.markReview(
+                record.externalOperationId(),
+                "RETRY_LIMIT_REACHED",
+                "Automatic LoreItems retry limit reached after " + record.attempts()
+                    + " attempts; staff review or explicit loreretry is required",
+                now);
+        } catch (SQLException ex) {
+            throw new LoreItemHandoffException(
+                "Could not persist LoreItems retry-limit review state", ex);
+        }
+    }
+
     private LoreItemHandoffRecord persistResult(
         LoreItemHandoffRecord record,
         LoreItemsGatewayResult result,
         Throwable failure) {
         long now = clock.getAsLong();
-        LoreItemHandoffState nextState;
-        String outcome;
-        String detail;
-        long nextAttempt;
-
         if (failure != null) {
-            nextState = LoreItemHandoffState.RETRY;
-            outcome = "CLIENT_STAGE_FAILURE";
-            detail = safeMessage(failure);
-            nextAttempt = now + backoffMillis(record.attempts() + 1);
-        } else if (result == null) {
-            nextState = LoreItemHandoffState.RETRY;
-            outcome = "NULL_CLIENT_RESULT";
-            detail = "LoreItems client completed without a result";
-            nextAttempt = now + backoffMillis(record.attempts() + 1);
-        } else {
-            outcome = result.serviceStatus();
-            detail = result.detail();
-            switch (result.disposition()) {
-                case ACCEPTED -> {
-                    nextState = LoreItemHandoffState.ACCEPTED;
-                    nextAttempt = 0L;
-                }
-                case RETRY -> {
-                    nextState = LoreItemHandoffState.RETRY;
-                    nextAttempt = now + backoffMillis(record.attempts() + 1);
-                }
-                case REVIEW -> {
-                    nextState = LoreItemHandoffState.REVIEW;
-                    nextAttempt = 0L;
-                }
-                default -> throw new IllegalStateException("Unhandled LoreItems disposition");
-            }
+            return persistRetryOutcome(record, "CLIENT_STAGE_FAILURE", safeMessage(failure), now);
         }
+        if (result == null) {
+            return persistRetryOutcome(
+                record,
+                "NULL_CLIENT_RESULT",
+                "LoreItems client completed without a result",
+                now);
+        }
+        return switch (result.disposition()) {
+            case ACCEPTED -> persistOutcome(
+                record, LoreItemHandoffState.ACCEPTED, result.serviceStatus(), result.detail(), 0L, now);
+            case RETRY -> persistRetryOutcome(record, result.serviceStatus(), result.detail(), now);
+            case REVIEW -> persistOutcome(
+                record, LoreItemHandoffState.REVIEW, result.serviceStatus(), result.detail(), 0L, now);
+        };
+    }
 
+    private LoreItemHandoffRecord persistRetryOutcome(
+        LoreItemHandoffRecord record,
+        String outcome,
+        String detail,
+        long now) {
+        int nextAttemptNumber = record.attempts() + 1;
+        boolean exhausted = nextAttemptNumber >= maxAutomaticAttempts;
+        String persistedDetail = detail;
+        if (exhausted) {
+            String suffix = "automatic retry limit reached after " + nextAttemptNumber
+                + " attempts; staff review or explicit loreretry is required";
+            persistedDetail = detail == null || detail.isBlank() ? suffix : detail + "; " + suffix;
+        }
+        return persistOutcome(
+            record,
+            exhausted ? LoreItemHandoffState.REVIEW : LoreItemHandoffState.RETRY,
+            outcome,
+            persistedDetail,
+            exhausted ? 0L : now + backoffMillis(nextAttemptNumber),
+            now);
+    }
+
+    private LoreItemHandoffRecord persistOutcome(
+        LoreItemHandoffRecord record,
+        LoreItemHandoffState state,
+        String outcome,
+        String detail,
+        long nextAttempt,
+        long now) {
         try {
             return store.recordOutcome(
-                record.externalOperationId(),
-                nextState,
-                outcome,
-                detail,
-                nextAttempt,
-                now);
+                record.externalOperationId(), state, outcome, detail, nextAttempt, now);
         } catch (SQLException ex) {
             throw new LoreItemHandoffException("Could not persist LoreItems handoff outcome", ex);
         }

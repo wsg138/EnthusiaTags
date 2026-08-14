@@ -17,12 +17,17 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 class ReleasedLoreItemsApiContractTest {
+    private static final String APPROVED_RELEASE_SHA256 =
+        "7c862b0ae545d710a33267ad6e19a4ae26d97323e97f40707c1475c9f9ba7063";
     @Test
     void buildUsesPinnedProductionArtifactContainingStableV1Api() throws Exception {
         Path jar = Path.of(System.getProperty("loreitems.release.jar"));
-        String expectedSha = System.getProperty("loreitems.release.sha256");
+        String configuredSha = System.getProperty("loreitems.release.sha256");
 
-        assertEquals(expectedSha, sha256(jar));
+        assertEquals(APPROVED_RELEASE_SHA256, configuredSha,
+            "the Maven release pin must match the approved production artifact");
+        assertEquals(APPROVED_RELEASE_SHA256, sha256(jar),
+            "the test artifact bytes must match the approved production artifact");
         try (JarFile release = new JarFile(jar.toFile())) {
             assertNotNull(release.getEntry("net/enthusia/loreitems/api/v1/LoreItemsServiceV1.class"));
             assertNotNull(release.getEntry("net/enthusia/loreitems/api/v1/LoreDeliveryResult.class"));

@@ -26,7 +26,7 @@
 - Tags owns a durable SQLite handoff ledger that persists intent before cross-plugin delivery and tracks state, outcome, attempts, retry time, audit detail, and exact-operation Tags finalization.
 - Accepted handoffs are reconciled into the normal Tags reward ledger before their exact external operation is acknowledged as finalized.
 - Admin `lorestatus` / `loreretry` tools expose durable handoff state without reopening accepted deliveries.
-- Build/test uses the exact production LoreItems `v1.0.0` artifact rather than a source checkout.
+- Build/test uses the exact production LoreItems `v1.0.0` artifact rather than a source checkout; bootstrap and Maven validation verify its SHA-256 while the contract test hard-codes the approved digest.
 
 ## Current-session reconciliation and accepted review work
 The exact pre-remediation head has a successful `Build` workflow, but it is not merge-ready because the current independent CodeRabbit review has unresolved actionable findings. A previous temporary one-shot workflow failed before applying its patch and left temporary helper files on the canonical branch. Those helpers are not accepted durable product state and are being replaced with a current-head-specific, self-cleaning remediation.

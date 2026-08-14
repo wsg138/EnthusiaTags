@@ -13,7 +13,10 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.TimeUnit;
+import java.util.function.Supplier;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 // Paper plugins are not J2EE webapps. This dedicated single-thread executor is intentional:
@@ -55,10 +58,15 @@ public final class LoreItemRewardRuntime implements AutoCloseable {
             return thread;
         };
         ExecutorService executor = Executors.newSingleThreadExecutor(factory);
+        int maxAutomaticAttempts = Math.max(1, plugin.getConfig().getInt(
+            "rewards.lore-items.max-auto-attempts",
+            LoreItemHandoffCoordinator.DEFAULT_MAX_AUTOMATIC_ATTEMPTS));
         LoreItemHandoffCoordinator coordinator = new LoreItemHandoffCoordinator(
             store,
             new ReloadingLoreItemsClient(plugin),
-            executor);
+            executor,
+            System::currentTimeMillis,
+            maxAutomaticAttempts);
         LoreItemRewardRuntime runtime = new LoreItemRewardRuntime(plugin, store, executor, coordinator);
         runtime.retryTask = Bukkit.getScheduler().runTaskTimerAsynchronously(
             plugin,
@@ -84,14 +92,14 @@ public final class LoreItemRewardRuntime implements AutoCloseable {
         if (!open.get()) {
             return CompletableFuture.failedFuture(new IllegalStateException(RUNTIME_CLOSED));
         }
-        return CompletableFuture.supplyAsync(() -> {
+        return supplyAsyncSafely(() -> {
             try {
                 return store.listForReward(playerId, rewardId);
             } catch (SQLException ex) {
                 throw new LoreItemHandoffCoordinator.LoreItemHandoffException(
                     "Could not read LoreItems reward handoff status", ex);
             }
-        }, executor);
+        });
     }
 
     public CompletionStage<List<LoreItemHandoffRecord>> acceptedPendingFinalization(int requestedLimit) {
@@ -102,21 +110,38 @@ public final class LoreItemRewardRuntime implements AutoCloseable {
         if (limit == 0) {
             return CompletableFuture.completedFuture(List.of());
         }
-        return CompletableFuture.supplyAsync(() -> listAcceptedPendingFinalization(limit), executor);
+        return supplyAsyncSafely(() -> listAcceptedPendingFinalization(limit));
+    }
+
+    public CompletionStage<LoreItemHandoffRecord> markReview(
+        String externalOperationId,
+        String outcome,
+        String detail) {
+        if (!open.get()) {
+            return CompletableFuture.failedFuture(new IllegalStateException(RUNTIME_CLOSED));
+        }
+        return supplyAsyncSafely(() -> {
+            try {
+                return store.markReview(externalOperationId, outcome, detail, System.currentTimeMillis());
+            } catch (SQLException ex) {
+                throw new LoreItemHandoffCoordinator.LoreItemHandoffException(
+                    "Could not persist LoreItems review state", ex);
+            }
+        });
     }
 
     public CompletionStage<Void> markRewardFinalized(String externalOperationId) {
         if (!open.get()) {
             return CompletableFuture.failedFuture(new IllegalStateException(RUNTIME_CLOSED));
         }
-        return CompletableFuture.runAsync(() -> {
+        return runAsyncSafely(() -> {
             try {
                 store.markRewardFinalized(externalOperationId, System.currentTimeMillis());
             } catch (SQLException ex) {
                 throw new LoreItemHandoffCoordinator.LoreItemHandoffException(
                     "Could not persist LoreItems reward finalization acknowledgement", ex);
             }
-        }, executor);
+        });
     }
 
     private List<LoreItemHandoffRecord> listAcceptedPendingFinalization(int limit) {
@@ -135,7 +160,7 @@ public final class LoreItemRewardRuntime implements AutoCloseable {
         if (!open.get()) {
             return CompletableFuture.failedFuture(new IllegalStateException(RUNTIME_CLOSED));
         }
-        return CompletableFuture.supplyAsync(() -> requestRetryRecord(playerId, rewardId, actionId), executor)
+        return supplyAsyncSafely(() -> requestRetryRecord(playerId, rewardId, actionId))
             .thenCompose(this::submitRequestedRetry);
     }
 
@@ -173,18 +198,28 @@ public final class LoreItemRewardRuntime implements AutoCloseable {
             return;
         }
         try {
-            coordinator.retryDue(LoreItemHandoffCoordinator.MAX_RETRY_BATCH)
+            coordinator.retryDue(
+                LoreItemHandoffCoordinator.MAX_RETRY_BATCH,
+                this::logRetryRecordFailure)
                 .whenComplete((records, failure) -> logRetryFailure(failure));
         } catch (RuntimeException ex) {
             plugin.getLogger().warning(
-                "LoreItems reward retry sweep could not start: " + safeMessage(ex));
+                "LoreItems reward retry sweep could not start: " + ThrowableDescriptions.describe(ex));
+        }
+    }
+
+    private void logRetryRecordFailure(Throwable failure) {
+        if (failure != null && open.get()) {
+            plugin.getLogger().warning(
+                "LoreItems reward retry record failed safely and the sweep continued: "
+                    + ThrowableDescriptions.describe(failure));
         }
     }
 
     private void logRetryFailure(Throwable failure) {
         if (failure != null && open.get()) {
             plugin.getLogger().warning(
-                "LoreItems reward retry sweep failed safely: " + safeMessage(failure));
+                "LoreItems reward retry sweep failed safely: " + ThrowableDescriptions.describe(failure));
         }
     }
 
@@ -203,20 +238,35 @@ public final class LoreItemRewardRuntime implements AutoCloseable {
         }
         executor.shutdownNow();
         try {
+            if (!executor.awaitTermination(5, TimeUnit.SECONDS)) {
+                plugin.getLogger().warning(
+                    "LoreItems handoff workers did not stop before storage close.");
+            }
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            plugin.getLogger().warning(
+                "Interrupted while waiting for LoreItems handoff workers to stop.");
+        }
+        try {
             store.close();
         } catch (SQLException ex) {
             plugin.getLogger().warning("Failed to close LoreItems reward handoff storage: " + ex.getMessage());
         }
     }
 
-    private static String safeMessage(Throwable throwable) {
-        Throwable current = throwable;
-        Throwable cause = current.getCause();
-        while (cause != null && !Objects.equals(current, cause)) {
-            current = cause;
-            cause = current.getCause();
+    private <T> CompletionStage<T> supplyAsyncSafely(Supplier<T> supplier) {
+        try {
+            return CompletableFuture.supplyAsync(supplier, executor);
+        } catch (RejectedExecutionException ex) {
+            return CompletableFuture.failedFuture(ex);
         }
-        String message = current.getMessage();
-        return message == null || message.isBlank() ? current.getClass().getSimpleName() : message;
+    }
+
+    private CompletionStage<Void> runAsyncSafely(Runnable action) {
+        try {
+            return CompletableFuture.runAsync(action, executor);
+        } catch (RejectedExecutionException ex) {
+            return CompletableFuture.failedFuture(ex);
+        }
     }
 }

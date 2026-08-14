@@ -30,6 +30,7 @@ import org.enthusia.tags.rewards.loreitems.LoreItemActionConfig;
 import org.enthusia.tags.rewards.loreitems.LoreItemHandoffRecord;
 import org.enthusia.tags.rewards.loreitems.LoreItemHandoffState;
 import org.enthusia.tags.rewards.loreitems.LoreItemRewardRuntime;
+import org.enthusia.tags.rewards.loreitems.ThrowableDescriptions;
 
 import java.io.File;
 import java.sql.SQLException;
@@ -94,6 +95,7 @@ public final class RewardService {
     private final java.util.Set<UUID> queuedRewardSyncPlayers = ConcurrentHashMap.newKeySet();
     private final Set<UUID> queuedUnlockChecks = ConcurrentHashMap.newKeySet();
     private final Set<String> inFlightClaims = ConcurrentHashMap.newKeySet();
+    private final Set<String> loreItemReviewWarningOperations = ConcurrentHashMap.newKeySet();
     private final Set<CompletableFuture<?>> activeOperations = ConcurrentHashMap.newKeySet();
     private final IntegrationStatus integrationStatus = new IntegrationStatus();
     private final AtomicReference<ServiceLifecycle> lifecycle =
@@ -529,6 +531,12 @@ public final class RewardService {
                 persistStateBarrier(playerId, state);
                 return RewardClaimResult.RECONCILIATION_REQUIRED;
             }
+            if (existing != null && existing.status() == RewardStatus.CLAIM_PENDING
+                && isRecoverableLorePending(reward, existing)) {
+                state.setOverall(rewardId, RewardStatus.CLAIM_PENDING);
+                persistStateBarrier(playerId, state);
+                return RewardClaimResult.CLAIM_IN_PROGRESS;
+            }
             storage.saveActionLedgerNow(playerId, rewardId, action, fingerprint,
                 RewardStatus.CLAIM_PENDING, null, null);
             boolean delivered;
@@ -682,21 +690,13 @@ public final class RewardService {
 
     private LoreItemDeliveryAttempt retryableLoreItemFailure(Throwable cause) {
         return new LoreItemDeliveryAttempt(false, false,
-            "LoreItems handoff did not complete in the claim worker: " + safeThrowableMessage(cause));
+            "LoreItems handoff did not complete in the claim worker: " + ThrowableDescriptions.describe(cause));
     }
 
     private static String blankAuditValue(String value) {
         return value == null || value.isBlank() ? "-" : value;
     }
 
-    private static String safeThrowableMessage(Throwable throwable) {
-        Throwable current = throwable;
-        while (current.getCause() != null && !java.util.Objects.equals(current, current.getCause())) {
-            current = current.getCause();
-        }
-        String message = current.getMessage();
-        return message == null || message.isBlank() ? current.getClass().getSimpleName() : message;
-    }
 
     private <T> T callOnMain(java.util.concurrent.Callable<T> callable) throws SQLException {
         if (lifecycle.get() == ServiceLifecycle.STOPPING || lifecycle.get() == ServiceLifecycle.STOPPED) {
@@ -2260,7 +2260,7 @@ public final class RewardService {
                     loreItemFinalizationRunning.set(false);
                     plugin.getLogger().warning(
                         "Failed to load accepted LoreItems handoffs for Tags finalization: "
-                            + safeThrowableMessage(failure));
+                            + ThrowableDescriptions.describe(failure));
                     return;
                 }
                 try {
@@ -2296,9 +2296,9 @@ public final class RewardService {
             RewardDefinition reward = rewards.get(record.rewardId());
             RewardAction action = findLoreItemAction(reward, record);
             if (action == null) {
-                plugin.getLogger().warning(
-                    "Accepted LoreItems handoff needs staff review because its Tags reward/action changed: "
-                        + record.externalOperationId());
+                moveAcceptedLoreItemToReview(
+                    record,
+                    "Tags reward/action/definition changed after LoreItems accepted the operation");
                 return;
             }
             String fingerprint = actionFingerprint(action);
@@ -2308,9 +2308,9 @@ public final class RewardService {
                 + " error=" + blankAuditValue(record.lastError());
             if (!storage.acceptLoreItemHandoffNow(
                 record.playerId(), record.rewardId(), action, fingerprint, evidence)) {
-                plugin.getLogger().warning(
-                    "Accepted LoreItems handoff could not be reconciled automatically with the Tags action ledger: "
-                        + record.externalOperationId());
+                moveAcceptedLoreItemToReview(
+                    record,
+                    "Tags action ledger no longer matches the accepted LoreItems operation");
                 return;
             }
             RewardStatus refreshed = refreshOverallAfterReconciliation(record.playerId(), record.rewardId());
@@ -2325,12 +2325,46 @@ public final class RewardService {
         } catch (ExecutionException | TimeoutException | SQLException ex) {
             plugin.getLogger().warning(
                 "Accepted LoreItems handoff remains pending Tags finalization " + record.externalOperationId()
-                    + ": " + safeThrowableMessage(ex));
+                    + ": " + ThrowableDescriptions.describe(ex));
         } finally {
             inFlightClaims.remove(claimKey);
         }
         if (resumeRemainingActions) {
             resumeClaimAfterItem(record.playerId(), record.rewardId());
+        }
+    }
+
+    private void moveAcceptedLoreItemToReview(
+        LoreItemHandoffRecord record,
+        String detail) {
+        try {
+            loreItemRewardRuntime.markReview(
+                record.externalOperationId(),
+                "TAGS_RECONCILIATION_REVIEW",
+                detail)
+                .toCompletableFuture()
+                .get(5, TimeUnit.SECONDS);
+            plugin.getLogger().warning(
+                "Accepted LoreItems handoff moved to staff review: "
+                    + record.externalOperationId() + " (" + detail + ")");
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            warnLoreItemReviewTransitionOnce(
+                record,
+                "Interrupted while moving accepted LoreItems handoff to review");
+        } catch (ExecutionException | TimeoutException ex) {
+            warnLoreItemReviewTransitionOnce(
+                record,
+                "Accepted LoreItems handoff could not be moved to review and remains pending finalization: "
+                    + ThrowableDescriptions.describe(ex));
+        }
+    }
+
+    private void warnLoreItemReviewTransitionOnce(
+        LoreItemHandoffRecord record,
+        String detail) {
+        if (loreItemReviewWarningOperations.add(record.externalOperationId())) {
+            plugin.getLogger().warning(detail + " operation=" + record.externalOperationId());
         }
     }
 
@@ -2447,9 +2481,10 @@ public final class RewardService {
             integrationStatus.addWarning("&cEnthusiaTags warning: Baltop integration plugin '" + config.baltopPluginName()
                 + "' is unavailable. Baltop rewards are blocked.");
         }
-        if (usesLoreItemRewards() && (loreItemRewardRuntime == null || !loreItemRewardRuntime.isOpen())) {
+        boolean hasLoreItemRewards = usesLoreItemRewards();
+        if (hasLoreItemRewards && (loreItemRewardRuntime == null || !loreItemRewardRuntime.isOpen())) {
             integrationStatus.addWarning("&cEnthusiaTags warning: durable LoreItems handoff storage is unavailable. Lore-item rewards are blocked.");
-        } else if (usesLoreItemRewards()) {
+        } else if (hasLoreItemRewards) {
             Plugin loreItems = Bukkit.getPluginManager().getPlugin("EnthusiaLoreItems");
             if (loreItems == null || !loreItems.isEnabled()) {
                 integrationStatus.addWarning("&eEnthusiaTags warning: EnthusiaLoreItems is not currently enabled. Lore-item claims will remain durably pending and retry automatically.");

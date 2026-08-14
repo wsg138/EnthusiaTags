@@ -112,6 +112,32 @@ public final class LoreItemHandoffStore implements AutoCloseable {
         return updated;
     }
 
+    public synchronized LoreItemHandoffRecord markReview(
+        String externalOperationId,
+        String outcome,
+        String detail,
+        long nowEpochMillis) throws SQLException {
+        String operationId = requiredText(externalOperationId, "externalOperationId");
+        try (PreparedStatement statement = connection.prepareStatement("""
+            UPDATE lore_item_handoffs
+               SET state = 'REVIEW', last_outcome = ?, last_error = ?, next_attempt_at = 0, updated_at = ?
+             WHERE external_operation_id = ? AND reward_finalized = 0
+            """)) {
+            statement.setString(1, outcome == null ? "" : outcome);
+            statement.setString(2, detail == null ? "" : detail);
+            statement.setLong(3, nowEpochMillis);
+            statement.setString(4, operationId);
+            if (statement.executeUpdate() != EXPECTED_SINGLE_ROW) {
+                throw new SQLException("Lore-item handoff could not be moved to review: " + operationId);
+            }
+        }
+        LoreItemHandoffRecord updated = loadByOperationId(operationId);
+        if (updated == null) {
+            throw new SQLException("Lore-item handoff disappeared after review transition");
+        }
+        return updated;
+    }
+
     public synchronized LoreItemHandoffRecord requestRetry(
         UUID playerId,
         String rewardId,
@@ -123,7 +149,8 @@ public final class LoreItemHandoffStore implements AutoCloseable {
         }
         try (PreparedStatement statement = connection.prepareStatement("""
             UPDATE lore_item_handoffs
-               SET state = ?, next_attempt_at = ?, reward_finalized = 0, updated_at = ?
+               SET state = ?, last_outcome = 'STAFF_RETRY_REQUESTED', last_error = '',
+                   next_attempt_at = ?, reward_finalized = 0, updated_at = ?
              WHERE external_operation_id = ?
             """)) {
             statement.setString(1, LoreItemHandoffState.RETRY.name());

@@ -245,13 +245,30 @@ public final class EnthusiaTagsPlugin extends JavaPlugin {
                     return java.util.List.of();
                 }
                 if (args.length == SINGLE_ARGUMENT_COUNT) {
-                    return java.util.List.of("reload", "performance", "rewards", "daily");
+                    String prefix = args[0].toLowerCase(java.util.Locale.ROOT);
+                    return java.util.List.of("reload", "performance", "rewards", "daily").stream()
+                        .filter(option -> option.startsWith(prefix))
+                        .toList();
                 }
                 if (args.length >= NESTED_COMMAND_ARGUMENT_COUNT
-                    && args[0].equalsIgnoreCase("rewards") && loreItemRewardAdmin != null) {
-                    return loreItemRewardAdmin.tabComplete(
-                        sender,
-                        java.util.Arrays.copyOfRange(args, 1, args.length));
+                    && args[0].equalsIgnoreCase("rewards")) {
+                    String[] rewardArgs = java.util.Arrays.copyOfRange(args, 1, args.length);
+                    if (rewardArgs.length == SINGLE_ARGUMENT_COUNT) {
+                        String prefix = rewardArgs[0].toLowerCase(java.util.Locale.ROOT);
+                        java.util.stream.Stream<String> rewardCommands = java.util.stream.Stream.of(
+                            "syncall", "sync", "debug", "ipbypass", "bypass",
+                            "reconcile", "inspect", "items", "ip");
+                        java.util.stream.Stream<String> loreCommands = loreItemRewardAdmin == null
+                            ? java.util.stream.Stream.empty()
+                            : loreItemRewardAdmin.tabComplete(sender, rewardArgs).stream();
+                        return java.util.stream.Stream.concat(rewardCommands, loreCommands)
+                            .filter(option -> option.startsWith(prefix))
+                            .distinct()
+                            .toList();
+                    }
+                    if (loreItemRewardAdmin != null) {
+                        return loreItemRewardAdmin.tabComplete(sender, rewardArgs);
+                    }
                 }
                 return java.util.List.of();
             });

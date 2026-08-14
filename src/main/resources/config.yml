@@ -44,6 +44,10 @@ global-scan:
   debug-log-repairs: false
 
 rewards:
+  lore-items:
+    # Automatic handoff attempts stop here and move to REVIEW; staff loreretry can try again.
+    max-auto-attempts: 48
+
   anti-farm:
     kills:
       # Each killer/victim pair may receive five credits in a true rolling hour.

@@ -72,6 +72,32 @@
         <plugins>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-antrun-plugin</artifactId>
+                <version>3.1.0</version>
+                <executions>
+                    <execution>
+                        <id>verify-pinned-loreitems-release</id>
+                        <phase>validate</phase>
+                        <goals>
+                            <goal>run</goal>
+                        </goals>
+                        <configuration>
+                            <target>
+                                <checksum file="${loreitems.release.jar}" algorithm="SHA-256"
+                                          property="loreitems.actual.sha256"/>
+                                <condition property="loreitems.release.sha256.matches">
+                                    <equals arg1="${loreitems.actual.sha256}"
+                                            arg2="${loreitems.release.sha256}"/>
+                                </condition>
+                                <fail unless="loreitems.release.sha256.matches"
+                                      message="Pinned EnthusiaLoreItems release JAR checksum mismatch"/>
+                            </target>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
                 <version>3.5.2</version>
                 <configuration>

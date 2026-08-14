@@ -59,6 +59,26 @@ class LoreItemsArchitectureTest {
     }
 
     @Test
+    void runtimeAndPublishWorkflowKeepRecoveryBounded() throws Exception {
+        String runtime = Files.readString(MAIN_JAVA.resolve(
+            "org/enthusia/tags/rewards/loreitems/LoreItemRewardRuntime.java"));
+        String rewardService = Files.readString(MAIN_JAVA.resolve(
+            "org/enthusia/tags/rewards/RewardService.java"));
+        String publishWorkflow = Files.readString(Path.of(".github/workflows/publish-latest.yml"));
+
+        assertTrue(runtime.contains("RejectedExecutionException"),
+            "runtime submissions must turn executor shutdown races into failed futures");
+        assertTrue(runtime.contains("awaitTermination"),
+            "runtime must wait for LoreItems workers before closing SQLite");
+        assertTrue(rewardService.contains("return RewardClaimResult.CLAIM_IN_PROGRESS;"),
+            "recoverable LoreItems CLAIM_PENDING rows must return pending instead of rewriting the ledger");
+        int bootstrap = publishWorkflow.indexOf("bash tools/bootstrap_loreitems_release.sh");
+        int maven = publishWorkflow.indexOf("mvn --batch-mode --no-transfer-progress clean test package");
+        assertTrue(bootstrap >= 0 && maven > bootstrap,
+            "publish-latest must bootstrap the pinned LoreItems artifact before Maven");
+    }
+
+    @Test
     void rewardClaimWorkerOwnsTheOnlyLoreItemWait() throws Exception {
         String source = Files.readString(MAIN_JAVA.resolve(
             "org/enthusia/tags/rewards/RewardService.java"));

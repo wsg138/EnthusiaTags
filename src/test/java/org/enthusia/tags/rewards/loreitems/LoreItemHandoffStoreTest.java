@@ -55,21 +55,31 @@ class LoreItemHandoffStoreTest {
     @Test
     void retryQueueIsOrderedBoundedAndOnlyReturnsDueRows() throws Exception {
         UUID secondPlayer = UUID.fromString("11111111-2222-3333-4444-555555555555");
+        UUID thirdPlayer = UUID.fromString("22222222-3333-4444-5555-666666666666");
+        UUID acceptedPlayer = UUID.fromString("33333333-4444-5555-6666-777777777777");
         try (LoreItemHandoffStore store = new LoreItemHandoffStore(tempDir.resolve("retry.db"))) {
-            LoreItemHandoffRecord first = store.prepare(PLAYER, "reward-a", ACTION, HOURGLASS, 1000L);
-            LoreItemHandoffRecord second = store.prepare(secondPlayer, "reward-b", ACTION, "star", 1100L);
-            assertNotEquals(first.externalOperationId(), second.externalOperationId());
+            LoreItemHandoffRecord latestDue = store.prepare(PLAYER, "reward-a", ACTION, HOURGLASS, 1000L);
+            LoreItemHandoffRecord earliestDue = store.prepare(secondPlayer, "reward-b", ACTION, "star", 1100L);
+            LoreItemHandoffRecord middleDue = store.prepare(thirdPlayer, "reward-c", ACTION, "ember", 1200L);
+            LoreItemHandoffRecord accepted = store.prepare(acceptedPlayer, "reward-d", ACTION, "leaf", 1300L);
+            assertNotEquals(latestDue.externalOperationId(), earliestDue.externalOperationId());
 
-            store.recordOutcome(first.externalOperationId(), LoreItemHandoffState.RETRY,
-                "SERVICE_UNAVAILABLE", "reload", 5000L, 1200L);
-            store.recordOutcome(second.externalOperationId(), LoreItemHandoffState.ACCEPTED,
-                "ACCEPTED_QUEUED", "accepted", 0L, 1300L);
+            store.recordOutcome(latestDue.externalOperationId(), LoreItemHandoffState.RETRY,
+                "SERVICE_UNAVAILABLE", "latest", 5000L, 1400L);
+            store.recordOutcome(earliestDue.externalOperationId(), LoreItemHandoffState.RETRY,
+                "SERVICE_UNAVAILABLE", "earliest", 3000L, 1500L);
+            store.recordOutcome(middleDue.externalOperationId(), LoreItemHandoffState.RETRY,
+                "SERVICE_UNAVAILABLE", "middle", 4000L, 1600L);
+            store.recordOutcome(accepted.externalOperationId(), LoreItemHandoffState.ACCEPTED,
+                "ACCEPTED_QUEUED", "accepted", 0L, 1700L);
 
-            assertEquals(List.of(), store.listDue(4999L, 10));
-            List<LoreItemHandoffRecord> due = store.listDue(5000L, 10);
-            assertEquals(1, due.size());
-            assertEquals(first.externalOperationId(), due.getFirst().externalOperationId());
-            assertEquals(1, due.getFirst().attempts());
+            assertEquals(List.of(), store.listDue(2999L, 2));
+            List<LoreItemHandoffRecord> due = store.listDue(5000L, 2);
+            assertEquals(2, due.size());
+            assertEquals(earliestDue.externalOperationId(), due.get(0).externalOperationId());
+            assertEquals(middleDue.externalOperationId(), due.get(1).externalOperationId());
+            assertEquals(1, due.get(0).attempts());
+            assertEquals(1, due.get(1).attempts());
         }
     }
 
@@ -92,6 +102,14 @@ class LoreItemHandoffStoreTest {
             assertEquals(second.externalOperationId(), remaining.getFirst().externalOperationId());
             assertTrue(store.loadByOperationId(first.externalOperationId()).rewardFinalized());
             assertFalse(store.loadByOperationId(second.externalOperationId()).rewardFinalized());
+
+            LoreItemHandoffRecord review = store.markReview(
+                second.externalOperationId(),
+                "TAGS_RECONCILIATION_REVIEW",
+                "configuration changed",
+                1300L);
+            assertEquals(LoreItemHandoffState.REVIEW, review.state());
+            assertEquals(List.of(), store.listAcceptedPendingFinalization(10));
         }
     }
 

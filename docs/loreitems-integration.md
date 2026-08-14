@@ -49,7 +49,7 @@ The handoff ledger also records attempt count, last service outcome, last error/
 
 ## Retry and reload behavior
 
-Tags performs bounded asynchronous retry sweeps. A sweep processes at most 50 due operations. Retry delay starts at 5 seconds, doubles per attempt, and is capped at 5 minutes. The LoreItems service completion is bounded to 10 seconds; a timeout is treated as uncertain/retryable and the same operation ID is used again.
+Tags performs bounded asynchronous retry sweeps. A sweep processes at most 50 due operations. Retry delay starts at 5 seconds, doubles per attempt, and is capped at 5 minutes. Automatic attempts stop at `rewards.lore-items.max-auto-attempts` (default 48) and move the handoff to `REVIEW`; an explicit staff `loreretry` performs another attempt with the same external operation ID. The LoreItems service completion is bounded to 10 seconds; a timeout is treated as uncertain/retryable and the same operation ID is used again.
 
 The retry worker runs outside the Paper main thread. Reward claims already execute on Tags claim workers, and the LoreItems `CompletionStage` is awaited there, never on the primary server thread. The service adapter re-checks whether the LoreItems plugin is enabled on each call and refreshes its cached adapter if the provider plugin instance changes.
 
@@ -76,7 +76,7 @@ WP-06 compiles against the exact production `EnthusiaLoreItems` v1.0.0 plugin ar
 
 `7c862b0ae545d710a33267ad6e19a4ae26d97323e97f40707c1475c9f9ba7063`
 
-then installs that checksum-verified JAR into the runner's temporary local Maven repository as a provided compile dependency. The test suite independently verifies the same checksum, the V1 API class entries, `API_VERSION == 1`, and the exact published status enum surface.
+then installs that checksum-verified JAR into the runner's temporary local Maven repository as a provided compile dependency. The Maven build re-verifies the downloaded JAR against the pinned SHA-256 before compilation, and the test suite independently anchors the configured checksum and JAR bytes to the approved production digest while checking the V1 API class entries, `API_VERSION == 1`, and published status enum surface.
 
 For a local build, bootstrap the pinned production artifact before the repository's normal build command:
 
