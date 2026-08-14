@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   patch:
-    if: false # armed only after the checkpoint and current-head patch payload are durable
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -30,7 +30,12 @@ jobs:
           test "${remote_head}" = "${CHECKPOINT_SHA}"
 
       - name: Apply assertion-guarded current-head review fixes
-        run: python3 tools/wp06_review_fix_patch.py
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/wp06_patch_bootstrap.py
+          python3 -m py_compile tools/wp06_review_fix_patch.py
+          python3 tools/wp06_review_fix_patch.py
 
       - name: Validate exact remediation tree
         shell: bash
@@ -45,6 +50,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          rm -f tools/wp06_patch_bootstrap.py
           rm -f tools/wp06_review_fix_patch.py
           rm -f tools/wp06_review_guardrail_patch.py
           rm -f .github/workflows/wp06-review-fix-one-shot.yml
