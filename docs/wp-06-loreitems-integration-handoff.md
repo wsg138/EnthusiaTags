@@ -2,12 +2,12 @@
 
 ## Package state
 - Active package: WP-06 — EnthusiaTags integration with LoreItems service API.
-- Status: `IN_PROGRESS`.
+- Status: `IN_REVIEW`.
 - Canonical implementation repository: `wsg138/EnthusiaTags`.
 - Canonical branch: `agent/wp-06-loreitems-integration`.
 - Canonical PR: #15 — `WP-06: integrate EnthusiaTags with LoreItems service API`.
 - Exact EnthusiaTags dependency/base `main`: `36bd6c51b7db6a94c866e5ce938b08e696050235`.
-- Exact pre-remediation branch head: `ef70f0ba68d2bb2fcae5d8687cec2e7a48f2b122`.
+- Exact implementation/remediation head: `251a155f8a6b52aa5fd36430b33b7ee2636503a6`.
 - Exact EnthusiaLoreItems dependency `main`: `ed91b1d46751544ed86fa7fa7de43cc769fc68a6`.
 - Production LoreItems release: `v1.0.0`, non-draft/non-prerelease, targeting the exact LoreItems dependency SHA above.
 - Production LoreItems JAR SHA-256: `7c862b0ae545d710a33267ad6e19a4ae26d97323e97f40707c1475c9f9ba7063`.
@@ -61,5 +61,10 @@ The accepted findings being addressed on this branch are:
 ## Blocker
 - None external. The current blockers are repository-owned review remediation and the mandated exact-head/review/merge/finalization gates above.
 
+## Current-session validation
+- The one-shot remediation workflow applied the accepted review fixes on the exact checkpoint tree, then ran `tools/bootstrap_loreitems_release.sh`, `mvn --batch-mode --no-transfer-progress clean test package`, and `git diff --check` successfully before creating the implementation commit.
+- The publish-latest workflow fix was part of that validated tree but is intentionally published through the GitHub connector because the Actions token cannot modify workflow files.
+- Exact-head PR Build/Codacy and independent review still must be re-evaluated after the connector publishes the workflow fix and removes this one-shot runner; no later gate is pre-claimed here.
+
 ## Exact next action
-Apply the accepted review remediation on this same branch, remove the temporary one-shot helpers, run Maven/package validation, and publish an exact implementation checkpoint.
+Publish the validated publish-latest workflow fix through the connector, remove this one-shot workflow, then require exact-head Build/Codacy and a fresh independent review before normal merge of PR #15.
