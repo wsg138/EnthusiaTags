@@ -59,15 +59,19 @@ jobs:
           git restore --worktree --source=HEAD -- dependency-reduced-pom.xml 2>/dev/null || rm -f dependency-reduced-pom.xml
           git diff --check
 
-      - name: Commit remediation and self-clean helpers
+      - name: Commit validated source remediation
         id: remediation
         shell: bash
         run: |
           set -euo pipefail
+          # The Actions token cannot update workflow files. The intended publish-latest
+          # change was included in validation above; restore it here so the connector
+          # can publish that workflow change after the validated source commit lands.
+          git restore --worktree --source=HEAD -- .github/workflows/publish-latest.yml
           rm -f tools/wp06_patch_bootstrap.py
           rm -f tools/wp06_review_fix_patch.py
           rm -f tools/wp06_review_guardrail_patch.py
-          rm -f .github/workflows/wp06-review-fix-one-shot.yml
+          rm -rf tools/__pycache__
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
@@ -103,15 +107,15 @@ jobs:
               "- The one-shot remediation workflow applied the accepted review fixes on the exact checkpoint tree, "
               "then ran `tools/bootstrap_loreitems_release.sh`, `mvn --batch-mode --no-transfer-progress clean test package`, "
               "and `git diff --check` successfully before creating the implementation commit.\n"
-              "- Exact-head PR Build/Codacy and independent review still must be re-evaluated on the final checkpoint commit; "
-              "no later gate is pre-claimed here.\n\n"
+              "- The publish-latest workflow fix was part of that validated tree but is intentionally published through the GitHub connector because the Actions token cannot modify workflow files.\n"
+              "- Exact-head PR Build/Codacy and independent review still must be re-evaluated after the connector publishes the workflow fix and removes this one-shot runner; no later gate is pre-claimed here.\n\n"
           )
           if marker not in text:
               raise SystemExit("handoff next-action marker missing")
           text = text.replace(marker, evidence + marker, 1)
           text = text.replace(
               "Apply the accepted review remediation on this same branch, remove the temporary one-shot helpers, run Maven/package validation, and publish an exact implementation checkpoint.",
-              "Require exact-head Build/Codacy on this checkpoint, obtain a fresh independent review, resolve every remaining actionable thread/comment, and only then normally merge PR #15.",
+              "Publish the validated publish-latest workflow fix through the connector, remove this one-shot workflow, then require exact-head Build/Codacy and a fresh independent review before normal merge of PR #15.",
               1,
           )
           path.write_text(text, encoding="utf-8")
