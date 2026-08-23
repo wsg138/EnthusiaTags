@@ -5,6 +5,8 @@
 
 Tags, rewards, cosmetics, and daily-reward plugin with PlaceholderAPI and Vault economy integrations.
 
+For the current **player-facing Enthusia SMP behavior**—tag selection, achievement progression, reward anti-farming, `/daily`, cosmetic categories, and wiki-source guidance—see **[`PLAYER_GUIDE.md`](PLAYER_GUIDE.md)**. The exact reward/tag/cosmetic definitions remain in `rewards.yml`, `config.yml`, and `cosmetics.yml`.
+
 | Download | Version | Runtime |
 | --- | --- | --- |
 | [EnthusiaTags.jar](https://github.com/wsg138/EnthusiaTags/releases/download/latest/EnthusiaTags.jar) | rolling `main` build (`2.2.1`) | Java 21, Paper/Leaf 1.21.11 |
