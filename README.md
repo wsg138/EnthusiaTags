@@ -103,16 +103,16 @@ replaces the rolling `latest` prerelease asset used by the download table.
 
 The default anti-farm values are configured under `rewards.anti-farm.kills` in `config.yml`. Active, AFK, and total playtime rewards link directly to the live `EnthusiaPlaytime` service exposed by the playtime plugin, with Bukkit service-registry fallback compatibility. Minecraft does not retain origin metadata for blocks placed before this update, so the one-time baseline preserves existing mining totals; strict natural-only tracking applies to blocks placed and mined after the upgrade.
 
-## Daily IP limits
+## Shared-household IP limits
 
-A successful or uncertain `/daily` transaction reserves the player's IP for that server date. Unrelated accounts on the same IP cannot claim another daily reward that day. Definite pre-Vault failures release the reservation safely.
-
-Shared-household exceptions are managed with:
+Normal achievement rewards and `/daily` both enforce IP-based anti-alt limits. Staff should manage approved shared-household exceptions through the single unified command:
 
 ```text
-/enthusiatags daily sibling add <player1> <player2>
-/enthusiatags daily sibling remove <player1> <player2>
-/enthusiatags daily sibling list <player>
+/tag sibling add <player1> <player2>
+/tag sibling remove <player1> <player2>
+/tag sibling list <player>
 ```
 
-Sibling relationships are transitive, so a connected household group may all claim from the same IP.
+`add` and `remove` apply the same resolved UUID pair to both the normal reward IP-bypass store and the daily sibling store. `list` displays both backing systems so staff can spot any legacy mismatch. Player arguments tab-complete for online players, as do the `sibling` and `add`/`remove`/`list` command segments.
+
+For daily rewards specifically, a successful or uncertain `/daily` transaction reserves the player's IP for that server date. Unrelated accounts on the same IP cannot claim another daily reward that day, while definite pre-Vault failures release the reservation safely. Daily sibling relationships are transitive, so a connected household group may all claim from the same IP.
