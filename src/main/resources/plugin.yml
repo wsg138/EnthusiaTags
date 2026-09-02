@@ -17,7 +17,7 @@ commands:
     permission: enthusia.tags.use
   tag:
     description: Admin tag management.
-    usage: /tag <give|revoke|set|clear|reload>
+    usage: /tag <give|revoke|set|clear|list|create|edit|offset|sibling|reload>
     permission: enthusia.tags.admin
   rewards:
     description: Open the rewards menu.

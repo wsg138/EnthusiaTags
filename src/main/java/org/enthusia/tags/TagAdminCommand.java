@@ -7,7 +7,10 @@ import org.bukkit.OfflinePlayer;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
+import org.bukkit.command.PluginCommand;
 import org.bukkit.command.TabCompleter;
+import org.enthusia.tags.daily.DailyService;
+import org.enthusia.tags.rewards.RewardService;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -26,13 +29,24 @@ public final class TagAdminCommand implements CommandExecutor, TabCompleter {
     private static final String COMMAND_EDIT = "edit";
     private static final String COMMAND_OFFSET = "offset";
     private static final String COMMAND_RELOAD = "reload";
+    private static final String COMMAND_SIBLING = "sibling";
+    private static final String REWARD_IP_BYPASS_COMMAND = "ipbypass";
+    private static final String DAILY_COMMAND = "daily";
+    private static final String SIBLING_ADD = "add";
+    private static final String SIBLING_REMOVE = "remove";
+    private static final String SIBLING_LIST = "list";
     private static final String MSG_PLAYER_NOT_FOUND = "player-not-found";
     private static final String MSG_UNKNOWN_TAG = "unknown-tag";
     private static final int PLAYER_ARGUMENTS = 2;
     private static final int TAG_ARGUMENTS = 3;
+    private static final int SIBLING_TARGET_ARGUMENTS = 3;
+    private static final int SIBLING_PAIR_ARGUMENTS = 4;
     private static final List<String> ROOT_COMPLETIONS = List.of(
         COMMAND_GIVE, COMMAND_REVOKE, COMMAND_SET, COMMAND_CLEAR, COMMAND_LIST,
-        COMMAND_CREATE, COMMAND_EDIT, COMMAND_OFFSET, COMMAND_RELOAD
+        COMMAND_CREATE, COMMAND_EDIT, COMMAND_OFFSET, COMMAND_RELOAD, COMMAND_SIBLING
+    );
+    private static final List<String> SIBLING_ACTION_COMPLETIONS = List.of(
+        SIBLING_ADD, SIBLING_REMOVE, SIBLING_LIST
     );
     private static final Set<String> PLAYER_TARGET_COMMANDS = Set.of(
         COMMAND_GIVE, COMMAND_REVOKE, COMMAND_SET, COMMAND_CLEAR, COMMAND_LIST
@@ -69,6 +83,7 @@ public final class TagAdminCommand implements CommandExecutor, TabCompleter {
             case COMMAND_CREATE -> handleCreate(sender, args);
             case COMMAND_EDIT -> handleEdit(sender, args);
             case COMMAND_OFFSET -> handleOffset(sender, args);
+            case COMMAND_SIBLING -> handleSibling(sender, args);
             default -> sendUsage(sender);
         }
         return true;
@@ -177,6 +192,80 @@ public final class TagAdminCommand implements CommandExecutor, TabCompleter {
         }
     }
 
+    private void handleSibling(CommandSender sender, String[] args) {
+        if (args.length < SIBLING_TARGET_ARGUMENTS) {
+            sendSiblingUsage(sender);
+            return;
+        }
+        String operation = args[1].toLowerCase(Locale.ROOT);
+        if (!SIBLING_ACTION_COMPLETIONS.contains(operation)) {
+            sendSiblingUsage(sender);
+            return;
+        }
+
+        SiblingServices services = siblingServices(sender);
+        if (services == null) return;
+        OfflinePlayer first = resolveSiblingTarget(sender, args[2]);
+        if (first == null) return;
+
+        if (SIBLING_LIST.equals(operation)) {
+            handleSiblingList(sender, services, first);
+            return;
+        }
+        handleSiblingPair(sender, args, operation, services, first);
+    }
+
+    private SiblingServices siblingServices(CommandSender sender) {
+        RewardService rewardService = plugin.getRewardService();
+        DailyService dailyService = dailyService();
+        if (rewardService == null || !rewardService.isAvailable() || dailyService == null) {
+            sender.sendMessage(Component.text(
+                "Sibling management is unavailable because both reward systems must be online to keep bypasses synchronized."));
+            return null;
+        }
+        return new SiblingServices(rewardService, dailyService);
+    }
+
+    private void handleSiblingList(CommandSender sender, SiblingServices services, OfflinePlayer target) {
+        String targetId = target.getUniqueId().toString();
+        services.rewards().handleAdminCommand(sender,
+            new String[]{REWARD_IP_BYPASS_COMMAND, SIBLING_LIST, targetId});
+        services.daily().handleAdminCommand(sender,
+            new String[]{COMMAND_SIBLING, SIBLING_LIST, targetId});
+    }
+
+    private void handleSiblingPair(CommandSender sender, String[] args, String operation,
+                                   SiblingServices services, OfflinePlayer first) {
+        if (args.length < SIBLING_PAIR_ARGUMENTS) {
+            sendSiblingUsage(sender);
+            return;
+        }
+        OfflinePlayer second = resolveSiblingTarget(sender, args[3]);
+        if (second == null) return;
+        if (first.getUniqueId().equals(second.getUniqueId())) {
+            sender.sendMessage(Component.text("Players must be two different accounts."));
+            return;
+        }
+
+        String firstId = first.getUniqueId().toString();
+        String secondId = second.getUniqueId().toString();
+        services.rewards().handleAdminCommand(sender,
+            new String[]{REWARD_IP_BYPASS_COMMAND, operation, firstId, secondId});
+        services.daily().handleAdminCommand(sender,
+            new String[]{COMMAND_SIBLING, operation, firstId, secondId});
+    }
+
+    private DailyService dailyService() {
+        PluginCommand daily = plugin.getCommand(DAILY_COMMAND);
+        return daily != null && daily.getExecutor() instanceof DailyService service ? service : null;
+    }
+
+    private OfflinePlayer resolveSiblingTarget(CommandSender sender, String supplied) {
+        OfflinePlayer target = playerLookup.findPlayer(supplied);
+        if (target == null) sender.sendMessage(message(MSG_PLAYER_NOT_FOUND));
+        return target;
+    }
+
     private OfflinePlayer requireTarget(CommandSender sender, String[] args, int requiredArgs) {
         if (args.length < requiredArgs) {
             sendUsage(sender);
@@ -190,12 +279,30 @@ public final class TagAdminCommand implements CommandExecutor, TabCompleter {
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
         if (!sender.hasPermission(ADMIN_PERMISSION)) return Collections.emptyList();
-        if (args.length == PLAYER_ARGUMENTS - 1) return ROOT_COMPLETIONS;
+        if (args.length == PLAYER_ARGUMENTS - 1) return matching(ROOT_COMPLETIONS, args[0]);
         String subcommand = args[0].toLowerCase(Locale.ROOT);
+        if (COMMAND_SIBLING.equals(subcommand)) return siblingTabComplete(args);
         if (args.length == PLAYER_ARGUMENTS && PLAYER_TARGET_COMMANDS.contains(subcommand)) return onlinePlayerNames();
         if (args.length == PLAYER_ARGUMENTS && COMMAND_EDIT.equals(subcommand)) return tagIds();
         if (args.length == TAG_ARGUMENTS && TAG_TARGET_COMMANDS.contains(subcommand)) return tagIds();
         return Collections.emptyList();
+    }
+
+    private List<String> siblingTabComplete(String[] args) {
+        if (args.length == PLAYER_ARGUMENTS) return matching(SIBLING_ACTION_COMPLETIONS, args[1]);
+        if (args.length == SIBLING_TARGET_ARGUMENTS) return matching(onlinePlayerNames(), args[2]);
+        if (args.length == SIBLING_PAIR_ARGUMENTS
+            && (SIBLING_ADD.equalsIgnoreCase(args[1]) || SIBLING_REMOVE.equalsIgnoreCase(args[1]))) {
+            return matching(onlinePlayerNames(), args[3]);
+        }
+        return Collections.emptyList();
+    }
+
+    private List<String> matching(List<String> options, String suppliedPrefix) {
+        String prefix = suppliedPrefix == null ? "" : suppliedPrefix.toLowerCase(Locale.ROOT);
+        return options.stream()
+            .filter(option -> option.toLowerCase(Locale.ROOT).startsWith(prefix))
+            .toList();
     }
 
     private List<String> onlinePlayerNames() {
@@ -219,7 +326,15 @@ public final class TagAdminCommand implements CommandExecutor, TabCompleter {
         sender.sendMessage(Component.text("       /tag create <id> <display name>"));
         sender.sendMessage(Component.text("       /tag edit <id> <tag text>"));
         sender.sendMessage(Component.text("       /tag offset <number> (deprecated)"));
+        sender.sendMessage(Component.text("       /tag sibling <add|remove> <player1> <player2>"));
+        sender.sendMessage(Component.text("       /tag sibling list <player>"));
         sender.sendMessage(Component.text("       /tag reload"));
+    }
+
+    private void sendSiblingUsage(CommandSender sender) {
+        sender.sendMessage(Component.text("Usage: /tag sibling add <player1> <player2>"));
+        sender.sendMessage(Component.text("       /tag sibling remove <player1> <player2>"));
+        sender.sendMessage(Component.text("       /tag sibling list <player>"));
     }
 
     private String joinArgs(String[] args, int start) {
@@ -240,5 +355,8 @@ public final class TagAdminCommand implements CommandExecutor, TabCompleter {
             .replace("{player}", playerName == null ? "" : playerName)
             .replace("{tag}", tagId == null ? "" : tagId);
         return LegacyComponentSerializer.legacyAmpersand().deserialize(raw);
+    }
+
+    private record SiblingServices(RewardService rewards, DailyService daily) {
     }
 }
