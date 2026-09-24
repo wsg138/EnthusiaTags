@@ -18,6 +18,9 @@ import java.util.ArrayList;
 import java.util.List;
 
 public final class CosmeticsMenu {
+    private static final int INVENTORY_SIZE = 54;
+    private static final int NAVIGATION_SLOT = INVENTORY_SIZE - 1;
+
     private final CosmeticsService cosmeticsService;
     private final TagService tagService;
     private final Messages messages;
@@ -40,17 +43,17 @@ public final class CosmeticsMenu {
         CosmeticsMenuHolder holder = new CosmeticsMenuHolder(cosmeticsService, null);
         Component title = LegacyComponentSerializer.legacyAmpersand()
             .deserialize(messages.get("cosmetics-gui-title"));
-        Inventory inventory = Bukkit.createInventory(holder, 54, title);
+        Inventory inventory = Bukkit.createInventory(holder, INVENTORY_SIZE, title);
         holder.setInventory(inventory);
 
         int slot = 0;
         for (CosmeticsCategory category : cosmeticsService.getCategories().values()) {
-            if (slot >= 54) {
+            if (slot >= NAVIGATION_SLOT) {
                 break;
             }
             inventory.setItem(slot++, createCategoryItem(category));
         }
-        inventory.setItem(53, createTagsItem());
+        inventory.setItem(NAVIGATION_SLOT, createTagsItem());
         return inventory;
     }
 
@@ -61,17 +64,17 @@ public final class CosmeticsMenu {
             ? messages.get("cosmetics-gui-title")
             : messages.get("cosmetics-category-title").replace("{category}", category.name());
         Component title = LegacyComponentSerializer.legacyAmpersand().deserialize(titleText);
-        Inventory inventory = Bukkit.createInventory(holder, 54, title);
+        Inventory inventory = Bukkit.createInventory(holder, INVENTORY_SIZE, title);
         holder.setInventory(inventory);
 
         int slot = 0;
         for (CosmeticDefinition cosmetic : categoryChoices(cosmeticsService.getCosmetics().values(), categoryId)) {
-            if (slot >= 53) {
+            if (slot >= NAVIGATION_SLOT) {
                 break;
             }
             inventory.setItem(slot++, createCosmeticItem(player, cosmetic));
         }
-        inventory.setItem(53, createBackItem());
+        inventory.setItem(NAVIGATION_SLOT, createBackItem());
         return inventory;
     }
 
