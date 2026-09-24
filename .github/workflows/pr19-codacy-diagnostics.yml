@@ -19,8 +19,7 @@ jobs:
 
           base = "https://api.codacy.com/api/v3/analysis/organizations/gh/wsg138/repositories/EnthusiaTags/pull-requests/19/issues"
           cursor = None
-          total = 0
-          page = 0
+          issues = []
           while True:
               params = {"status": "new", "limit": "100"}
               if cursor:
@@ -28,28 +27,17 @@ jobs:
               url = base + "?" + urllib.parse.urlencode(params)
               with urllib.request.urlopen(url, timeout=30) as response:
                   payload = json.load(response)
-              page += 1
-              rows = payload.get("data", [])
-              print(f"CODACY_PAGE {page} COUNT {len(rows)}")
-              for issue in rows:
-                  total += 1
-                  pattern = issue.get("patternInfo") or {}
-                  location = issue.get("location") or {}
-                  tool_info = issue.get("toolInfo") or {}
-                  print("CODACY_ISSUE " + json.dumps({
-                      "file": issue.get("filePath"),
-                      "line": location.get("line") or issue.get("line"),
-                      "column": location.get("column") or issue.get("column"),
-                      "pattern": pattern.get("id"),
-                      "level": pattern.get("level") or issue.get("level"),
-                      "category": pattern.get("category") or issue.get("category"),
-                      "message": issue.get("message"),
-                      "tool": tool_info.get("name") or issue.get("tool"),
-                      "raw": issue,
-                  }, sort_keys=True))
-              pagination = payload.get("pagination") or {}
-              cursor = pagination.get("cursor")
+              issues.extend(payload.get("data", []))
+              cursor = (payload.get("pagination") or {}).get("cursor")
               if not cursor:
                   break
-          print(f"CODACY_TOTAL {total}")
+          with open("codacy-pr19-issues.json", "w", encoding="utf-8") as output:
+              json.dump(issues, output, indent=2, sort_keys=True)
+          print(f"CODACY_TOTAL {len(issues)}")
           PY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: pr19-codacy-issues
+          path: codacy-pr19-issues.json
+          if-no-files-found: error
+          retention-days: 1
