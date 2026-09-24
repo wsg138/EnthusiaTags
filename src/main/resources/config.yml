@@ -1,5 +1,30 @@
 config-version: 5
 
+# Display-only native advancement pilot. Claims still use /rewards.
+advancements:
+  enabled: true
+  # Paper remains a normal vanilla icon without the optional logo resource pack.
+  logo-custom-model-data: 815001
+  players-per-tick: 25
+  # Optional display-only statistics track. Requires WarzoneDuels; restart after changing.
+  # Adds nine duel milestones for challenges, wins, streaks, spoils, draws, and special-condition wins.
+  # Existing provable records are credited silently.
+  warzone-duels-enabled: false
+  # Display-only reputation track. Enabled when EnthusiaCommend is available.
+  # Historical provider evidence is credited silently; this never pays rewards.
+  commendation-enabled: true
+  # Display-only EnthusiaExpress history track. Enabled when EnthusiaExpress is available.
+  # Reads mail.db off-thread in read-only mode; historical rows are credited silently.
+  express-enabled: true
+  # Display-only DiaryKeeper track. Requires the advancement-evidence DiaryKeeper build.
+  # Existing issuance is credited silently; new diary actions persist provider-owned evidence.
+  diary-enabled: true
+  # PAPER custom model used by the Dear Diary advancement icon.
+  # PAPER is intentional: it shares Nexo's already-working paper item mapping with the Enthusia tab logo.
+  diary-icon-custom-model-data: 815002
+  # Optional per-existing-reward frame overrides: TASK, GOAL or CHALLENGE.
+  frames: {}
+
 # MiniMessage format exposed to nametag consumers. `{tag}` is replaced with configured tag text.
 line-format: "<gray>[{tag}<gray>]"
 

@@ -73,7 +73,7 @@ class LoreItemsArchitectureTest {
         assertTrue(rewardService.contains("return RewardClaimResult.CLAIM_IN_PROGRESS;"),
             "recoverable LoreItems CLAIM_PENDING rows must return pending instead of rewriting the ledger");
         int bootstrap = publishWorkflow.indexOf("bash tools/bootstrap_loreitems_release.sh");
-        int maven = publishWorkflow.indexOf("mvn --batch-mode --no-transfer-progress clean test package");
+        int maven = publishWorkflow.indexOf("mvn --batch-mode --no-transfer-progress clean verify");
         assertTrue(bootstrap >= 0 && maven > bootstrap,
             "publish-latest must bootstrap the pinned LoreItems artifact before Maven");
     }

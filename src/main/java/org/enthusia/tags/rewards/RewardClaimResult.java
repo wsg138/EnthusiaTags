@@ -2,6 +2,8 @@ package org.enthusia.tags.rewards;
 
 public enum RewardClaimResult {
     SUCCESS,
+    SUCCESS_GOLD_WITHHELD,
+    GOLD_VERIFICATION_UNAVAILABLE,
     LOADING,
     ALREADY_CLAIMED,
     NOT_READY,

@@ -1,4 +1,4 @@
-config-version: 2
+config-version: 3
 
 categories:
   kill:
@@ -24,6 +24,25 @@ categories:
     icon: "OAK_SIGN"
 
 cosmetics:
+  # Original delegates to the existing message owner; it never sends a replacement.
+  original_join:
+    name: "&fOriginal Join Message"
+    category: "join"
+    type: ORIGINAL
+    icon: "PAPER"
+    permission: "enthusia.cosmetics.use"
+  original_quit:
+    name: "&fOriginal Leave Message"
+    category: "quit"
+    type: ORIGINAL
+    icon: "PAPER"
+    permission: "enthusia.cosmetics.use"
+  original_kill_message:
+    name: "&fOriginal Kill Message"
+    category: "kill_message"
+    type: ORIGINAL
+    icon: "PAPER"
+    permission: "enthusia.cosmetics.use"
   kill_sparks:
     name: "&#ffb347&lSparks"
     category: "kill"

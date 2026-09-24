@@ -56,4 +56,9 @@ public final class RewardAction {
     public String getDisplayName() { return displayName; }
     public List<String> getLore() { return lore; }
     public boolean isValid() { return valid; }
+
+    public boolean isGoldNetworkLimited() {
+        return org.enthusia.tags.advancements.domain.GoldRewardPolicy.isNetworkLimited(
+            type.name(), material == null ? null : material.name());
+    }
 }

@@ -99,6 +99,13 @@ public final class RewardListener implements Listener {
                     .deserialize(rewardService.getMessage("rewards-claimed")));
                 player.openInventory(rewardMenu.create(player));
             }
+            case SUCCESS_GOLD_WITHHELD -> {
+                player.sendMessage(LegacyComponentSerializer.legacyAmpersand()
+                    .deserialize(rewardService.getMessage("rewards-gold-withheld")));
+                player.openInventory(rewardMenu.create(player));
+            }
+            case GOLD_VERIFICATION_UNAVAILABLE -> player.sendMessage(LegacyComponentSerializer.legacyAmpersand()
+                .deserialize(rewardService.getMessage("rewards-gold-verification-unavailable")));
             case LOADING -> player.sendMessage(LegacyComponentSerializer.legacyAmpersand()
                 .deserialize(rewardService.getMessage("rewards-loading")));
             case ALREADY_CLAIMED -> player.sendMessage(LegacyComponentSerializer.legacyAmpersand()

@@ -51,6 +51,12 @@ public final class CosmeticsService {
         this.performanceMonitor = performanceMonitor;
     }
 
+    CosmeticsService(JavaPlugin plugin, Messages messages, PerformanceMonitor performanceMonitor,
+                     CosmeticsStorage storage) {
+        this(plugin, messages, performanceMonitor);
+        this.storage = java.util.Objects.requireNonNull(storage, "storage");
+    }
+
     public void enable() {
         ensureDefaults();
         initStorage();

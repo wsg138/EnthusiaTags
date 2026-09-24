@@ -83,7 +83,7 @@ public final class CosmeticDefinition {
     }
 
     public String getMessage() {
-        return message;
+        return type == CosmeticType.ORIGINAL ? null : message;
     }
 
     public String getPermission() {

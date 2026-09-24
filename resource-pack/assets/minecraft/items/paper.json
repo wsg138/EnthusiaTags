@@ -1,0 +1,12 @@
+{
+  "model": {
+    "type": "minecraft:range_dispatch",
+    "property": "minecraft:custom_model_data",
+    "index": 0,
+    "fallback": { "type": "minecraft:model", "model": "minecraft:item/paper" },
+    "entries": [
+      { "threshold": 815001, "model": { "type": "minecraft:model", "model": "enthusia:item/logo" } },
+      { "threshold": 815002, "model": { "type": "minecraft:model", "model": "enthusia:item/journal_quill" } }
+    ]
+  }
+}

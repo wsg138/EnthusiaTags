@@ -5,6 +5,7 @@ This file is the maintainer and worker guide for repository-local automated test
 ## What this test-hardening branch adds
 
 ### `TagTextFormatTest`
+
 Protects formatting and user-controlled text boundaries:
 
 - null/empty behavior;
@@ -18,6 +19,7 @@ Protects formatting and user-controlled text boundaries:
 A failure here can indicate a visible formatting regression or an unsafe dynamic-text interpolation change.
 
 ### `CosmeticsStorageTest`
+
 Protects the SQLite cosmetic-selection ledger:
 
 - selections are isolated by player and category;
@@ -29,6 +31,7 @@ Protects the SQLite cosmetic-selection ledger:
 This test uses a temporary SQLite file only. It must never use production data.
 
 ### `FullFeatureCoverageContractTest`
+
 This is a coverage-inventory guard. It maps major production feature families to concrete regression tests so coverage cannot silently disappear when tests are removed or reorganized.
 
 It currently guards tag formatting, placeholders, nametag refresh/rendering, config migration, cosmetics persistence, daily rewards, anti-farm/natural-block accounting, reward persistence/recovery, money/config policy and LoreItems handoff/API behavior.

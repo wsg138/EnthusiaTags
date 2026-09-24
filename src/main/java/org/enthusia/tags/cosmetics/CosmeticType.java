@@ -1,6 +1,7 @@
 package org.enthusia.tags.cosmetics;
 
 public enum CosmeticType {
+    ORIGINAL,
     KILL_PARTICLE,
     DEATH_PARTICLE,
     TRAIL_PARTICLE,

@@ -54,18 +54,12 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.lang.reflect.Method;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 @SuppressWarnings({"PMD.UseConcurrentHashMap", "PMD.NullAssignment", "PMD.AvoidInstantiatingObjectsInLoops"})
 public final class RewardService {
     private static final String REWARD_UNLOCK_NOTIFIED_PREFIX = "reward-unlocked:";
     private static final int MAX_UNLOCK_CHECKS_PER_RUN = 25;
     private static final int MAX_LORE_ITEM_FINALIZATIONS_PER_SWEEP = 50;
-    private static final Pattern HOURS_PATTERN = Pattern.compile("(?i)(\\d+)\\s*h");
-    private static final Pattern MINUTES_PATTERN = Pattern.compile("(?i)(\\d+)\\s*m");
-    private static final Pattern SECONDS_PATTERN = Pattern.compile("(?i)(\\d+)\\s*s");
-    private static final Pattern NON_DIGIT_PATTERN = Pattern.compile("[^0-9]");
     private static final String COMMAND_SYNC_ALL = "syncall";
     private static final String COMMAND_SYNC = "sync";
     private static final String COMMAND_DEBUG = "debug";
@@ -91,6 +85,9 @@ public final class RewardService {
     private final Map<UUID, CompletableFuture<Void>> pendingLoads = new ConcurrentHashMap<>();
     private final Map<UUID, Map<String, Long>> pendingCounterDeltas = new ConcurrentHashMap<>();
     private final Map<UUID, ProgressSnapshot> progressSnapshots = new ConcurrentHashMap<>();
+    private final Map<UUID, Map<String, Long>> lastVerifiedProgress = new ConcurrentHashMap<>();
+    private final Map<UUID, org.enthusia.tags.advancements.domain.CompletionBaseline> completionBaselines = new ConcurrentHashMap<>();
+    private java.util.function.BiConsumer<Player, List<RewardDefinition>> advancementNotifications;
     private final ConcurrentLinkedDeque<UUID> rewardSyncQueue = new ConcurrentLinkedDeque<>();
     private final java.util.Set<UUID> queuedRewardSyncPlayers = ConcurrentHashMap.newKeySet();
     private final Set<UUID> queuedUnlockChecks = ConcurrentHashMap.newKeySet();
@@ -129,6 +126,13 @@ public final class RewardService {
         this.playerLookup = new PlayerLookup(plugin);
         this.loreItemRewardRuntime = plugin instanceof EnthusiaTagsPlugin tagsPlugin
             ? tagsPlugin.getLoreItemRewardRuntime() : null;
+    }
+
+    /** Package-local storage injection keeps orchestration independently testable. */
+    RewardService(JavaPlugin plugin, TagService tagService, Messages messages,
+                  PerformanceMonitor performanceMonitor, RewardStorage storage) {
+        this(plugin, tagService, messages, performanceMonitor);
+        this.storage = java.util.Objects.requireNonNull(storage, "storage");
     }
 
     public void enable() {
@@ -178,6 +182,9 @@ public final class RewardService {
         pendingLoads.clear();
         pendingCounterDeltas.clear();
         progressSnapshots.clear();
+        lastVerifiedProgress.clear();
+        completionBaselines.clear();
+        advancementNotifications = null;
         rewardSyncQueue.clear();
         queuedRewardSyncPlayers.clear();
         queuedUnlockChecks.clear();
@@ -211,6 +218,8 @@ public final class RewardService {
         if (lifecycle.get() == ServiceLifecycle.STOPPING || lifecycle.get() == ServiceLifecycle.STOPPED) {
             return;
         }
+        completionBaselines.clear();
+        progressSnapshots.clear();
         ensureDefaults();
         loadConfig();
         refreshIntegrations();
@@ -235,7 +244,7 @@ public final class RewardService {
     }
 
     public boolean isAvailable() {
-        return plugin.isEnabled() && lifecycle.get() == ServiceLifecycle.RUNNING
+        return lifecycle.get() == ServiceLifecycle.RUNNING && plugin.isEnabled()
             && storage != null && claimExecutor != null && !claimExecutor.isShutdown();
     }
 
@@ -274,7 +283,6 @@ public final class RewardService {
                     Player player = Bukkit.getPlayer(playerId);
                     if (player != null) {
                         Bukkit.getScheduler().runTask(plugin, () -> {
-                            reserveExistingIpClaims(player, state);
                             drainItemOverflow(player);
                             recoverPendingRewards(player.getUniqueId());
                             queueProgressRefresh(player);
@@ -304,7 +312,6 @@ public final class RewardService {
         preloadPlayer(player.getUniqueId());
         RewardPlayerState state = getLoadedState(player.getUniqueId());
         if (state != null) {
-            reserveExistingIpClaims(player, state);
             drainItemOverflow(player);
             recoverPendingRewards(player.getUniqueId());
             queueProgressRefresh(player);
@@ -321,6 +328,8 @@ public final class RewardService {
         pendingLoads.remove(playerId);
         pendingCounterDeltas.remove(playerId);
         progressSnapshots.remove(playerId);
+        lastVerifiedProgress.remove(playerId);
+        completionBaselines.remove(playerId);
         playerStates.remove(playerId);
     }
 
@@ -473,7 +482,7 @@ public final class RewardService {
         future.whenComplete((result, throwable) -> activeOperations.remove(future));
     }
 
-    private RewardClaimResult claimInternal(UUID playerId, String playerName, RewardDefinition reward,
+    RewardClaimResult claimInternal(UUID playerId, String playerName, RewardDefinition reward,
                                             String ipAddress) {
         RewardPlayerState state = getLoadedState(playerId);
         if (state == null || !state.isLoaded()) return RewardClaimResult.LOADING;
@@ -494,6 +503,16 @@ public final class RewardService {
         }
         Map<String, RewardStorage.ActionLedgerEntry> ledger =
             storage.loadActionLedgerNow(playerId, rewardId);
+        // Validate the entire configured claim before reserving or delivering any component.
+        // A definition conflict is not a transient failure of gold/IP verification.
+        for (RewardAction action : reward.getActions()) {
+            RewardStorage.ActionLedgerEntry existing = ledger.get(action.getActionId());
+            if (existing != null && !existing.fingerprint().equals(actionFingerprint(action))) {
+                state.setOverall(rewardId, RewardStatus.REQUIRES_RECONCILIATION);
+                return persistStateBarrier(playerId, state)
+                    ? RewardClaimResult.RECONCILIATION_REQUIRED : RewardClaimResult.DELIVERY_FAILED;
+            }
+        }
         boolean unresolvedHistoricalAction = ledger.values().stream().anyMatch(entry ->
             entry.status() == RewardStatus.REQUIRES_RECONCILIATION
                 || (entry.status() == RewardStatus.CLAIM_PENDING
@@ -503,30 +522,24 @@ public final class RewardService {
             persistStateBarrier(playerId, state);
             return RewardClaimResult.RECONCILIATION_REQUIRED;
         }
-        if (!reserveIpClaim(playerId, rewardId, ipAddress)) {
-            return RewardClaimResult.IP_ALREADY_CLAIMED;
-        }
-
         state.setOverall(rewardId, RewardStatus.CLAIM_PENDING);
         if (!persistStateBarrier(playerId, state)) {
-            storage.releaseIpClaimAsync(playerId, rewardId, ipAddress);
             return RewardClaimResult.DELIVERY_FAILED;
         }
-        boolean anyActionDelivered = ledger.values().stream()
-            .anyMatch(entry -> entry.status() == RewardStatus.CLAIMED
-                || entry.status() == RewardStatus.REQUIRES_RECONCILIATION);
+        boolean goldWithheld = false;
+        boolean goldVerificationFailed = false;
         for (RewardAction action : reward.getActions()) {
             String fingerprint = actionFingerprint(action);
             RewardStorage.ActionLedgerEntry existing = ledger.get(action.getActionId());
-            if (existing != null && existing.status() == RewardStatus.CLAIMED
+            if (existing != null && existing.status().isActionSettled()
                 && existing.fingerprint().equals(fingerprint)) {
-                anyActionDelivered = true;
+                goldWithheld |= existing.status() == RewardStatus.WITHHELD_NETWORK_LIMIT;
                 continue;
             }
             if (existing != null && (existing.status() == RewardStatus.REQUIRES_RECONCILIATION
                 || (existing.status() == RewardStatus.CLAIM_PENDING
                     && !isRecoverableLorePending(reward, existing))
-                || (existing.status() == RewardStatus.CLAIMED && !existing.fingerprint().equals(fingerprint)))) {
+                || (existing.status().isActionSettled() && !existing.fingerprint().equals(fingerprint)))) {
                 state.setOverall(rewardId, RewardStatus.REQUIRES_RECONCILIATION);
                 persistStateBarrier(playerId, state);
                 return RewardClaimResult.RECONCILIATION_REQUIRED;
@@ -536,6 +549,21 @@ public final class RewardService {
                 state.setOverall(rewardId, RewardStatus.CLAIM_PENDING);
                 persistStateBarrier(playerId, state);
                 return RewardClaimResult.CLAIM_IN_PROGRESS;
+            }
+            if (action.isGoldNetworkLimited()) {
+                try {
+                    if (!storage.reserveGoldActionNow(playerId, rewardId, action, fingerprint, ipAddress)) {
+                        goldWithheld = true;
+                        continue;
+                    }
+                } catch (SQLException ex) {
+                    // Never convert unavailable verification into permanent denial. Other components
+                    // can still be delivered and the gold component remains retryable.
+                    goldVerificationFailed = true;
+                    plugin.getLogger().warning("Gold network verification unavailable for " + playerId
+                        + " reward=" + rewardId + " action=" + action.getActionId() + ": " + ex.getMessage());
+                    continue;
+                }
             }
             storage.saveActionLedgerNow(playerId, rewardId, action, fingerprint,
                 RewardStatus.CLAIM_PENDING, null, null);
@@ -604,23 +632,24 @@ public final class RewardService {
                 storage.saveActionLedgerNow(playerId, rewardId, action, fingerprint,
                     failureStatus, vaultResult, evidence);
                 state.setOverall(rewardId, failureStatus);
-                if (!anyActionDelivered && !ambiguous && action.getType() != RewardActionType.LORE_ITEM) {
-                    storage.releaseIpClaimAsync(playerId, rewardId, ipAddress);
-                }
                 persistStateBarrier(playerId, state);
                 plugin.getLogger().warning("Reward delivery failed player=" + playerId
                     + " name=" + playerName + " reward=" + rewardId + " action=" + action.getType());
                 return RewardClaimResult.DELIVERY_FAILED;
             }
-            anyActionDelivered = true;
             storage.saveActionLedgerNow(playerId, rewardId, action, fingerprint,
                 RewardStatus.CLAIMED, vaultResult, evidence);
         }
 
+        if (goldVerificationFailed) {
+            state.setOverall(rewardId, RewardStatus.DELIVERY_FAILED);
+            persistStateBarrier(playerId, state);
+            return RewardClaimResult.GOLD_VERIFICATION_UNAVAILABLE;
+        }
         long finalizedRevision = storage.finalizeRewardNow(playerId, rewardId);
         state.applyDurableFinalization(rewardId, finalizedRevision);
         invalidateProgress(playerId);
-        return RewardClaimResult.SUCCESS;
+        return goldWithheld ? RewardClaimResult.SUCCESS_GOLD_WITHHELD : RewardClaimResult.SUCCESS;
         } catch (SQLException ex) {
             plugin.getLogger().severe("Reward claim ledger failed for " + playerId + ": " + ex.getMessage());
             return RewardClaimResult.DELIVERY_FAILED;
@@ -829,7 +858,9 @@ public final class RewardService {
         for (RewardCriterion criterion : reward.getCriteria()) {
             long value = getProgress(player, criterion, snapshot);
             progress.put(criterion.getLabel(), value);
-            currentlyComplete &= isCriterionAvailable(criterion) && value >= criterion.getAmount();
+            currentlyComplete &= isCriterionAvailable(criterion)
+                && !snapshot.unavailableCriteria().contains(criterionCacheKey(criterion))
+                && value >= criterion.getAmount();
         }
         if (!areActionsAvailable(reward)) {
             return new RewardEvaluation(RewardStatus.LOCKED, progress, unlocked, false,
@@ -848,7 +879,8 @@ public final class RewardService {
             if (!isCriterionAvailable(criterion)) {
                 return false;
             }
-            if (getProgress(player, criterion, snapshot) < criterion.getAmount()) {
+            if (getProgress(player, criterion, snapshot) < criterion.getAmount()
+                || snapshot.unavailableCriteria().contains(criterionCacheKey(criterion))) {
                 return false;
             }
         }
@@ -858,6 +890,44 @@ public final class RewardService {
     public long getProgress(Player player, RewardCriterion criterion) {
         if (!isAvailable()) return 0L;
         return getProgress(player, criterion, getProgressSnapshot(player));
+    }
+
+    /** -1 means unavailable; completed display is based only on Tags' persisted evidence. */
+    public int getAdvancementProgress(Player player, RewardDefinition reward) {
+        if (!isAvailable()) return -1;
+        RewardPlayerState state = getLoadedState(player.getUniqueId());
+        if (state == null || !state.isLoaded()) return -1;
+        String id = reward.getId().toLowerCase(Locale.ROOT);
+        if (historicallyCompleted(state, id)) return 1000;
+        return verifiedAdvancementProgress(player, reward, getProgressSnapshot(player));
+    }
+
+    static boolean historicallyCompleted(RewardPlayerState state, String id) {
+        if (state.isClaimed(id) || state.hasState(REWARD_UNLOCK_NOTIFIED_PREFIX + id)) return true;
+        String delivery = state.getState("reward-delivery:" + id);
+        return delivery != null && Set.of(RewardStatus.CLAIM_PENDING.name(), RewardStatus.ITEM_QUEUED.name(),
+            RewardStatus.DELIVERY_FAILED.name(), RewardStatus.REQUIRES_RECONCILIATION.name(), RewardStatus.CLAIMED.name()).contains(delivery);
+    }
+
+    private int verifiedAdvancementProgress(Player player, RewardDefinition reward, ProgressSnapshot snapshot) {
+        if (reward.getCriteria().isEmpty()) return -1;
+        double ratio = 1;
+        boolean complete = true;
+        for (RewardCriterion criterion : reward.getCriteria()) {
+            if (!isCriterionAvailable(criterion) || !criterion.isValid()) return -1;
+            long value = getProgress(player, criterion, snapshot);
+            if (value < 0 || snapshot.unavailableCriteria().contains(criterionCacheKey(criterion))) return -1;
+            long goal = criterion.getAmount();
+            if (goal > 0) {
+                ratio = Math.min(ratio, (double) value / goal);
+                complete &= value >= goal;
+            }
+        }
+        return complete ? 1000 : Math.max(0, Math.min(999, (int) (ratio * 1000)));
+    }
+
+    public void setAdvancementNotifications(java.util.function.BiConsumer<Player, List<RewardDefinition>> sink) {
+        advancementNotifications = sink;
     }
 
     public long getProgress(Player player, RewardCriterion criterion, ProgressSnapshot snapshot) {
@@ -871,9 +941,22 @@ public final class RewardService {
         if (cached != null) {
             return cached;
         }
-        long value = computeProgress(player, criterion);
-        snapshot.values().put(cacheKey, value);
-        return value;
+        Map<String, Long> lastGood = lastVerifiedProgress.computeIfAbsent(player.getUniqueId(),
+            ignored -> new ConcurrentHashMap<>());
+        java.util.OptionalLong reading;
+        try {
+            reading = java.util.OptionalLong.of(computeProgress(player, criterion));
+        } catch (PlaytimeHook.ProgressUnavailableException unavailable) {
+            reading = java.util.OptionalLong.empty();
+        }
+        var verified = org.enthusia.tags.advancements.domain.VerifiedProgress.resolve(lastGood.get(cacheKey), reading);
+        if (verified.available()) {
+            lastGood.put(cacheKey, verified.displayedValue());
+        } else {
+            snapshot.unavailableCriteria().add(cacheKey);
+        }
+        snapshot.values().put(cacheKey, verified.displayedValue());
+        return verified.displayedValue();
     }
 
     private long computeProgress(Player player, RewardCriterion criterion) {
@@ -946,11 +1029,11 @@ public final class RewardService {
     public String formatProgress(Player player, RewardCriterion criterion) {
         long current = getProgress(player, criterion);
         long goal = criterion.getAmount();
-        return current + "/" + goal;
+        return (current < 0 ? "Unavailable" : current) + "/" + goal;
     }
 
     public String formatProgress(long current, RewardCriterion criterion) {
-        return current + "/" + criterion.getAmount();
+        return (current < 0 ? "Unavailable" : current) + "/" + criterion.getAmount();
     }
 
     public ProgressSnapshot getProgressSnapshot(Player player) {
@@ -1286,7 +1369,7 @@ public final class RewardService {
                 return new ReconciliationPlan(RewardStatus.DELIVERY_FAILED, false);
             }
             boolean allHistoricalDelivered = !statuses.isEmpty()
-                && statuses.values().stream().allMatch(status -> status == RewardStatus.CLAIMED);
+                && statuses.values().stream().allMatch(RewardStatus::isActionSettled);
             return new ReconciliationPlan(allHistoricalDelivered ? RewardStatus.CLAIMED
                 : RewardStatus.CLAIM_PENDING, allHistoricalDelivered);
         }
@@ -1300,7 +1383,7 @@ public final class RewardService {
             RewardStorage.ActionLedgerEntry entry = ledger.get(action.getActionId());
             RewardStatus status = action.getActionId().equals(overrideActionId) && overrideActionStatus != null
                 ? overrideActionStatus : entry == null ? null : entry.status();
-            return status == RewardStatus.CLAIMED && entry != null
+            return status != null && status.isActionSettled() && entry != null
                 && actionFingerprint(action).equals(entry.fingerprint());
         });
         return new ReconciliationPlan(allCurrentDelivered ? RewardStatus.CLAIMED : RewardStatus.CLAIM_PENDING,
@@ -1310,7 +1393,7 @@ public final class RewardService {
     private String unresolvedEvidence(Map<String, RewardStorage.ActionLedgerEntry> ledger,
                                       List<RewardStorage.ItemOverflowEntry> items) {
         List<String> unresolved = new ArrayList<>();
-        ledger.values().stream().filter(entry -> entry.status() != RewardStatus.CLAIMED)
+        ledger.values().stream().filter(entry -> !entry.status().isActionSettled())
             .forEach(entry -> unresolved.add("action " + entry.actionId() + "=" + entry.status()));
         items.stream().filter(item -> !"DELIVERED".equals(item.status()))
             .forEach(item -> unresolved.add("item " + item.actionId() + "=" + item.status()));
@@ -1418,6 +1501,7 @@ public final class RewardService {
             .forEach(entry -> addActionInspection(lines, "historical/removed", entry.actionId(),
                 entry.actionType(), "-", entry));
         lines.add("  IP reservations: " + storage.listIpClaimsNow(playerId, rewardId));
+        lines.add("  Gold-only IP reservations: " + storage.listGoldIpClaimsNow(playerId, rewardId));
         lines.add("  recent IP reconciliation history:");
         for (String entry : storage.loadIpHistoryNow(playerId, rewardId, 12)) {
             lines.add("    " + entry);
@@ -1714,28 +1798,6 @@ public final class RewardService {
         return state;
     }
 
-    private boolean reserveIpClaim(Player player, String rewardId) {
-        return reserveIpClaim(player.getUniqueId(), rewardId, getPlayerIpAddress(player));
-    }
-
-    private boolean reserveIpClaim(UUID playerId, String rewardId, String ipAddress) {
-        if (ipAddress.isBlank()) {
-            performanceMonitor.increment("rewards.claim.ip-missing");
-            return true;
-        }
-        try {
-            boolean reserved = storage.reserveIpClaimNow(playerId, rewardId, ipAddress);
-            if (!reserved) {
-                performanceMonitor.increment("rewards.claim.ip-blocked");
-            }
-            return reserved;
-        } catch (SQLException ex) {
-            plugin.getLogger().warning("Failed to check reward IP claim for " + playerId + ": " + ex.getMessage());
-            performanceMonitor.increment("rewards.claim.ip-check-failed");
-            return false;
-        }
-    }
-
     private String getPlayerIpAddress(Player player) {
         java.net.InetSocketAddress address = player.getAddress();
         if (address == null) {
@@ -1747,29 +1809,15 @@ public final class RewardService {
         return address.getHostString() == null ? "" : address.getHostString();
     }
 
-    private void reserveExistingIpClaims(Player player, RewardPlayerState state) {
-        if (state == null || !state.isLoaded() || state.claimedRewardsSnapshot().isEmpty()) {
-            return;
-        }
-        String ipAddress = getPlayerIpAddress(player);
-        if (ipAddress.isBlank()) {
-            return;
-        }
-        UUID playerId = player.getUniqueId();
-        for (String rewardId : state.claimedRewardsSnapshot()) {
-            storage.reserveIpClaimAsync(playerId, rewardId, ipAddress).exceptionally(throwable -> {
-                plugin.getLogger().warning("Failed to backfill reward IP claim for " + playerId + ": " + throwable.getMessage());
-                return false;
-            });
-        }
-    }
-
     private void notifyUnlockedRewards(Player player, ProgressSnapshot snapshot) {
         RewardPlayerState state = getLoadedState(player.getUniqueId());
         if (state == null || !state.isLoaded()) {
             return;
         }
         List<RewardDefinition> newlyUnlocked = new ArrayList<>();
+        Set<String> liveUnlocks = new java.util.HashSet<>();
+        var baseline = completionBaselines.computeIfAbsent(player.getUniqueId(),
+            ignored -> new org.enthusia.tags.advancements.domain.CompletionBaseline());
         for (RewardDefinition reward : rewards.values()) {
             String rewardId = reward.getId().toLowerCase(Locale.ROOT);
             if (state.isClaimed(rewardId)) {
@@ -1779,11 +1827,14 @@ public final class RewardService {
             if (state.hasState(notificationKey)) {
                 continue;
             }
-            RewardEvaluation evaluation = evaluate(player, reward, snapshot);
-            if (!evaluation.claimable()) {
+            int progress = verifiedAdvancementProgress(player, reward, snapshot);
+            boolean liveCompletion = baseline.isLiveCompletion(rewardId, progress)
+                || baseline.hasPendingLiveCompletion(rewardId);
+            if (progress != 1000) {
                 continue;
             }
             newlyUnlocked.add(reward);
+            if (liveCompletion) liveUnlocks.add(rewardId);
         }
         if (!newlyUnlocked.isEmpty()) {
             if (claimExecutor == null || claimExecutor.isShutdown()
@@ -1798,8 +1849,15 @@ public final class RewardService {
                 activeOperations.remove(future);
                 scheduleMain(() -> {
                     Player live = onlinePlayer(playerId);
-                    if (live == null || throwable != null || persistedUnlocks.isEmpty()) return;
-                    sendPersistedUnlocks(live, persistedUnlocks);
+                    if (live == null || throwable != null || persistedUnlocks.isEmpty()
+                        || getLoadedState(playerId) != state) return;
+                    List<RewardDefinition> celebrations = persistedUnlocks.stream()
+                        .filter(reward -> liveUnlocks.contains(reward.getId().toLowerCase(Locale.ROOT))).toList();
+                    if (celebrations.isEmpty()) return;
+                    if (advancementNotifications != null && plugin.getConfig().getBoolean("advancements.enabled", true))
+                        advancementNotifications.accept(live, celebrations);
+                    else sendPersistedUnlocks(live, celebrations);
+                    celebrations.forEach(reward -> baseline.acknowledge(reward.getId().toLowerCase(Locale.ROOT)));
                 });
             });
         }
@@ -1811,9 +1869,9 @@ public final class RewardService {
         for (RewardDefinition reward : newlyUnlocked) {
             String rewardId = reward.getId().toLowerCase(Locale.ROOT);
             try {
-                storage.markUnlockedNow(playerId, rewardId);
+                boolean inserted = storage.markUnlockedNow(playerId, rewardId);
                 state.putState(REWARD_UNLOCK_NOTIFIED_PREFIX + rewardId, "true");
-                persisted.add(reward);
+                if (inserted) persisted.add(reward);
             } catch (SQLException ex) {
                 plugin.getLogger().warning("Failed to persist unlock marker for " + playerId
                     + " reward=" + rewardId + ": " + ex.getMessage());
@@ -1915,34 +1973,23 @@ public final class RewardService {
 
     private long getPlaytimeMinutes(Player player, RewardCriterionType type, String placeholder) {
         if (!playtimeHook.isAvailable()) {
-            return config.allowPlaceholderPlaytimeFallback() ? getPlaytimeFromPlaceholder(player, placeholder) : 0L;
+            if (config.allowPlaceholderPlaytimeFallback()) {
+                return getPlaytimeFromPlaceholder(player, placeholder);
+            }
+            throw new PlaytimeHook.ProgressUnavailableException();
         }
         return playtimeHook.getMinutes(player.getUniqueId(), type);
     }
 
     private long getPlaytimeFromPlaceholder(Player player, String placeholder) {
         if (placeholder == null || placeholder.isBlank()) {
-            return 0L;
+            throw new PlaytimeHook.ProgressUnavailableException();
         }
         String resolved = tagService.getPlaceholderRegistry().apply(player, placeholder);
         resolved = placeholderApiHook.apply(player, resolved);
-        return parsePlaytimeMinutes(resolved, placeholder);
-    }
-
-    private long parsePlaytimeMinutes(String resolved, String placeholder) {
-        if (resolved == null) {
-            return 0L;
-        }
-        String raw = resolved.trim();
-        if (raw.isEmpty()) {
-            return 0L;
-        }
-
-        long tokenizedMinutes = parseTokenizedPlaytimeMinutes(raw);
-        if (tokenizedMinutes >= 0L) {
-            return tokenizedMinutes;
-        }
-        return parseNumericPlaytimeMinutes(raw, placeholder);
+        long parsed = PlaytimeTextParser.parse(resolved, placeholder);
+        if (parsed < 0) throw new PlaytimeHook.ProgressUnavailableException();
+        return parsed;
     }
 
     private void sendUnlockNotification(Player player, RewardDefinition reward, boolean playSound) {
@@ -1981,45 +2028,6 @@ public final class RewardService {
             (float) plugin.getConfig().getDouble("rewards.unlock-sound.pitch", 1.15D));
     }
 
-    private long parseTokenizedPlaytimeMinutes(String raw) {
-        long minutes = 0L;
-        boolean matched = false;
-        Matcher hours = HOURS_PATTERN.matcher(raw);
-        if (hours.find()) {
-            minutes += Long.parseLong(hours.group(1)) * 60L;
-            matched = true;
-        }
-        Matcher mins = MINUTES_PATTERN.matcher(raw);
-        if (mins.find()) {
-            minutes += Long.parseLong(mins.group(1));
-            matched = true;
-        }
-        Matcher secs = SECONDS_PATTERN.matcher(raw);
-        if (secs.find()) {
-            minutes += Long.parseLong(secs.group(1)) / 60L;
-            matched = true;
-        }
-        return matched ? minutes : -1L;
-    }
-
-    private long parseNumericPlaytimeMinutes(String raw, String placeholder) {
-        String digits = NON_DIGIT_PATTERN.matcher(raw).replaceAll("");
-        if (digits.isEmpty()) {
-            return 0L;
-        }
-
-        try {
-            long value = Long.parseLong(digits);
-            String token = placeholder == null ? "" : placeholder.toLowerCase(Locale.ROOT);
-            if (token.contains("%playtime_") && !token.contains("formatted")) {
-                return value / 60L;
-            }
-            return value;
-        } catch (NumberFormatException ex) {
-            return 0L;
-        }
-    }
-
     private boolean isInBaltopTop3(UUID playerId) {
         Plugin plugin = baltopPlugin;
         Method method = baltopMethod;
@@ -2046,7 +2054,7 @@ public final class RewardService {
         };
     }
 
-    private boolean isCriterionAvailable(RewardCriterion criterion) {
+    boolean isCriterionAvailable(RewardCriterion criterion) {
         if (criterion == null || !criterion.isValid()) {
             return false;
         }
@@ -2055,6 +2063,7 @@ public final class RewardService {
             return naturalBlockTrackingAvailable;
         }
         return switch (criterion.getSourceType()) {
+            case CUSTOM_COUNTER -> true;
             case VAULT_BALANCE -> vaultHook.isAvailable();
             case BALTOP -> baltopPlugin != null;
             case PLAYTIME -> playtimeHook.isAvailable() || config.allowPlaceholderPlaytimeFallback();
@@ -2825,7 +2834,7 @@ public final class RewardService {
         rewards = java.util.Collections.unmodifiableMap(loadedRewards);
     }
 
-    private List<RewardCriterion> loadCriteria(ConfigurationSection section) {
+    List<RewardCriterion> loadCriteria(ConfigurationSection section) {
         List<RewardCriterion> criteria = new ArrayList<>();
         if (section == null) {
             return criteria;
@@ -3152,6 +3161,9 @@ public final class RewardService {
 
     private static Map<RewardCriterionType, String> defaultCounterKeys() {
         Map<RewardCriterionType, String> keys = new EnumMap<>(RewardCriterionType.class);
+        keys.put(RewardCriterionType.PLAYTIME_CONSECUTIVE_ACTIVE_MINUTES, "max_consecutive_active");
+        keys.put(RewardCriterionType.UNDERGROUND_ACTIVE_MINUTES, "underground_active");
+        keys.put(RewardCriterionType.PING_MS_AT_LEAST, "max_ping_ms");
         keys.put(RewardCriterionType.KILL_STREAK_CURRENT, "kill_streak");
         keys.put(RewardCriterionType.DEATH_STREAK_SAME, "death_streak_same");
         keys.put(RewardCriterionType.QUICK_KILL_COUNT, "quick_kill");
@@ -3161,7 +3173,10 @@ public final class RewardService {
         return keys;
     }
 
-    public record ProgressSnapshot(long createdTick, Map<String, Long> values) {
+    public record ProgressSnapshot(long createdTick, Map<String, Long> values, Set<String> unavailableCriteria) {
+        public ProgressSnapshot(long createdTick, Map<String, Long> values) {
+            this(createdTick, values, ConcurrentHashMap.newKeySet());
+        }
     }
 
     private record SourceDefaults(RewardSourceType sourceType, Statistic statistic, Material material, String key) {

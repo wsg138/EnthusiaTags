@@ -29,6 +29,7 @@ public final class CosmeticsListener implements Listener {
     private final CosmeticsMenu cosmeticsMenu;
     private final TagMenu tagMenu;
     private final RewardService rewardService;
+    private final java.util.function.BooleanSupplier roseChatOwnsPresence;
 
     public CosmeticsListener(CosmeticsService cosmeticsService,
                              TagService tagService,
@@ -38,6 +39,7 @@ public final class CosmeticsListener implements Listener {
         this.cosmeticsMenu = new CosmeticsMenu(cosmeticsService, tagService, messages);
         this.tagMenu = new TagMenu(tagService);
         this.rewardService = rewardService;
+        this.roseChatOwnsPresence = () -> org.bukkit.Bukkit.getPluginManager().isPluginEnabled("RoseChat");
     }
 
     @EventHandler
@@ -45,9 +47,17 @@ public final class CosmeticsListener implements Listener {
         cosmeticsService.preloadPlayerBlocking(event.getUniqueId());
     }
 
+    @EventHandler(priority = EventPriority.LOWEST)
+    public void onJoinLoad(PlayerJoinEvent event) {
+        cosmeticsService.loadPlayer(event.getPlayer());
+    }
+
     @EventHandler(priority = EventPriority.HIGH)
     public void onJoin(PlayerJoinEvent event) {
-        cosmeticsService.loadPlayer(event.getPlayer());
+        if (roseChatOwnsPresence != null && roseChatOwnsPresence.getAsBoolean())
+            return;
+        if (event.joinMessage() == null)
+            return;
         String message = cosmeticsService.getJoinMessage(event.getPlayer());
         if (message != null && !message.isBlank()) {
             event.joinMessage(LegacyComponentSerializer.legacyAmpersand().deserialize(message));
@@ -56,14 +66,22 @@ public final class CosmeticsListener implements Listener {
 
     @EventHandler(priority = EventPriority.HIGH)
     public void onQuit(PlayerQuitEvent event) {
+        if (roseChatOwnsPresence != null && roseChatOwnsPresence.getAsBoolean())
+            return;
+        if (event.quitMessage() == null)
+            return;
         String message = cosmeticsService.getQuitMessage(event.getPlayer());
         if (message != null && !message.isBlank()) {
             event.quitMessage(LegacyComponentSerializer.legacyAmpersand().deserialize(message));
         }
-        cosmeticsService.unloadPlayer(event.getPlayer());
     }
 
     @EventHandler(priority = EventPriority.MONITOR)
+    public void onQuitCleanup(PlayerQuitEvent event) {
+        cosmeticsService.unloadPlayer(event.getPlayer());
+    }
+
+    @EventHandler(priority = EventPriority.HIGH)
     public void onDeath(PlayerDeathEvent event) {
         Player victim = event.getEntity();
         cosmeticsService.applyDeathEffect(victim);
@@ -71,7 +89,7 @@ public final class CosmeticsListener implements Listener {
         if (killer != null) {
             cosmeticsService.applyKillEffect(killer, victim);
             String message = cosmeticsService.getKillMessage(killer, victim);
-            if (message != null && !message.isBlank()) {
+            if (event.deathMessage() != null && message != null && !message.isBlank()) {
                 event.deathMessage(LegacyComponentSerializer.legacyAmpersand().deserialize(message));
             }
         }

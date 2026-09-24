@@ -1,0 +1,8 @@
+# Custom icon used by the Dear Diary advancement.
+# PAPER is intentional because the Enthusia tab logo already proves this Nexo mapping path works.
+enthusia_diary_advancement_icon:
+  itemname: Diary
+  material: PAPER
+  Pack:
+    model: enthusia:item/journal_quill
+    custom_model_data: 815002

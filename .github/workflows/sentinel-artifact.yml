@@ -23,15 +23,20 @@ jobs:
           EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
         run: test "$(git rev-parse HEAD)" = "${EXPECTED_HEAD}"
 
-      - name: Set up Java 21
+      - name: Set up Java 25
         uses: actions/setup-java@d7793b545071e98d581d3bf084a51c3213318a07 # v4
         with:
           distribution: temurin
-          java-version: '21'
+          java-version: '25'
           cache: maven
 
       - name: Bootstrap pinned LoreItems release
         run: bash tools/bootstrap_loreitems_release.sh
+
+      - name: Build pinned companion renderer and fetch presence contract
+        run: |
+          python3 -m pip install --require-hashes -r tools/ci/requirements.txt
+          bash tools/ci/bootstrap_companions.sh
 
       - name: Build and test
         run: mvn --batch-mode --no-transfer-progress clean test package

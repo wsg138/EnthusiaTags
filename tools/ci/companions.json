@@ -1,0 +1,13 @@
+{
+  "renderer": {
+    "repository": "FainNeito/EnthusiaAdvancements",
+    "sha": "139177ccba8f37b2d568f2e4d8fb7e5e0b864db8",
+    "version": "1.0.0-pilot.5"
+  },
+  "rosechat": {
+    "repository": "FainNeito/Enthusia-RoseChat",
+    "sha": "6fedea957dd76c6b89847c32ff23f293d7dee458",
+    "path": "src/main/java/dev/rosewood/rosechat/api/event/PresenceMessageEvent.java",
+    "sha256": "24159533ea385d4b2525fa512492336850e2dcbd811e1f68d31b62ba96302388"
+  }
+}

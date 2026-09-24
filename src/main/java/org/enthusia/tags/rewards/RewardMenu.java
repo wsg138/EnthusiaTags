@@ -198,6 +198,10 @@ public final class RewardMenu {
                 lore.add(LegacyComponentSerializer.legacyAmpersand()
                     .deserialize(formatActionLine(action)));
             }
+            if (reward.getActions().stream().anyMatch(RewardAction::isGoldNetworkLimited)) {
+                lore.add(LegacyComponentSerializer.legacyAmpersand()
+                    .deserialize(rewardService.getMessage("rewards-gold-policy")));
+            }
         }
 
         meta.lore(lore);

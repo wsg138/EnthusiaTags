@@ -3,7 +3,9 @@ package org.enthusia.tags.rewards;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.UUID;
+import java.util.function.Supplier;
 import org.bukkit.Bukkit;
 import org.bukkit.plugin.Plugin;
 
@@ -18,10 +20,27 @@ public final class PlaytimeHook {
     private Field activeMinutesField;
     private Field afkMinutesField;
     private Field totalMinutesField;
+    private final Supplier<Object> providerResolver;
+
+    public PlaytimeHook() {
+        providerResolver = this::resolveService;
+    }
+
+    PlaytimeHook(Supplier<Object> providerResolver) {
+        this.providerResolver = providerResolver;
+    }
+
+    public static final class ProgressUnavailableException extends IllegalStateException {
+        private static final long serialVersionUID = 1L;
+
+        public ProgressUnavailableException() {
+            super("Playtime could not be read authoritatively");
+        }
+    }
 
     public void setup() {
         try {
-            bind(resolveService());
+            bind(providerResolver.get());
         } catch (ReflectiveOperationException | RuntimeException ex) {
             clear();
         }
@@ -33,28 +52,34 @@ public final class PlaytimeHook {
     }
 
     public long getMinutes(UUID playerId, RewardCriterionType type) {
+        return readMinutes(playerId, type).orElseThrow(ProgressUnavailableException::new);
+    }
+
+    /** Empty is unavailable, not a proven zero: the provider uses Optional.empty on runtime failure. */
+    public OptionalLong readMinutes(UUID playerId, RewardCriterionType type) {
         if (!isAvailable()) {
-            return 0L;
+            return OptionalLong.empty();
         }
         try {
             Object result = getLifetime.invoke(service, playerId);
             if (!(result instanceof Optional<?> optional)) {
-                return 0L;
+                return OptionalLong.empty();
             }
             Object snapshot = optional.orElse(null);
             if (snapshot == null) {
-                return 0L;
+                return OptionalLong.empty();
             }
             bindSnapshot(snapshot);
-            return switch (type) {
+            long value = switch (type) {
                 case PLAYTIME_ACTIVE_MINUTES -> activeMinutesField.getLong(snapshot);
                 case PLAYTIME_AFK_MINUTES -> afkMinutesField.getLong(snapshot);
                 case PLAYTIME_TOTAL_MINUTES -> totalMinutesField.getLong(snapshot);
-                default -> 0L;
+                default -> -1L;
             };
+            return value < 0 ? OptionalLong.empty() : OptionalLong.of(value);
         } catch (ReflectiveOperationException | RuntimeException ex) {
             setup();
-            return 0L;
+            return OptionalLong.empty();
         }
     }
 
@@ -98,7 +123,7 @@ public final class PlaytimeHook {
 
     private void refreshProvider() {
         try {
-            Object current = resolveService();
+            Object current = providerResolver.get();
             if (current != service || getLifetime == null) {
                 bind(current);
             }
