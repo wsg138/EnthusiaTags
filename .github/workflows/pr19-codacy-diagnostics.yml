@@ -1,4 +1,4 @@
-name: PR 19 Codacy diagnostics
+name: PR Codacy diagnostics
 on:
   push:
     branches:
@@ -17,7 +17,8 @@ jobs:
           import urllib.parse
           import urllib.request
 
-          base = "https://api.codacy.com/api/v3/analysis/organizations/gh/wsg138/repositories/EnthusiaTags/pull-requests/19/issues"
+          pull_request = 20
+          base = f"https://api.codacy.com/api/v3/analysis/organizations/gh/wsg138/repositories/EnthusiaTags/pull-requests/{pull_request}/issues"
           cursor = None
           issues = []
           while True:
@@ -31,13 +32,14 @@ jobs:
               cursor = (payload.get("pagination") or {}).get("cursor")
               if not cursor:
                   break
-          with open("codacy-pr19-issues.json", "w", encoding="utf-8") as output:
+          output_name = f"codacy-pr{pull_request}-issues.json"
+          with open(output_name, "w", encoding="utf-8") as output:
               json.dump(issues, output, indent=2, sort_keys=True)
           print(f"CODACY_TOTAL {len(issues)}")
           PY
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: pr19-codacy-issues
-          path: codacy-pr19-issues.json
+          name: pr20-codacy-issues
+          path: codacy-pr20-issues.json
           if-no-files-found: error
           retention-days: 1
