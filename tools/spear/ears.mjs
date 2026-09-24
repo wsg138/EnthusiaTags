@@ -18,6 +18,18 @@ export function isEarsClause(clause) {
   const result = remainder.slice(split + separator.length).trim();
   return condition.length > 0 && result.length > 0;
 }
+
+function parseInlineRequirement(line) {
+  const clean = line.trim();
+  if (!clean.startsWith('-')) return null;
+  const body = clean.slice(1).trimStart();
+  const separator = body.indexOf(':');
+  if (separator < 0) return null;
+  const id = body.slice(0, separator).trim();
+  if (!/^REQ-\d+$/.test(id)) return null;
+  return {id, clause: body.slice(separator + 1).trimStart()};
+}
+
 export function validate(text, filename) {
   const errors=[]; let pending=null;
   const fail=(entry,reason)=>errors.push({id:entry.id,file:filename,line:entry.line,reason});
@@ -28,11 +40,11 @@ export function validate(text, filename) {
   };
   text.split(/\r?\n/).forEach((line,index)=>{
     const header=line.match(/^###\s+(REQ-\d+)\b/);
-    const inline=line.match(/^\s*-\s+(REQ-\d+):\s*(.*)$/);
+    const inline=parseInlineRequirement(line);
     if(header || inline) {
       if(pending) fail(pending,'Requirement is missing its EARS clause');
-      const entry={id:(header || inline)[1],line:index+1};
-      if(inline) {check(entry,inline[2]); pending=null;} else pending=entry;
+      const entry={id:header ? header[1] : inline.id,line:index+1};
+      if(inline) {check(entry,inline.clause); pending=null;} else pending=entry;
       return;
     }
     if(pending && line.trim() && !line.startsWith('#')) {check(pending,line.trim());pending=null;}
