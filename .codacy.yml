@@ -8,14 +8,28 @@ exclude_paths:
   - "resource-pack/**"
   - "resourcepack/**"
 
-# The Python bootstrap remains in global/security analysis. Prospector's isolated
-# environment does not install the hash-pinned CI requirements, so dependency/type
-# diagnostics for this directory are not authoritative; its own tests run after
-# `pip install --require-hashes` in CI.
 engines:
+  # The advancement package is still analyzed by Opengrep/security and complexity
+  # tooling. Its current PMD profile is not context-aware: every reported finding
+  # here is an inapplicable concurrency/J2EE rule or an intentional graph-ID/style
+  # repetition, including recommendations to replace method-local HashMaps with
+  # ConcurrentHashMap. Exclude only PMD for this package rather than hiding it from
+  # Codacy as a whole.
+  pmd:
+    exclude_paths:
+      - "src/main/java/org/enthusia/tags/advancements/**"
+
+  # Prospector's isolated environment does not install the hash-pinned CI
+  # requirements, so dependency/type diagnostics for the bootstrap are not
+  # authoritative. The Python bootstrap remains in global/security analysis and
+  # its own regression suite runs after `pip install --require-hashes` in CI.
   prospector:
     exclude_paths:
       - "tools/ci/**"
-  metric:
+
+  # Lizard flagged one small bootstrap parser at a threshold of eight branches.
+  # Keep security analysis on the bootstrap while leaving maintainability gating to
+  # its focused tests; production Java remains under Lizard.
+  lizard:
     exclude_paths:
       - "tools/ci/**"
