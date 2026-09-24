@@ -1,6 +1,7 @@
 package org.enthusia.tags.cosmetics;
 import java.lang.reflect.Method;
 import java.util.List;
+import java.util.Objects;
 import org.bukkit.entity.Player;
 import org.bukkit.event.*;
 import org.bukkit.event.server.PluginEnableEvent;
@@ -60,7 +61,7 @@ public final class RoseChatPresenceHook {
             default -> null;
         };
         // Original or inaccessible selections leave every original template intact.
-        if (message != null && !message.isBlank()) {
+        if (Objects.nonNull(message) && !message.isBlank()) {
             Method setter = type.getMethod("setLines", List.class);
             setter.invoke(event, List.of(message));
         }
