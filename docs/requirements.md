@@ -97,3 +97,7 @@ The user explicitly authorized the remaining non-guild WarzoneDuels advancement 
 - REQ-905: WHEN local workflow tooling reads or modifies task state THE SYSTEM SHALL reject malformed state, serialize concurrent operations, enforce required evidence, and replace files atomically.
 
 - REQ-906: IF a companion linkage error occurs during projection or tree removal THEN THE SYSTEM SHALL contain and log that integration failure while preserving retry/cleanup behavior without swallowing fatal virtual-machine errors.
+
+- REQ-917: WHEN daily discovery is enabled and a permitted online player remains in the same join session until its configured delay THE SYSTEM SHALL show one chat action for an available daily reward only after verifying current date, transaction and IP eligibility without reserving or paying a reward.
+- REQ-918: WHEN daily discovery is enabled and a daily claim succeeds THE SYSTEM SHALL retain its reward confirmation and explain the next reset using the configured timezone.
+- REQ-919: IF reminder eligibility fails or the player disconnects, claims, loses permission, or configuration reloads THEN THE SYSTEM SHALL suppress stale reminders without changing claim, streak or payment semantics.

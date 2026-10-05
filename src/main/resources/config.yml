@@ -94,6 +94,11 @@ debug:
     log-interval-seconds: 300
 
 daily:
+  # Optional chat discovery; no automatic claim or menu opening.
+  discovery:
+    enabled: false
+    new-player-delay-seconds: 120
+    returning-delay-seconds: 20
   timezone: "America/Indiana/Indianapolis"
   currency-label: "Raw Gold"
   payouts: [5, 10, 15, 20, 30, 40, 50]

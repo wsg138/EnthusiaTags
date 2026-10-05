@@ -33,3 +33,6 @@ Nine milestones ship: first win, five-win best streak and 50 wins use existing s
 ## Verification and rollout
 
 SPEAR cycles: spec, prove (behavioral red), engine (green), architecture, refine. Record test commands and results per task. Validate existing databases through temporary SQLite fixtures, concurrency/restart/recovery tests, then produce a local test artifact only after package verification. Staging must check the actual Paper/client versions, logo pack, toast timing, RoseChat visibility and restart behavior. No live approval can be inferred from unit tests.
+
+## Optional daily discovery
+DailyReminder is a main-thread infrastructure adapter: owns per-join task/session identity, schedules one configurable delayed chat offer, and cancels on claim attempt, quit, reload and disable. SQL eligibility runs through the existing single-thread daily executor using the current menu ledger policy and a read-only IP ownership/sibling query. Capture configuration/currency/date on the main thread; callback rechecks online session, permission, provider/claim availability and date. No reward reservation, payment, schema or streak changes. Success reset guidance uses the configured zone's next calendar-day start, including DST, and never assumes a rolling 24-hour cooldown. No homes or Teleport API integration; first-join delay is only a timing heuristic.

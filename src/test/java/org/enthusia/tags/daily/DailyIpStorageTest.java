@@ -28,6 +28,25 @@ class DailyIpStorageTest {
     }
 
     @Test
+    void reminderEligibilityReadsNeverCreateIpReservations() throws Exception {
+        UUID first = UUID.randomUUID();
+        UUID second = UUID.randomUUID();
+        LocalDate date = LocalDate.of(2026, 10, 5);
+        String address = "203.0.113.10";
+        try (DailyIpStorage storage = new DailyIpStorage(
+            temporaryDirectory.resolve("reminder-ip.db").toFile())) {
+            assertTrue(storage.canReserve(first, date, address));
+            assertTrue(storage.owners(date, address).isEmpty());
+            assertTrue(storage.reserve(first, date, address));
+            assertTrue(storage.canReserve(first, date, address));
+            assertFalse(storage.canReserve(second, date, address));
+            assertTrue(storage.addSibling(first, second, "test"));
+            assertTrue(storage.canReserve(second, date, address));
+            assertFalse(storage.owners(date, address).contains(second));
+        }
+    }
+
+    @Test
     void siblingGroupsAreTransitiveForHouseholds() throws Exception {
         UUID first = UUID.randomUUID();
         UUID second = UUID.randomUUID();

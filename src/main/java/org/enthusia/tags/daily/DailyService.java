@@ -62,6 +62,7 @@ public final class DailyService implements CommandExecutor, Listener {
     private final VaultHook vault = new VaultHook();
     private final DailyMenuRenderer menuRenderer;
     private final DailyAnimationRenderer animationRenderer;
+    private final DailyReminder reminder;
     private final Set<UUID> claims = ConcurrentHashMap.newKeySet();
     private final Map<UUID, ActiveAnimation> animations = new ConcurrentHashMap<>();
     private final Set<CompletableFuture<?>> activeWork = ConcurrentHashMap.newKeySet();
@@ -80,6 +81,7 @@ public final class DailyService implements CommandExecutor, Listener {
         this.plugin = plugin;
         menuRenderer = new DailyMenuRenderer(plugin);
         animationRenderer = new DailyAnimationRenderer(plugin, menuRenderer);
+        reminder = new DailyReminder(plugin, this::loadReminder, this::reminderReady, this::today);
     }
 
     public void enable() throws SQLException {
@@ -108,6 +110,7 @@ public final class DailyService implements CommandExecutor, Listener {
     }
 
     public void disable() {
+        reminder.clear();
         accepting.set(false);
         acceptingClaims.set(false);
         cancelReloadRetry();
@@ -126,6 +129,7 @@ public final class DailyService implements CommandExecutor, Listener {
     }
 
     public void reload() {
+        reminder.clear();
         acceptingClaims.set(false);
         if (!claims.isEmpty()) {
             scheduleReloadRetry();
@@ -181,6 +185,7 @@ public final class DailyService implements CommandExecutor, Listener {
     @EventHandler
     public void join(PlayerJoinEvent event) {
         backfillClaimedIp(event.getPlayer());
+        reminder.join(event.getPlayer());
     }
 
     @EventHandler
@@ -207,6 +212,7 @@ public final class DailyService implements CommandExecutor, Listener {
 
     @EventHandler
     public void quit(PlayerQuitEvent event) {
+        reminder.remove(event.getPlayer().getUniqueId());
         cancelAnimation(event.getPlayer().getUniqueId());
     }
 
@@ -609,6 +615,7 @@ public final class DailyService implements CommandExecutor, Listener {
             player.sendMessage(Component.text("Your daily claim is already being processed."));
             return;
         }
+        reminder.remove(playerId);
 
         LocalDate currentDate = today();
         List<Double> payoutSnapshot = payouts;
@@ -638,7 +645,15 @@ public final class DailyService implements CommandExecutor, Listener {
             : outcome.message();
         player.sendMessage(Component.text(message));
         if (outcome.claimed()) {
+            reminder.remove(playerId);
             animationRenderer.playClaimSound(player);
+            if (plugin.getConfig().getBoolean("daily.discovery.enabled", false)) {
+                var nextReset = java.time.ZonedDateTime.now(zone).toLocalDate()
+                    .plusDays(1).atStartOfDay(zone);
+                player.sendMessage(Component.text("Your next daily reward resets at "
+                    + nextReset.toLocalDate() + " " + nextReset.toLocalTime()
+                    + " (" + zone.getId() + "). Use /daily after the reset."));
+            }
         }
         openLoaded(playerId, false);
     }
@@ -971,6 +986,30 @@ public final class DailyService implements CommandExecutor, Listener {
 
     private LocalDate today() {
         return LocalDate.now(zone);
+    }
+
+    private boolean reminderReady(Player player) {
+        return accepting.get() && acceptingClaims.get() && vault.isAvailable()
+            && !claims.contains(player.getUniqueId());
+    }
+
+    private CompletableFuture<Optional<DailyReminder.Offer>> loadReminder(Player player) {
+        UUID id = player.getUniqueId();
+        String ip = playerIp(player);
+        boolean enforceIp = ipLimitEnabled() && !ip.isBlank();
+        LocalDate date = today();
+        List<Double> schedule = payouts;
+        String currency = menuRenderer.currencyLabel();
+        return submit(() -> {
+            var view = loadView(id, date, schedule);
+            if (view.claimIndex() < 0 || (enforceIp && !ipStorage.canReserve(id, date, ip))) {
+                return Optional.empty();
+            }
+            double amount = view.days().get(view.claimIndex()).amount();
+            String reward = java.math.BigDecimal.valueOf(amount).stripTrailingZeros()
+                .toPlainString() + " " + currency;
+            return Optional.of(new DailyReminder.Offer(date, reward));
+        });
     }
 
     private record ActiveAnimation(UUID sessionId, BukkitTask task) {
