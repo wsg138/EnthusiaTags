@@ -1,129 +1,110 @@
 package org.enthusia.tags.rewards;
 
-import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
+import java.util.Locale;
+import java.util.UUID;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
+import org.bukkit.event.inventory.ClickType;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryCloseEvent;
-import org.bukkit.inventory.InventoryHolder;
-import org.bukkit.inventory.ItemStack;
-import org.bukkit.inventory.meta.ItemMeta;
-import org.bukkit.persistence.PersistentDataContainer;
-import org.bukkit.persistence.PersistentDataType;
+import org.bukkit.event.inventory.InventoryDragEvent;
+import org.bukkit.inventory.Inventory;
 
-import java.util.Locale;
-import java.util.UUID;
-
+/** Controls the browser, but delegates every claim/recovery to the existing RewardService. */
 public final class RewardListener implements Listener {
-    private final RewardService rewardService;
-    private final RewardMenu rewardMenu;
-
-    public RewardListener(RewardService rewardService, RewardMenu rewardMenu) {
-        this.rewardService = rewardService;
-        this.rewardMenu = rewardMenu;
+    private final RewardService service;
+    private final RewardMenu menu;
+    private final java.util.Map<RewardMenuAction.Type, java.util.function.Consumer<Interaction>> actionHandlers;
+    public RewardListener(RewardService service, RewardMenu menu) {
+        this.service = service; this.menu = menu; this.actionHandlers = handlers();
     }
-
     @EventHandler
     public void onInventoryClose(InventoryCloseEvent event) {
-        if (event.getPlayer() instanceof Player player) {
-            rewardService.retryQueuedItems(player);
-        }
+        // Retain the established retry mechanism for already-claimed queued items.
+        if(event.getPlayer() instanceof Player player) service.retryQueuedItems(player);
     }
-
+    @EventHandler
+    public void onInventoryDrag(InventoryDragEvent event) {
+        if(owned(event.getView().getTopInventory()) != null) event.setCancelled(true);
+    }
     @EventHandler
     public void onInventoryClick(InventoryClickEvent event) {
-        InventoryHolder holder = event.getView().getTopInventory().getHolder();
-        if (!(holder instanceof RewardMenuHolder rewardHolder)) {
-            return;
-        }
+        Inventory top = event.getView().getTopInventory();
+        RewardMenuHolder holder = owned(top);
+        if(holder == null) return;
         event.setCancelled(true);
-        if (!(event.getWhoClicked() instanceof Player player)) {
-            return;
-        }
-        ItemStack clicked = event.getCurrentItem();
-        if (clicked == null || !clicked.hasItemMeta()) {
-            return;
-        }
-        ItemMeta meta = clicked.getItemMeta();
-        PersistentDataContainer data = meta.getPersistentDataContainer();
-        if (data.has(rewardMenu.getBackKey(), PersistentDataType.BYTE)) {
-            player.openInventory(rewardMenu.create(player));
-            return;
-        }
-        if (data.has(rewardMenu.getNextKey(), PersistentDataType.BYTE)) {
-            if (rewardHolder.getCategory() == null) {
-                return;
-            }
-            int next = rewardHolder.getPage() + 1;
-            player.openInventory(rewardMenu.createCategory(player, rewardHolder.getCategory(), next));
-            return;
-        }
-        if (data.has(rewardMenu.getPrevKey(), PersistentDataType.BYTE)) {
-            if (rewardHolder.getCategory() == null) {
-                return;
-            }
-            int prev = Math.max(0, rewardHolder.getPage() - 1);
-            player.openInventory(rewardMenu.createCategory(player, rewardHolder.getCategory(), prev));
-            return;
-        }
-        String categoryId = data.get(rewardMenu.getCategoryKey(), PersistentDataType.STRING);
-        if (categoryId != null && !categoryId.isBlank()) {
-            player.openInventory(rewardMenu.createCategory(player, categoryId));
-            return;
-        }
-        String rewardId = data.get(rewardMenu.getRewardKey(), PersistentDataType.STRING);
-        if (rewardId == null) {
-            return;
-        }
-        RewardDefinition reward = rewardService.getRewards().get(rewardId.toLowerCase(Locale.ROOT));
-        if (reward == null) {
-            return;
-        }
-        UUID playerId = player.getUniqueId();
-        rewardService.claimAsync(player, reward).whenComplete((result, throwable) ->
-            rewardService.runForOnlinePlayer(playerId, currentPlayer -> {
-                if (throwable != null) {
-                    currentPlayer.sendMessage(LegacyComponentSerializer.legacyAmpersand()
-                        .deserialize(rewardService.getMessage("rewards-delivery-failed")));
-                    return;
-                }
-                sendClaimResult(currentPlayer, result);
-            }));
+        if(!(event.getWhoClicked() instanceof Player player) || !allowed(player)) return;
+        // Never interpret a player's own item, a shift-transfer, an offhand swap or a double-click as a GUI button.
+        if(event.getClickedInventory() != top || event.getRawSlot() < 0 || event.getRawSlot() >= top.getSize()) return;
+        if(event.getClick() != ClickType.LEFT && event.getClick() != ClickType.RIGHT) return;
+        RewardMenuAction action = holder.action(event.getRawSlot());
+        if(action == null || (action.type() == RewardMenuAction.Type.CLAIM && event.getClick() != ClickType.LEFT)) return;
+        if(!holder.schedule()) return;
+        boolean reverse = event.getClick() == ClickType.RIGHT;
+        try {
+            menu.nextTick(() -> {
+                holder.unschedule();
+                if(!allowed(player) || player.getServer().getPlayer(player.getUniqueId()) != player
+                    || player.getOpenInventory().getTopInventory() != top || !java.util.Objects.equals(holder.action(event.getRawSlot()), action)) return;
+                handle(player,holder,action,reverse);
+            });
+        } catch(RuntimeException error) { holder.unschedule(); throw error; }
     }
-
-    private void sendClaimResult(Player player, RewardClaimResult result) {
-        switch (result) {
-            case SUCCESS -> {
-                player.sendMessage(LegacyComponentSerializer.legacyAmpersand()
-                    .deserialize(rewardService.getMessage("rewards-claimed")));
-                player.openInventory(rewardMenu.create(player));
-            }
-            case SUCCESS_GOLD_WITHHELD -> {
-                player.sendMessage(LegacyComponentSerializer.legacyAmpersand()
-                    .deserialize(rewardService.getMessage("rewards-gold-withheld")));
-                player.openInventory(rewardMenu.create(player));
-            }
-            case GOLD_VERIFICATION_UNAVAILABLE -> player.sendMessage(LegacyComponentSerializer.legacyAmpersand()
-                .deserialize(rewardService.getMessage("rewards-gold-verification-unavailable")));
-            case LOADING -> player.sendMessage(LegacyComponentSerializer.legacyAmpersand()
-                .deserialize(rewardService.getMessage("rewards-loading")));
-            case ALREADY_CLAIMED -> player.sendMessage(LegacyComponentSerializer.legacyAmpersand()
-                .deserialize(rewardService.getMessage("rewards-already-claimed")));
-            case NOT_READY -> player.sendMessage(LegacyComponentSerializer.legacyAmpersand()
-                .deserialize(rewardService.getMessage("rewards-not-ready")));
-            case IP_ALREADY_CLAIMED -> player.sendMessage(LegacyComponentSerializer.legacyAmpersand()
-                .deserialize(rewardService.getMessage("rewards-ip-already-claimed")));
-            case DELIVERY_FAILED -> player.sendMessage(LegacyComponentSerializer.legacyAmpersand()
-                .deserialize(rewardService.getMessage("rewards-delivery-failed")));
-            case ITEM_QUEUED -> player.sendMessage(LegacyComponentSerializer.legacyAmpersand()
-                .deserialize(rewardService.getMessage("rewards-item-queued")));
-            case RECONCILIATION_REQUIRED -> player.sendMessage(LegacyComponentSerializer.legacyAmpersand()
-                .deserialize(rewardService.getMessage("rewards-reconciliation-required")));
-            case CLAIM_IN_PROGRESS -> player.sendMessage(LegacyComponentSerializer.legacyAmpersand()
-                .deserialize(rewardService.getMessage("rewards-claim-in-progress")));
-            case SERVICE_UNAVAILABLE -> player.sendMessage(LegacyComponentSerializer.legacyAmpersand()
-                .deserialize(rewardService.getMessage("rewards-service-unavailable")));
+    private boolean allowed(Player player) {
+        return player.isOnline() && player.hasPermission("enthusia.tags.rewards") && service.isAvailable();
+    }
+    private RewardMenuHolder owned(Inventory top) {
+        return top.getHolder() instanceof RewardMenuHolder holder && holder.getRewardService() == service ? holder : null;
+    }
+    private record Interaction(Player player, RewardMenuHolder holder, RewardMenuAction action, boolean reverse) {}
+    private java.util.Map<RewardMenuAction.Type, java.util.function.Consumer<Interaction>> handlers() {
+        return java.util.Map.ofEntries(
+            java.util.Map.entry(RewardMenuAction.Type.CATEGORY, input -> { menu.navigate(input.player(),input.holder(),RewardMenuState.category(input.action().value())); }),
+            java.util.Map.entry(RewardMenuAction.Type.BACK, input -> { menu.navigate(input.player(),input.holder(),RewardMenuState.dashboard()); }),
+            java.util.Map.entry(RewardMenuAction.Type.READY, input -> { menu.navigate(input.player(),input.holder(),RewardMenuState.ready()); }),
+            java.util.Map.entry(RewardMenuAction.Type.FILTER, input -> { menu.navigate(input.player(),input.holder(),input.holder().state().withFilter(input.holder().state().filter().cycle(input.reverse()))); }),
+            java.util.Map.entry(RewardMenuAction.Type.SORT, input -> { menu.navigate(input.player(),input.holder(),input.holder().state().withSort(input.holder().state().sort().cycle(input.reverse()))); }),
+            java.util.Map.entry(RewardMenuAction.Type.GROUP, input -> { menu.navigate(input.player(),input.holder(),input.holder().state().withGroup(input.holder().state().group().cycle(input.reverse()))); }),
+            java.util.Map.entry(RewardMenuAction.Type.PREVIOUS, input -> { if(input.holder().state().page() > 0) menu.navigate(input.player(),input.holder(),input.holder().state().withPage(input.holder().state().page()-1)); }),
+            java.util.Map.entry(RewardMenuAction.Type.NEXT, input -> { if(input.holder().state().page()+1 < input.holder().pageCount()) menu.navigate(input.player(),input.holder(),input.holder().state().withPage(input.holder().state().page()+1)); }),
+            java.util.Map.entry(RewardMenuAction.Type.CLOSE, input -> { input.player().closeInventory(); }),
+            java.util.Map.entry(RewardMenuAction.Type.REFRESH, input -> { input.holder().clearNotices(); menu.refresh(input.player(),input.holder(),false); }),
+            java.util.Map.entry(RewardMenuAction.Type.TAGS, input -> { menu.openTags(input.player()); }),
+            java.util.Map.entry(RewardMenuAction.Type.COSMETICS, input -> { menu.openCosmetics(input.player()); }),
+            java.util.Map.entry(RewardMenuAction.Type.CLAIM, input -> { claim(input.player(),input.holder(),input.action().value()); })
+        );
+    }
+    private void handle(Player player, RewardMenuHolder holder, RewardMenuAction action, boolean reverse) {
+        actionHandlers.get(action.type()).accept(new Interaction(player, holder, action, reverse));
+    }
+    private void claim(Player player, RewardMenuHolder holder, String id) {
+        RewardDefinition reward = service.getRewards().get(id.toLowerCase(Locale.ROOT));
+        if(reward == null) { menu.refresh(player,holder,false); return; }
+        UUID playerId = player.getUniqueId();
+        if(!menu.beginClaim(playerId,id)) return;
+        holder.clearNotice(id);
+        try {
+            menu.refresh(player,holder,true);
+            service.claimAsync(player,reward).whenComplete((result,error) -> {
+                // This release is unconditional, even when the player disconnects or the service is stopping.
+                menu.endClaim(playerId,id);
+                RewardClaimResult outcome = error != null || result == null ? RewardClaimResult.DELIVERY_FAILED : result;
+                service.runForOnlinePlayer(playerId,current -> {
+                    if (current != player) return;
+                    current.sendMessage(RewardMenuText.component(service.getMessage(RewardMenuText.resultMessageKey(outcome))));
+                    // Do not reopen a closed GUI or switch someone away from a different inventory.
+                    if(current.getOpenInventory().getTopInventory() == holder.getInventory()) {
+                        holder.notice(id,outcome);
+                        menu.refresh(current,holder,true);
+                    }
+                });
+            });
+        } catch(RuntimeException error) {
+            menu.endClaim(playerId,id);
+            holder.notice(id,RewardClaimResult.DELIVERY_FAILED);
+            player.sendMessage(RewardMenuText.component(service.getMessage("rewards-delivery-failed")));
+            menu.refresh(player,holder,true);
         }
     }
 }

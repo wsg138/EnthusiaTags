@@ -97,3 +97,11 @@ The user explicitly authorized the remaining non-guild WarzoneDuels advancement 
 - REQ-905: WHEN local workflow tooling reads or modifies task state THE SYSTEM SHALL reject malformed state, serialize concurrent operations, enforce required evidence, and replace files atomically.
 
 - REQ-906: IF a companion linkage error occurs during projection or tree removal THEN THE SYSTEM SHALL contain and log that integration failure while preserving retry/cleanup behavior without swallowing fatal virtual-machine errors.
+
+
+## Reward browser source recovery
+
+- REQ-945: WHEN a player browses rewards THE SYSTEM SHALL expose the preserved dashboard, category, ready, filter, sorting, grouping and focused navigation without changing reward definitions or claiming during navigation.
+- REQ-946: WHEN reward progress or delivery is displayed THE SYSTEM SHALL distinguish unavailable evidence, incomplete, ready, claimed, queued, pending, failed, withheld and review states using existing RewardService authority.
+- REQ-947: WHEN a reward menu receives interaction THE SYSTEM SHALL accept only its own server-side top-inventory actions and recheck permission, online session and inventory before deferred navigation or ordinary left-click claims.
+- REQ-948: WHEN a claim finishes or a reward browser refreshes THE SYSTEM SHALL retain stable visible slots and release in-flight guards without reopening a closed inventory or moving a new session into an old view.
