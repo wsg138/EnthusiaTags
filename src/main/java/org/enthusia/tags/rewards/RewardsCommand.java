@@ -15,16 +15,24 @@ import java.util.Collections;
 import java.util.List;
 
 public final class RewardsCommand implements CommandExecutor, TabCompleter {
+    private static final String RETRY_ITEMS_COMMAND = "retryitems";
+    private static final String RELOAD_COMMAND = "reload";
+    private static final String OPEN_COMMAND = "open";
+    private static final String GUIDE_COMMAND = "guide";
+    private static final int COMMAND_ARGUMENTS = 1;
+    private static final int TARGET_ARGUMENTS = 2;
     private final RewardMenu rewardMenu;
     private final Messages messages;
     private final EnthusiaTagsPlugin plugin;
     private final RewardService rewardService;
+    private final RewardGuide guide;
 
     public RewardsCommand(RewardService rewardService, TagService tagService, Messages messages, EnthusiaTagsPlugin plugin) {
         this.rewardMenu = new RewardMenu(rewardService, tagService);
         this.rewardService = rewardService;
         this.messages = messages;
         this.plugin = plugin;
+        this.guide = new RewardGuide(plugin, rewardService);
     }
 
     @Override
@@ -33,7 +41,7 @@ public final class RewardsCommand implements CommandExecutor, TabCompleter {
             sender.sendMessage(message("rewards-service-unavailable"));
             return true;
         }
-        if (args.length == 1 && args[0].equalsIgnoreCase("reload")) {
+        if (args.length == COMMAND_ARGUMENTS && args[0].equalsIgnoreCase(RELOAD_COMMAND)) {
             if (!sender.hasPermission("enthusia.tags.admin")) {
                 sender.sendMessage(message("no-permission"));
                 return true;
@@ -46,29 +54,46 @@ public final class RewardsCommand implements CommandExecutor, TabCompleter {
             sender.sendMessage(message("players-only"));
             return true;
         }
-        if (args.length == 1 && args[0].equalsIgnoreCase("retryitems")) {
+        return handlePlayerCommand(player, args);
+    }
+
+    private boolean handlePlayerCommand(Player player, String[] args) {
+        if (args.length >= COMMAND_ARGUMENTS && args[0].equalsIgnoreCase(GUIDE_COMMAND)) {
+            guide.open(player, args.length == COMMAND_ARGUMENTS ? null : args[1]);
+            return true;
+        }
+        if (args.length == COMMAND_ARGUMENTS && args[0].equalsIgnoreCase(RETRY_ITEMS_COMMAND)) {
             rewardService.retryQueuedItems(player);
             player.sendMessage(Component.text("Queued item delivery retry requested."));
             return true;
         }
-        if (args.length == 2 && args[0].equalsIgnoreCase("open")) {
-            RewardDefinition reward = rewardService.getRewards().get(args[1].toLowerCase(java.util.Locale.ROOT));
-            if (reward == null) {
-                player.sendMessage(Component.text("Unknown reward."));
-                return true;
-            }
-            player.openInventory(rewardMenu.createFocused(player, reward));
+        if (args.length == TARGET_ARGUMENTS && args[0].equalsIgnoreCase(OPEN_COMMAND)) {
+            openFocused(player, args[1]);
             return true;
         }
         player.openInventory(rewardMenu.create(player));
         return true;
     }
 
+    private void openFocused(Player player, String id) {
+        RewardDefinition reward = rewardService.getRewards().get(id.toLowerCase(java.util.Locale.ROOT));
+        if (reward == null) {
+            player.sendMessage(Component.text("Unknown reward."));
+        } else {
+            player.openInventory(rewardMenu.createFocused(player, reward));
+        }
+    }
+
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
-        if (args.length == 1) {
+        if (sender instanceof Player player && guide.allowed(player)) {
+            if (args.length == TARGET_ARGUMENTS && args[0].equalsIgnoreCase(GUIDE_COMMAND)) return List.of("build", "social", "combat");
+            if (args.length == COMMAND_ARGUMENTS) return sender.hasPermission("enthusia.tags.admin")
+                ? List.of(RELOAD_COMMAND, OPEN_COMMAND, RETRY_ITEMS_COMMAND, GUIDE_COMMAND) : List.of(RETRY_ITEMS_COMMAND, GUIDE_COMMAND);
+        }
+        if (args.length == COMMAND_ARGUMENTS) {
             return sender.hasPermission("enthusia.tags.admin")
-                ? List.of("reload", "open", "retryitems") : List.of("retryitems");
+                ? List.of(RELOAD_COMMAND, OPEN_COMMAND, RETRY_ITEMS_COMMAND) : List.of(RETRY_ITEMS_COMMAND);
         }
         return Collections.emptyList();
     }

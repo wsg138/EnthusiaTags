@@ -46,7 +46,7 @@ class RewardConfigV5MigrationTest {
 
         ConfigurationSection rewards = existing.getConfigurationSection("rewards");
         assertNotNull(rewards);
-        assertEquals(101, rewards.getKeys(false).size());
+        assertEquals(139, rewards.getKeys(false).size());
         assertTrue(existing.contains("rewards.ultimate_survivor"));
     }
 

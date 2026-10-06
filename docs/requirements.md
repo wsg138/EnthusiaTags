@@ -97,3 +97,24 @@ The user explicitly authorized the remaining non-guild WarzoneDuels advancement 
 - REQ-905: WHEN local workflow tooling reads or modifies task state THE SYSTEM SHALL reject malformed state, serialize concurrent operations, enforce required evidence, and replace files atomically.
 
 - REQ-906: IF a companion linkage error occurs during projection or tree removal THEN THE SYSTEM SHALL contain and log that integration failure while preserving retry/cleanup behavior without swallowing fatal virtual-machine errors.
+
+- REQ-928: WHEN a permitted player opens the enabled reward guide THE SYSTEM SHALL offer voluntary building, social and combat paths and display at most one supported existing goal without claiming or executing gameplay actions.
+- REQ-929: IF player state, provider progress or reward delivery is unavailable, unknown, already claimed, queued, pending or requires reconciliation THEN THE SYSTEM SHALL defer that goal rather than infer zero progress or a fresh payout.
+- REQ-930: WHEN the guide previews Gold actions THE SYSTEM SHALL read the existing achievement ownership and action ledger policy without writing reservations or claims and distinguish allowed, blocked and unknown eligibility.
+- REQ-931: IF Gold preview eligibility is blocked or unknown THEN THE SYSTEM SHALL omit its monetary amount while retaining eligible nonmonetary components and truthful ordinary reward navigation.
+- REQ-932: WHEN a guide callback returns THE SYSTEM SHALL recheck player session, permission, service, configuration and reward observations before showing a result while preserving the existing focused menu and authoritative claim validation.
+
+## Provider reward source recovery
+
+- REQ-937: WHEN a supported provider milestone is verified complete THE SYSTEM SHALL latch its stable completion counter once without executing rewards or replaying historical celebrations.
+- REQ-938: IF a provider observation is unavailable or predates the player session THEN THE SYSTEM SHALL retain previously earned completion and mark unearned progress unavailable rather than authoritative zero.
+- REQ-939: WHEN reward state is unloaded or the player reconnects or configuration reloads THE SYSTEM SHALL reject stale observations and retry fresh evidence after loading without overwriting claims or ownership.
+- REQ-940: WHEN provider reward defaults are recovered THE SYSTEM SHALL add only missing provider rewards and referenced tags while preserving custom overrides, higher configuration versions, action fingerprints and current active-playtime policy.
+- REQ-941: WHEN native advancement presentation is unavailable THE SYSTEM SHALL continue bounded read-only provider tracking and ordinary claim access without duplicate provider readers or reward delivery in the renderer.
+
+
+## Provider goals in voluntary guide
+
+- REQ-942: WHEN a configured guide goal uses an allowlisted provider completion counter THE SYSTEM SHALL suggest it only with verified current evidence or durable earned completion and an ordinary unsettled claim state.
+- REQ-943: IF provider evidence is unknown, unavailable, pre-session or unsupported THEN THE SYSTEM SHALL omit that guide goal while retaining existing earned counters and ordinary claim policy.
+- REQ-944: WHEN a provider guide goal is shown THE SYSTEM SHALL explain its configured description and manual reward navigation without executing provider actions or promising Gold before the existing read-only eligibility preview.

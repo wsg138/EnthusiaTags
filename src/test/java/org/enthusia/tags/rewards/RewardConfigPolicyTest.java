@@ -29,7 +29,7 @@ class RewardConfigPolicyTest {
         assertEquals(5, config.getInt("config-version"));
         ConfigurationSection rewards = config.getConfigurationSection("rewards");
         assertNotNull(rewards);
-        assertEquals(100, rewards.getKeys(false).size());
+        assertEquals(138, rewards.getKeys(false).size());
 
         int moneyActions = 0;
         int maximumActions = 0;
@@ -57,7 +57,7 @@ class RewardConfigPolicyTest {
             }
         }
 
-        assertEquals(48, moneyActions);
+        assertEquals(84, moneyActions);
         assertEquals(3, maximumActions);
         assertEquals(5000D,
             config.getDouble("rewards.two_thousand_hours.rewards.payout.amount"));

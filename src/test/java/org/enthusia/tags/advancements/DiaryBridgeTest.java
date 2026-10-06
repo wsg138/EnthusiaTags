@@ -111,7 +111,7 @@ class DiaryBridgeTest {
         String config = Files.readString(Path.of("src/main/resources/config.yml"));
         String plugin = Files.readString(Path.of("src/main/resources/plugin.yml"));
         String source = Files.readString(Path.of(
-            "src/main/java/org/enthusia/tags/advancements/NativeAdvancementController.java"));
+            "src/main/java/org/enthusia/tags/advancements/ProviderRewardTracker.java"));
 
         assertTrue(config.contains("diary-enabled: true"));
         assertTrue(config.contains("diary-icon-custom-model-data: 815002"));
@@ -119,7 +119,7 @@ class DiaryBridgeTest {
         assertTrue(source.contains("getPlugin(\"DiaryKeeper\")"));
         assertTrue(source.contains("DiaryAdvancementBridge"));
         assertTrue(source.contains("diary.refresh()"));
-        assertTrue(source.contains("diary.observe(player.getUniqueId())"));
+        assertTrue(source.contains("diary.observe(id)"));
         assertTrue(source.contains("diary.forget(id)"));
         assertTrue(source.contains("diaryTask.cancel()"));
     }

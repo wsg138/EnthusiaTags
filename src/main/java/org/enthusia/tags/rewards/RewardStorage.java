@@ -1180,7 +1180,32 @@ public final class RewardStorage {
                                         String fingerprint, String ipAddress) throws SQLException {
         requireGoldReservation(playerId, rewardId, action, fingerprint, ipAddress);
         return executeBlockingMeasured("storage.rewards.gold-reserve",
-            () -> reserveGoldActionDirect(playerId, rewardId, action, fingerprint, ipAddress));
+             () -> reserveGoldActionDirect(playerId, rewardId, action, fingerprint, ipAddress));
+    }
+
+    /** Read-only preview on the storage executor. Claim-time reservation still rechecks ownership. */
+    public org.enthusia.tags.advancements.domain.GoldEligibility previewGoldActionNow(
+            UUID playerId, String rewardId, RewardAction action, String fingerprint, String ipAddress)
+            throws SQLException {
+        if (ipAddress == null || ipAddress.isBlank()) {
+            return org.enthusia.tags.advancements.domain.GoldEligibility.UNKNOWN;
+        }
+        requireGoldReservation(playerId, rewardId, action, fingerprint, ipAddress);
+        return executeBlockingMeasured("storage.rewards.gold-preview", () -> {
+            ActionLedgerEntry existing = selectActionEntry(playerId, rewardId, action.getActionId());
+            if (existing != null && !fingerprint.equals(existing.fingerprint())) {
+                return org.enthusia.tags.advancements.domain.GoldEligibility.UNKNOWN;
+            }
+            if (existing != null && existing.status() == RewardStatus.WITHHELD_NETWORK_LIMIT) {
+                return org.enthusia.tags.advancements.domain.GoldEligibility.BLOCKED;
+            }
+            if (existing != null && existing.status() != RewardStatus.DELIVERY_FAILED) {
+                return org.enthusia.tags.advancements.domain.GoldEligibility.UNKNOWN;
+            }
+            return hasOtherGoldOwner(playerId, rewardId, ipAddress)
+                ? org.enthusia.tags.advancements.domain.GoldEligibility.BLOCKED
+                : org.enthusia.tags.advancements.domain.GoldEligibility.ALLOWED;
+        });
     }
 
     private static void requireGoldReservation(UUID playerId, String rewardId, RewardAction action,

@@ -1,5 +1,11 @@
 # EnthusiaTags — SMP Player Guide
 
+## Optional goal guide
+
+When enabled by server staff, `/rewards guide` shows clickable building, social/exploration and combat choices in chat. A choice suggests one available goal and shows progress and rewards; **Open goal** takes you to the existing reward screen. Opening the guide does not complete or claim a reward. Paths without an available supported goal show unavailable; you can still browse `/rewards` normally.
+
+Gold amounts are shown only when eligibility can be checked. Eligibility is checked again at claim time, and shared-network limits can prevent Gold payouts. Other reward components may remain available. This guide defaults disabled and has no automatic join message.
+
 This file documents the player-facing behavior of EnthusiaTags on Enthusia SMP. The main [`README.md`](README.md) contains deeper implementation, recovery, migration, and build details.
 
 The production values below were checked against the live Enthusia configuration on August 22, 2026. The exact achievement/reward definitions remain authoritative in `rewards.yml`, because the server currently contains about 100 separately configured rewards.
