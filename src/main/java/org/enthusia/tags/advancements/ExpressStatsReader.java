@@ -19,35 +19,42 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
-/** Read-only aggregate adapter for EnthusiaExpress mail.db. */
+/** Read-only unique-correspondent adapter for EnthusiaExpress mail.db. */
 final class ExpressStatsReader {
     private static final String SENDER_SQL = """
-        SELECT sender_uuid,
-               SUM(CASE WHEN type='PACKAGE' THEN 1 ELSE 0 END) AS sent_packages,
-               SUM(CASE WHEN type='LETTER' THEN 1 ELSE 0 END) AS sent_letters,
+        SELECT LOWER(sender_uuid) AS sender_uuid,
+               COUNT(DISTINCT CASE WHEN type='PACKAGE' THEN LOWER(recipient_uuid) END) AS sent_packages,
+               COUNT(DISTINCT CASE WHEN type='LETTER' THEN LOWER(recipient_uuid) END) AS sent_letters,
                MAX(CASE WHEN type='PACKAGE' THEN packed_item_count ELSE 0 END) AS max_packed
           FROM mail
-         WHERE sender_uuid IS NOT NULL
-           AND (? IS NULL OR sender_uuid IN (SELECT value FROM json_each(?)))
-         GROUP BY sender_uuid
+         WHERE sender_uuid IS NOT NULL AND LOWER(sender_uuid)<>LOWER(recipient_uuid)
+           AND status NOT IN ('RETURNED','RETURN_CLAIMED')
+           AND (? IS NULL OR LOWER(sender_uuid) IN (SELECT value FROM json_each(?)))
+         GROUP BY LOWER(sender_uuid)
         """;
     private static final String RECIPIENT_SQL = """
-        SELECT recipient_uuid,
-               SUM(CASE WHEN type='PACKAGE' AND status='CLAIMED' THEN 1 ELSE 0 END) AS claimed_packages,
-               SUM(CASE WHEN type='LETTER' AND unread=0 THEN 1 ELSE 0 END) AS read_letters,
-               SUM(CASE WHEN type='PACKAGE' AND status='RETURN_CLAIMED' THEN 1 ELSE 0 END) AS returned_claims
+        SELECT LOWER(recipient_uuid) AS recipient_uuid,
+               COUNT(DISTINCT CASE WHEN type='PACKAGE' AND status='CLAIMED'
+                   AND LOWER(sender_uuid)<>LOWER(recipient_uuid) THEN LOWER(sender_uuid) END) AS claimed_packages,
+               COUNT(DISTINCT CASE WHEN type='LETTER' AND unread=0
+                   AND LOWER(sender_uuid)<>LOWER(recipient_uuid) THEN LOWER(sender_uuid) END) AS read_letters,
+               MAX(CASE WHEN type='PACKAGE' AND status='RETURN_CLAIMED'
+                   AND LOWER(sender_uuid)=LOWER(recipient_uuid) THEN 1 ELSE 0 END) AS returned_claims
           FROM mail
-         WHERE ? IS NULL OR recipient_uuid IN (SELECT value FROM json_each(?))
-         GROUP BY recipient_uuid
+         WHERE ? IS NULL OR LOWER(recipient_uuid) IN (SELECT value FROM json_each(?))
+         GROUP BY LOWER(recipient_uuid)
         """;
     private static final String RECIPIENT_PENDING_SQL = """
-        SELECT recipient_uuid,
-               SUM(CASE WHEN type='PACKAGE' AND status='CLAIMED' AND delivery_pending=0 THEN 1 ELSE 0 END) AS claimed_packages,
-               SUM(CASE WHEN type='LETTER' AND unread=0 THEN 1 ELSE 0 END) AS read_letters,
-               SUM(CASE WHEN type='PACKAGE' AND status='RETURN_CLAIMED' AND delivery_pending=0 THEN 1 ELSE 0 END) AS returned_claims
+        SELECT LOWER(recipient_uuid) AS recipient_uuid,
+               COUNT(DISTINCT CASE WHEN type='PACKAGE' AND status='CLAIMED' AND delivery_pending=0
+                   AND LOWER(sender_uuid)<>LOWER(recipient_uuid) THEN LOWER(sender_uuid) END) AS claimed_packages,
+               COUNT(DISTINCT CASE WHEN type='LETTER' AND unread=0
+                   AND LOWER(sender_uuid)<>LOWER(recipient_uuid) THEN LOWER(sender_uuid) END) AS read_letters,
+               MAX(CASE WHEN type='PACKAGE' AND status='RETURN_CLAIMED' AND delivery_pending=0
+                   AND LOWER(sender_uuid)=LOWER(recipient_uuid) THEN 1 ELSE 0 END) AS returned_claims
           FROM mail
-         WHERE ? IS NULL OR recipient_uuid IN (SELECT value FROM json_each(?))
-         GROUP BY recipient_uuid
+         WHERE ? IS NULL OR LOWER(recipient_uuid) IN (SELECT value FROM json_each(?))
+         GROUP BY LOWER(recipient_uuid)
         """;
     private ExpressStatsReader() {
     }

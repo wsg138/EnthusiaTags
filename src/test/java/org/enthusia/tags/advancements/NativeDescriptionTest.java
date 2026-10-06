@@ -26,4 +26,32 @@ class NativeDescriptionTest {
         assertTrue(text.contains("one account per challenge/IP"));
         assertTrue(text.contains("/rewards"));
     }
+    @Test void providerTooltipPreservesIconAndListsManualGoldClaim() {
+        String milestone = "diary/dear_diary";
+        var criterion = new RewardCriterion(RewardCriterionType.CUSTOM_COUNTER,
+            org.enthusia.tags.rewards.RewardSourceType.CUSTOM_COUNTER, 1, null, null, null,
+            "advancement_reward:" + milestone, 0, "Diary", true);
+        var gold = new RewardAction(RewardActionType.MONEY, "", 20, "Existing payout");
+        var reward = new RewardDefinition("adv_diary_dear_diary", "Diary", List.of(), null,
+            List.of(criterion), List.of(gold), "advancements");
+        var node = new io.github.badgersmc.advancements.pilot.ProjectionService.Node(milestone,
+            null, "Diary", List.of("Provider evidence", "Rewards: None (display-only)."),
+            org.bukkit.Material.PAPER, 815002, "enthusia:journal_quill", "TASK", 3, 7);
+        var decorated = NativeAdvancementController.withProviderRewards(List.of(node),
+            java.util.Map.of(reward.getId(), reward)).getFirst();
+        assertEquals(node.key(), decorated.key());
+        assertEquals(node.parentKey(), decorated.parentKey());
+        assertEquals(node.title(), decorated.title());
+        assertEquals(node.icon(), decorated.icon());
+        assertEquals(node.customModelData(), decorated.customModelData());
+        assertEquals(node.itemModel(), decorated.itemModel());
+        assertEquals(node.frame(), decorated.frame());
+        assertEquals(node.x(), decorated.x());
+        assertEquals(node.y(), decorated.y());
+        String text = String.join("\n", decorated.description());
+        assertFalse(text.contains("Rewards: None"));
+        assertTrue(text.contains("20"));
+        assertTrue(text.contains("/rewards"));
+        assertTrue(text.contains("one account per challenge/IP"));
+    }
 }

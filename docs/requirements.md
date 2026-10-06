@@ -97,3 +97,11 @@ The user explicitly authorized the remaining non-guild WarzoneDuels advancement 
 - REQ-905: WHEN local workflow tooling reads or modifies task state THE SYSTEM SHALL reject malformed state, serialize concurrent operations, enforce required evidence, and replace files atomically.
 
 - REQ-906: IF a companion linkage error occurs during projection or tree removal THEN THE SYSTEM SHALL contain and log that integration failure while preserving retry/cleanup behavior without swallowing fatal virtual-machine errors.
+
+## Provider reward source recovery
+
+- REQ-937: WHEN a supported provider milestone is verified complete THE SYSTEM SHALL latch its stable completion counter once without executing rewards or replaying historical celebrations.
+- REQ-938: IF a provider observation is unavailable or predates the player session THEN THE SYSTEM SHALL retain previously earned completion and mark unearned progress unavailable rather than authoritative zero.
+- REQ-939: WHEN reward state is unloaded or the player reconnects or configuration reloads THE SYSTEM SHALL reject stale observations and retry fresh evidence after loading without overwriting claims or ownership.
+- REQ-940: WHEN provider reward defaults are recovered THE SYSTEM SHALL add only missing provider rewards and referenced tags while preserving custom overrides, higher configuration versions, action fingerprints and current active-playtime policy.
+- REQ-941: WHEN native advancement presentation is unavailable THE SYSTEM SHALL continue bounded read-only provider tracking and ordinary claim access without duplicate provider readers or reward delivery in the renderer.

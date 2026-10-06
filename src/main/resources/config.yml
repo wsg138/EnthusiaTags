@@ -1,4 +1,5 @@
 config-version: 5
+provider-rewards-version: 1
 
 # Display-only native advancement pilot. Claims still use /rewards.
 advancements:
@@ -127,6 +128,89 @@ daily:
     pitch: 1.25
 
 tags:
+  adv_clutch:
+    display-name: "<#ff5a5a><bold>Clutch"
+    tag-text: "<#ff5a5a><bold>Clutch"
+    icon: "GOLDEN_APPLE"
+    description:
+      - "&7Earned from an Enthusia advancement reward."
+
+  adv_courier:
+    display-name: "<#6ee7ff><bold>Courier"
+    tag-text: "<#6ee7ff><bold>Courier"
+    icon: "MINECART"
+    description:
+      - "&7Earned from an Enthusia advancement reward."
+
+  adv_gladiator:
+    display-name: "<#ffb347><bold>Gladiator"
+    tag-text: "<#ffb347><bold>Gladiator"
+    icon: "NETHERITE_SWORD"
+    description:
+      - "&7Earned from an Enthusia advancement reward."
+
+  adv_indestructible:
+    display-name: "<#c0c0c0><bold>Indestructible"
+    tag-text: "<#c0c0c0><bold>Indestructible"
+    icon: "OBSIDIAN"
+    description:
+      - "&7Earned from an Enthusia advancement reward."
+
+  adv_infamous:
+    display-name: "<#8b0000><bold>Infamous"
+    tag-text: "<#8b0000><bold>Infamous"
+    icon: "RED_DYE"
+    description:
+      - "&7Earned from an Enthusia advancement reward."
+
+  adv_postmaster:
+    display-name: "<#ffcc66><bold>Postmaster"
+    tag-text: "<#ffcc66><bold>Postmaster"
+    icon: "CHEST_MINECART"
+    description:
+      - "&7Earned from an Enthusia advancement reward."
+
+  adv_public_enemy:
+    display-name: "<#ff3030><bold>Public Enemy"
+    tag-text: "<#ff3030><bold>Public Enemy"
+    icon: "WITHER_SKELETON_SKULL"
+    description:
+      - "&7Earned from an Enthusia advancement reward."
+
+  adv_redeemed:
+    display-name: "<#78e08f><bold>Redeemed"
+    tag-text: "<#78e08f><bold>Redeemed"
+    icon: "TOTEM_OF_UNDYING"
+    description:
+      - "&7Earned from an Enthusia advancement reward."
+
+  adv_unstoppable:
+    display-name: "<#ff3b30><bold>Unstoppable"
+    tag-text: "<#ff3b30><bold>Unstoppable"
+    icon: "DIAMOND_SWORD"
+    description:
+      - "&7Earned from an Enthusia advancement reward."
+
+  adv_void_walker:
+    display-name: "<#9b6dff><bold>Void Walker"
+    tag-text: "<#9b6dff><bold>Void Walker"
+    icon: "ENDER_PEARL"
+    description:
+      - "&7Earned from an Enthusia advancement reward."
+  adv_well_regarded:
+    display-name: "<#6ee7ff><bold>Well Regarded"
+    tag-text: "<#6ee7ff><bold>Well Regarded"
+    icon: "BEACON"
+    description:
+      - "&7Earned from an Enthusia advancement reward."
+
+  adv_writer:
+    display-name: "<#d8a7ff><bold>Writer"
+    tag-text: "<#d8a7ff><bold>Writer"
+    icon: "FEATHER"
+    description:
+      - "&7Earned from an Enthusia advancement reward."
+
   beta_tester:
     display-name: "<#39c5ff>Beta <#6ee7ff>Tester"
     tag-text: "<#39c5ff>Beta <#6ee7ff>Tester"

@@ -1,4 +1,5 @@
 config-version: 5
+provider-rewards-version: 1
 
 placeholders:
   # Placeholder fallback values. These are only used if
@@ -17,6 +18,9 @@ integrations:
     plugin-name: "EnthusiaCurrency"
 
 categories:
+  advancements:
+    name: "&dAdvancements"
+    icon: "NETHER_STAR"
   playtime:
     name: "&bPlaytime"
     icon: "CLOCK"
@@ -1678,3 +1682,765 @@ rewards:
         material: TOTEM_OF_UNDYING
         amount: 2
         label: Ultimate Survivor bonus
+
+  adv_warzone_welcome_to_thunderdome:
+    name: "&bWelcome to the Thunderdome"
+    description:
+      - "&7Send a valid Warzone Duel challenge."
+      - "&8Source: WarzoneDuels Advancement"
+    icon: "COMPASS"
+    category: advancements
+    criteria:
+      complete:
+        type: CUSTOM_COUNTER
+        key: "advancement_reward:warzone_duels/welcome_to_thunderdome"
+        amount: 1
+        label: "Advancement completed"
+    rewards:
+      payout:
+        type: MONEY
+        amount: 100
+        label: "Advancement reward"
+
+  adv_warzone_first_blood:
+    name: "&cArena Initiate"
+    description:
+      - "&7Win your first Warzone Duel."
+      - "&8Source: WarzoneDuels Advancement"
+    icon: "IRON_SWORD"
+    category: advancements
+    criteria:
+      complete:
+        type: CUSTOM_COUNTER
+        key: "advancement_reward:warzone_duels/first_blood"
+        amount: 1
+        label: "Advancement completed"
+    rewards:
+      payout:
+        type: MONEY
+        amount: 150
+        label: "Advancement reward"
+
+  adv_warzone_victor_spoils:
+    name: "&6To the Victor Go the Spoils"
+    description:
+      - "&7Withdraw captured duel spoils."
+      - "&8Source: WarzoneDuels Advancement"
+    icon: "CHEST"
+    category: advancements
+    criteria:
+      complete:
+        type: CUSTOM_COUNTER
+        key: "advancement_reward:warzone_duels/victor_spoils"
+        amount: 1
+        label: "Advancement completed"
+    rewards:
+      payout:
+        type: MONEY
+        amount: 250
+        label: "Advancement reward"
+
+  adv_warzone_price_for_peace:
+    name: "&eA Price for Peace"
+    description:
+      - "&7Complete a duel by mutual draw."
+      - "&8Source: WarzoneDuels Advancement"
+    icon: "PAPER"
+    category: advancements
+    criteria:
+      complete:
+        type: CUSTOM_COUNTER
+        key: "advancement_reward:warzone_duels/price_for_peace"
+        amount: 1
+        label: "Advancement completed"
+    rewards:
+      payout:
+        type: MONEY
+        amount: 150
+        label: "Advancement reward"
+
+  adv_warzone_my_house_my_rules:
+    name: "&cMy House, My Rules"
+    description:
+      - "&7Win as challenger with non-default rules."
+      - "&8Source: WarzoneDuels Advancement"
+    icon: "REDSTONE_TORCH"
+    category: advancements
+    criteria:
+      complete:
+        type: CUSTOM_COUNTER
+        key: "advancement_reward:warzone_duels/my_house_my_rules"
+        amount: 1
+        label: "Advancement completed"
+    rewards:
+      payout:
+        type: MONEY
+        amount: 350
+        label: "Advancement reward"
+
+  adv_warzone_adapt_and_overcome:
+    name: "&bAdapt and Overcome"
+    description:
+      - "&7Win with pearls and wind charges disabled."
+      - "&8Source: WarzoneDuels Advancement"
+    icon: "SHIELD"
+    category: advancements
+    criteria:
+      complete:
+        type: CUSTOM_COUNTER
+        key: "advancement_reward:warzone_duels/adapt_and_overcome"
+        amount: 1
+        label: "Advancement completed"
+    rewards:
+      payout:
+        type: MONEY
+        amount: 500
+        label: "Advancement reward"
+
+  adv_warzone_not_even_close:
+    name: "&6Not Even Close"
+    description:
+      - "&7Win a 1v1 below two hearts."
+      - "&8Source: WarzoneDuels Advancement"
+    icon: "GOLDEN_APPLE"
+    category: advancements
+    criteria:
+      complete:
+        type: CUSTOM_COUNTER
+        key: "advancement_reward:warzone_duels/not_even_close"
+        amount: 1
+        label: "Advancement completed"
+    rewards:
+      payout:
+        type: MONEY
+        amount: 750
+        label: "Advancement reward"
+      tag:
+        type: TAG
+        id: adv_clutch
+        label: "Clutch"
+
+  adv_warzone_unstoppable:
+    name: "&cUnstoppable"
+    description:
+      - "&7Reach a 5-match Warzone Duel win streak."
+      - "&8Source: WarzoneDuels Advancement"
+    icon: "DIAMOND_SWORD"
+    category: advancements
+    criteria:
+      complete:
+        type: CUSTOM_COUNTER
+        key: "advancement_reward:warzone_duels/unstoppable"
+        amount: 1
+        label: "Advancement completed"
+    rewards:
+      payout:
+        type: MONEY
+        amount: 1000
+        label: "Advancement reward"
+      tag:
+        type: TAG
+        id: adv_unstoppable
+        label: "Unstoppable"
+
+  adv_warzone_gladiator:
+    name: "&6&lThe Gladiator"
+    description:
+      - "&7Win 50 Warzone Duels."
+      - "&8Source: WarzoneDuels Advancement"
+    icon: "NETHERITE_SWORD"
+    category: advancements
+    criteria:
+      complete:
+        type: CUSTOM_COUNTER
+        key: "advancement_reward:warzone_duels/gladiator"
+        amount: 1
+        label: "Advancement completed"
+    rewards:
+      payout:
+        type: MONEY
+        amount: 2500
+        label: "Advancement reward"
+      tag:
+        type: TAG
+        id: adv_gladiator
+        label: "Gladiator"
+
+  adv_commend_a_good_word:
+    name: "&dA Good Word"
+    description:
+      - "&7Receive your first positive commendation."
+      - "&8Source: EnthusiaCommend Advancement"
+    icon: "PINK_TULIP"
+    category: advancements
+    criteria:
+      complete:
+        type: CUSTOM_COUNTER
+        key: "advancement_reward:reputation/a_good_word"
+        amount: 1
+        label: "Advancement completed"
+    rewards:
+      payout:
+        type: MONEY
+        amount: 100
+        label: "Advancement reward"
+
+  adv_commend_well_regarded:
+    name: "&eWell Regarded"
+    description:
+      - "&7Reach +10 overall reputation."
+      - "&8Source: EnthusiaCommend Advancement"
+    icon: "GOLD_INGOT"
+    category: advancements
+    criteria:
+      complete:
+        type: CUSTOM_COUNTER
+        key: "advancement_reward:reputation/well_regarded"
+        amount: 1
+        label: "Advancement completed"
+    rewards:
+      payout:
+        type: MONEY
+        amount: 250
+        label: "Advancement reward"
+
+  adv_commend_pillar_of_the_community:
+    name: "&6Pillar of the Community"
+    description:
+      - "&7Reach +20 overall reputation."
+      - "&8Source: EnthusiaCommend Advancement"
+    icon: "BEACON"
+    category: advancements
+    criteria:
+      complete:
+        type: CUSTOM_COUNTER
+        key: "advancement_reward:reputation/pillar_of_the_community"
+        amount: 1
+        label: "Advancement completed"
+    rewards:
+      payout:
+        type: MONEY
+        amount: 750
+        label: "Advancement reward"
+      tag:
+        type: TAG
+        id: adv_well_regarded
+        label: "Well Regarded"
+
+  adv_commend_kind_soul:
+    name: "&dKind Soul"
+    description:
+      - "&7Reach +5 in Was Kind reputation."
+      - "&8Source: EnthusiaCommend Advancement"
+    icon: "PINK_TULIP"
+    category: advancements
+    criteria:
+      complete:
+        type: CUSTOM_COUNTER
+        key: "advancement_reward:reputation/kind_soul"
+        amount: 1
+        label: "Advancement completed"
+    rewards:
+      payout:
+        type: MONEY
+        amount: 250
+        label: "Advancement reward"
+
+  adv_commend_generous_spirit:
+    name: "&aGenerous Spirit"
+    description:
+      - "&7Reach +5 in Gave Items/Money reputation."
+      - "&8Source: EnthusiaCommend Advancement"
+    icon: "EMERALD"
+    category: advancements
+    criteria:
+      complete:
+        type: CUSTOM_COUNTER
+        key: "advancement_reward:reputation/generous_spirit"
+        amount: 1
+        label: "Advancement completed"
+    rewards:
+      payout:
+        type: MONEY
+        amount: 250
+        label: "Advancement reward"
+
+  adv_commend_trusted_name:
+    name: "&bTrusted Name"
+    description:
+      - "&7Reach +5 in Trustworthy reputation."
+      - "&8Source: EnthusiaCommend Advancement"
+    icon: "SHIELD"
+    category: advancements
+    criteria:
+      complete:
+        type: CUSTOM_COUNTER
+        key: "advancement_reward:reputation/trusted_name"
+        amount: 1
+        label: "Advancement completed"
+    rewards:
+      payout:
+        type: MONEY
+        amount: 250
+        label: "Advancement reward"
+
+  adv_commend_merchant_of_merit:
+    name: "&6Merchant of Merit"
+    description:
+      - "&7Reach +5 in Good Stall reputation."
+      - "&8Source: EnthusiaCommend Advancement"
+    icon: "CHEST"
+    category: advancements
+    criteria:
+      complete:
+        type: CUSTOM_COUNTER
+        key: "advancement_reward:reputation/merchant_of_merit"
+        amount: 1
+        label: "Advancement completed"
+    rewards:
+      payout:
+        type: MONEY
+        amount: 250
+        label: "Advancement reward"
+
+  adv_commend_bad_reputation:
+    name: "&cBad Reputation"
+    description:
+      - "&7Reach -10 overall reputation."
+      - "&8Source: EnthusiaCommend Advancement"
+    icon: "RED_DYE"
+    category: advancements
+    criteria:
+      complete:
+        type: CUSTOM_COUNTER
+        key: "advancement_reward:reputation/bad_reputation"
+        amount: 1
+        label: "Advancement completed"
+    rewards:
+      tag:
+        type: TAG
+        id: adv_infamous
+        label: "Infamous"
+
+  adv_commend_public_enemy:
+    name: "&4Public Enemy"
+    description:
+      - "&7Reach -25 overall reputation."
+      - "&8Source: EnthusiaCommend Advancement"
+    icon: "WITHER_SKELETON_SKULL"
+    category: advancements
+    criteria:
+      complete:
+        type: CUSTOM_COUNTER
+        key: "advancement_reward:reputation/public_enemy"
+        amount: 1
+        label: "Advancement completed"
+    rewards:
+      tag:
+        type: TAG
+        id: adv_public_enemy
+        label: "Public Enemy"
+
+  adv_commend_redemption_arc:
+    name: "&aRedemption Arc"
+    description:
+      - "&7Recover from -12 or lower back to 0 or higher."
+      - "&8Source: EnthusiaCommend Advancement"
+    icon: "TOTEM_OF_UNDYING"
+    category: advancements
+    criteria:
+      complete:
+        type: CUSTOM_COUNTER
+        key: "advancement_reward:reputation/redemption_arc"
+        amount: 1
+        label: "Advancement completed"
+    rewards:
+      payout:
+        type: MONEY
+        amount: 750
+        label: "Advancement reward"
+      tag:
+        type: TAG
+        id: adv_redeemed
+        label: "Redeemed"
+
+  adv_express_first_class:
+    name: "&bFirst Class"
+    description:
+      - "&7Send your first EnthusiaExpress package."
+      - "&8Source: EnthusiaExpress Advancement"
+    icon: "CHEST"
+    category: advancements
+    criteria:
+      complete:
+        type: CUSTOM_COUNTER
+        key: "advancement_reward:express/first_class"
+        amount: 1
+        label: "Advancement completed"
+    rewards:
+      payout:
+        type: MONEY
+        amount: 150
+        label: "Advancement reward"
+
+  adv_express_care_package:
+    name: "&dCare Package"
+    description:
+      - "&7Send a package containing at least 64 packed items."
+      - "&8Source: EnthusiaExpress Advancement"
+    icon: "SHULKER_BOX"
+    category: advancements
+    criteria:
+      complete:
+        type: CUSTOM_COUNTER
+        key: "advancement_reward:express/care_package"
+        amount: 1
+        label: "Advancement completed"
+    rewards:
+      payout:
+        type: MONEY
+        amount: 500
+        label: "Advancement reward"
+
+  adv_express_frequent_shipper:
+    name: "&bFrequent Shipper"
+    description:
+      - "&7Send packages to 10 different players."
+      - "&8Source: EnthusiaExpress Advancement"
+    icon: "MINECART"
+    category: advancements
+    criteria:
+      complete:
+        type: CUSTOM_COUNTER
+        key: "advancement_reward:express/frequent_shipper"
+        amount: 1
+        label: "Advancement completed"
+    rewards:
+      payout:
+        type: MONEY
+        amount: 750
+        label: "Advancement reward"
+      tag:
+        type: TAG
+        id: adv_courier
+        label: "Courier"
+
+  adv_express_postal_legend:
+    name: "&6&lPostal Legend"
+    description:
+      - "&7Send packages to 50 different players."
+      - "&8Source: EnthusiaExpress Advancement"
+    icon: "CHEST_MINECART"
+    category: advancements
+    criteria:
+      complete:
+        type: CUSTOM_COUNTER
+        key: "advancement_reward:express/postal_legend"
+        amount: 1
+        label: "Advancement completed"
+    rewards:
+      payout:
+        type: MONEY
+        amount: 2000
+        label: "Advancement reward"
+      tag:
+        type: TAG
+        id: adv_postmaster
+        label: "Postmaster"
+
+  adv_express_youve_got_mail:
+    name: "&aYou've Got Mail"
+    description:
+      - "&7Claim your first delivered package."
+      - "&8Source: EnthusiaExpress Advancement"
+    icon: "BUNDLE"
+    category: advancements
+    criteria:
+      complete:
+        type: CUSTOM_COUNTER
+        key: "advancement_reward:express/youve_got_mail"
+        amount: 1
+        label: "Advancement completed"
+    rewards:
+      payout:
+        type: MONEY
+        amount: 150
+        label: "Advancement reward"
+
+  adv_express_parcel_collector:
+    name: "&3Parcel Collector"
+    description:
+      - "&7Claim packages from 10 different players."
+      - "&8Source: EnthusiaExpress Advancement"
+    icon: "ENDER_CHEST"
+    category: advancements
+    criteria:
+      complete:
+        type: CUSTOM_COUNTER
+        key: "advancement_reward:express/parcel_collector"
+        amount: 1
+        label: "Advancement completed"
+    rewards:
+      payout:
+        type: MONEY
+        amount: 500
+        label: "Advancement reward"
+
+  adv_express_return_to_sender:
+    name: "&eReturn to Sender"
+    description:
+      - "&7Collect one of your returned packages."
+      - "&8Source: EnthusiaExpress Advancement"
+    icon: "COMPASS"
+    category: advancements
+    criteria:
+      complete:
+        type: CUSTOM_COUNTER
+        key: "advancement_reward:express/return_to_sender"
+        amount: 1
+        label: "Advancement completed"
+    rewards:
+      payout:
+        type: MONEY
+        amount: 250
+        label: "Advancement reward"
+
+  adv_express_pen_pal:
+    name: "&dPen Pal"
+    description:
+      - "&7Send your first signed-book letter."
+      - "&8Source: EnthusiaExpress Advancement"
+    icon: "WRITTEN_BOOK"
+    category: advancements
+    criteria:
+      complete:
+        type: CUSTOM_COUNTER
+        key: "advancement_reward:express/pen_pal"
+        amount: 1
+        label: "Advancement completed"
+    rewards:
+      payout:
+        type: MONEY
+        amount: 100
+        label: "Advancement reward"
+
+  adv_express_correspondent:
+    name: "&bCorrespondent"
+    description:
+      - "&7Send letters to 10 different players."
+      - "&8Source: EnthusiaExpress Advancement"
+    icon: "BOOK"
+    category: advancements
+    criteria:
+      complete:
+        type: CUSTOM_COUNTER
+        key: "advancement_reward:express/correspondent"
+        amount: 1
+        label: "Advancement completed"
+    rewards:
+      payout:
+        type: MONEY
+        amount: 500
+        label: "Advancement reward"
+
+  adv_express_read_all_about_it:
+    name: "&fRead All About It"
+    description:
+      - "&7Read your first received letter."
+      - "&8Source: EnthusiaExpress Advancement"
+    icon: "PAPER"
+    category: advancements
+    criteria:
+      complete:
+        type: CUSTOM_COUNTER
+        key: "advancement_reward:express/read_all_about_it"
+        amount: 1
+        label: "Advancement completed"
+    rewards:
+      payout:
+        type: MONEY
+        amount: 100
+        label: "Advancement reward"
+
+  adv_express_avid_reader:
+    name: "&5Avid Reader"
+    description:
+      - "&7Read letters from 10 different players."
+      - "&8Source: EnthusiaExpress Advancement"
+    icon: "BOOKSHELF"
+    category: advancements
+    criteria:
+      complete:
+        type: CUSTOM_COUNTER
+        key: "advancement_reward:express/avid_reader"
+        amount: 1
+        label: "Advancement completed"
+    rewards:
+      payout:
+        type: MONEY
+        amount: 750
+        label: "Advancement reward"
+
+  adv_diary_dear_diary:
+    name: "&dDear Diary..."
+    description:
+      - "&7Receive your personal diary for the first time."
+      - "&8Source: DiaryKeeper Advancement"
+    icon: "PAPER"
+    category: advancements
+    criteria:
+      complete:
+        type: CUSTOM_COUNTER
+        key: "advancement_reward:diary/dear_diary"
+        amount: 1
+        label: "Advancement completed"
+    rewards:
+      payout:
+        type: MONEY
+        amount: 100
+        label: "Advancement reward"
+
+  adv_diary_first_entry:
+    name: "&fFirst Entry"
+    description:
+      - "&7Write or edit your diary once."
+      - "&8Source: DiaryKeeper Advancement"
+    icon: "INK_SAC"
+    category: advancements
+    criteria:
+      complete:
+        type: CUSTOM_COUNTER
+        key: "advancement_reward:diary/first_entry"
+        amount: 1
+        label: "Advancement completed"
+    rewards:
+      payout:
+        type: MONEY
+        amount: 150
+        label: "Advancement reward"
+
+  adv_diary_prolific_writer:
+    name: "&dProlific Writer"
+    description:
+      - "&7Write or edit your diary 25 times."
+      - "&8Source: DiaryKeeper Advancement"
+    icon: "FEATHER"
+    category: advancements
+    criteria:
+      complete:
+        type: CUSTOM_COUNTER
+        key: "advancement_reward:diary/prolific_writer"
+        amount: 1
+        label: "Advancement completed"
+    rewards:
+      payout:
+        type: MONEY
+        amount: 500
+        label: "Advancement reward"
+      tag:
+        type: TAG
+        id: adv_writer
+        label: "Writer"
+
+  adv_diary_finders_keepers:
+    name: "&eFinders Keepers"
+    description:
+      - "&7Pick up a diary from the ground."
+      - "&8Source: DiaryKeeper Advancement"
+    icon: "SPYGLASS"
+    category: advancements
+    criteria:
+      complete:
+        type: CUSTOM_COUNTER
+        key: "advancement_reward:diary/finders_keepers"
+        amount: 1
+        label: "Advancement completed"
+    rewards:
+      payout:
+        type: MONEY
+        amount: 150
+        label: "Advancement reward"
+
+  adv_diary_indestructible:
+    name: "&7Indestructible"
+    description:
+      - "&7Have your diary survive a destruction attempt."
+      - "&8Source: DiaryKeeper Advancement"
+    icon: "NETHERITE_INGOT"
+    category: advancements
+    criteria:
+      complete:
+        type: CUSTOM_COUNTER
+        key: "advancement_reward:diary/indestructible"
+        amount: 1
+        label: "Advancement completed"
+    rewards:
+      payout:
+        type: MONEY
+        amount: 250
+        label: "Advancement reward"
+
+  adv_diary_stubborn:
+    name: "&8Stubborn"
+    description:
+      - "&7Have your diary survive 10 destruction attempts."
+      - "&8Source: DiaryKeeper Advancement"
+    icon: "OBSIDIAN"
+    category: advancements
+    criteria:
+      complete:
+        type: CUSTOM_COUNTER
+        key: "advancement_reward:diary/stubborn"
+        amount: 1
+        label: "Advancement completed"
+    rewards:
+      payout:
+        type: MONEY
+        amount: 750
+        label: "Advancement reward"
+      tag:
+        type: TAG
+        id: adv_indestructible
+        label: "Indestructible"
+
+  adv_diary_void_walker:
+    name: "&5Void Walker"
+    description:
+      - "&7Have your diary safely returned from the void."
+      - "&8Source: DiaryKeeper Advancement"
+    icon: "ENDER_PEARL"
+    category: advancements
+    criteria:
+      complete:
+        type: CUSTOM_COUNTER
+        key: "advancement_reward:diary/void_walker"
+        amount: 1
+        label: "Advancement completed"
+    rewards:
+      payout:
+        type: MONEY
+        amount: 500
+        label: "Advancement reward"
+      tag:
+        type: TAG
+        id: adv_void_walker
+        label: "Void Walker"
+
+  adv_diary_nice_try:
+    name: "&6Nice Try"
+    description:
+      - "&7Attempt to stash your diary in a restricted container."
+      - "&8Source: DiaryKeeper Advancement"
+    icon: "CHEST"
+    category: advancements
+    criteria:
+      complete:
+        type: CUSTOM_COUNTER
+        key: "advancement_reward:diary/nice_try"
+        amount: 1
+        label: "Advancement completed"
+    rewards:
+      payout:
+        type: MONEY
+        amount: 100
+        label: "Advancement reward"

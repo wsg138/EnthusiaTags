@@ -58,7 +58,7 @@ class ProjectionTickTest {
         bukkit.when(Bukkit::getScheduler).thenReturn(scheduler);
         bukkit.when(Bukkit::getOnlinePlayers).thenReturn(List.of(player));
         bukkit.when(() -> Bukkit.getPlayer(id)).thenReturn(player);
-        controller = new NativeAdvancementController(plugin, rewards);
+        controller = new NativeAdvancementController(plugin, rewards, mock(ProviderRewardTracker.class));
         ArgumentCaptor<Runnable> capture = ArgumentCaptor.forClass(Runnable.class);
         verify(scheduler).runTaskTimer(eq(plugin), capture.capture(), eq(20L), eq(20L));
         tick = capture.getValue();

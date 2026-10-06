@@ -1,5 +1,12 @@
 # SPEAR tasks
 
+## T-937 [TDD] Recover provider-backed rewards
+References: REQ-937 through REQ-941.
+Evidence: canonical main28048ca freshly fetched; isolated codex/recover-provider-rewards; preserved dirty candidate contains38 provider goals and12 referenced tags absent from canonical main. Existing claim/storage/IP policy remains authoritative. Provider schemas and running filenames inventoried in operations/retention-network-feature-map-20261005.md; local candidate hash is not fresh runtime equivalence.
+Acceptance: allowlisted completed milestone counters, loaded-state/session/reload fencing, unknown-versus-zero progress, separate ordinary claims, additive custom-preserving migration and renderer-independent shared readers. No supporter/donor migration, new provider API or deployment. Includes the separately tested PR #26 distinct-mail policy as a dependency before enabling monetary mail rewards.
+Status: local engine/architecture verified; refine addresses the exact-head hosted complexity finding by factoring the provider availability boundary. First-head hosted build and Sentinel artifact pass; Codacy requested one cleanup. Final-head verification pending. Initial three behavioral assertions failed in provider-red.log. Focused checks passed 29 tests. Java 25 clean Maven verify passes all 261 tests with zero failures/errors/skips, including existing claim/IP/lifecycle contracts and pinned companion API. EARS and all 12 Node tooling checks pass. Architecture and live acceptance boundaries are recorded in implementation.md; the shaded SQLite read-only artifact probe passes. No deployment or live player acceptance.
+
+
 ## T-916 [INFRA] Canonical advancement presentation dependency
 
 References: REQ-916; implementation.md Presentation and Verification and rollout.

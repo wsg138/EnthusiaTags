@@ -143,10 +143,10 @@ class WarzoneBridgeTest {
 
     @Test void nativeWiringIsOptInAsyncAndClosesWithController() throws Exception {
         String config = Files.readString(Path.of("src/main/resources/config.yml"));
-        String source = Files.readString(Path.of("src/main/java/org/enthusia/tags/advancements/NativeAdvancementController.java"));
+        String source = Files.readString(Path.of("src/main/java/org/enthusia/tags/advancements/ProviderRewardTracker.java"));
         assertTrue(config.contains("warzone-duels-enabled: false"));
         assertTrue(source.contains("runTaskTimerAsynchronously"));
-        assertTrue(source.contains("duels.observe(player.getUniqueId())"));
+        assertTrue(source.contains("duels.observe(id)"));
         assertTrue(source.contains("duels.forget(id)"));
         assertTrue(source.contains("duelTask.cancel()"));
     }

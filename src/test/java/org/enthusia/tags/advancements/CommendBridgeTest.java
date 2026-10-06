@@ -98,14 +98,14 @@ class CommendBridgeTest {
         String config = Files.readString(Path.of("src/main/resources/config.yml"));
         String plugin = Files.readString(Path.of("src/main/resources/plugin.yml"));
         String source = Files.readString(Path.of(
-            "src/main/java/org/enthusia/tags/advancements/NativeAdvancementController.java"));
+            "src/main/java/org/enthusia/tags/advancements/ProviderRewardTracker.java"));
 
         assertTrue(config.contains("commendation-enabled: true"));
         assertTrue(plugin.contains("- EnthusiaCommend"));
         assertTrue(source.contains("getPlugin(\"EnthusiaCommend\")"));
         assertTrue(source.contains("CommendAdvancementBridge"));
         assertTrue(source.contains("commend.refresh()"));
-        assertTrue(source.contains("commend.observe(player.getUniqueId())"));
+        assertTrue(source.contains("commend.observe(id)"));
         assertTrue(source.contains("commend.forget(id)"));
         assertTrue(source.contains("commendTask.cancel()"));
     }

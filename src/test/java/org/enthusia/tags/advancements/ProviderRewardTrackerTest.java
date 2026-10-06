@@ -1,0 +1,94 @@
+package org.enthusia.tags.advancements;
+
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import java.util.logging.Logger;
+import org.bukkit.Bukkit;
+import org.bukkit.configuration.file.YamlConfiguration;
+import org.bukkit.entity.Player;
+import org.bukkit.event.player.PlayerJoinEvent;
+import org.bukkit.plugin.Plugin;
+import org.bukkit.plugin.PluginManager;
+import org.bukkit.plugin.java.JavaPlugin;
+import org.bukkit.scheduler.BukkitScheduler;
+import org.bukkit.scheduler.BukkitTask;
+import org.enthusia.tags.rewards.RewardService;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
+
+class ProviderRewardTrackerTest {
+    @TempDir Path folder;
+    @Test void rewardsTrackWithoutRendererAndRejectFailedOrPreJoinReads() throws Exception {
+        UUID id = UUID.randomUUID();
+        Player player = mock(Player.class);
+        when(player.getUniqueId()).thenReturn(id);
+        when(player.isOnline()).thenReturn(true);
+        JavaPlugin plugin = mock(JavaPlugin.class);
+        var config = new YamlConfiguration();
+        config.set("advancements.enabled", false);
+        config.set("advancements.warzone-duels-enabled", true);
+        config.set("advancements.commendation-enabled", false);
+        config.set("advancements.express-enabled", false);
+        config.set("advancements.diary-enabled", false);
+        when(plugin.getConfig()).thenReturn(config);
+        when(plugin.getLogger()).thenReturn(Logger.getLogger("provider-tracker"));
+        Plugin provider = mock(Plugin.class);
+        when(provider.isEnabled()).thenReturn(true);
+        when(provider.getDataFolder()).thenReturn(folder.toFile());
+        PluginManager manager = mock(PluginManager.class);
+        when(manager.getPlugin("WarzoneDuels")).thenReturn(provider);
+        when(manager.isPluginEnabled("WarzoneDuels")).thenReturn(true);
+        BukkitScheduler scheduler = mock(BukkitScheduler.class);
+        BukkitTask task = mock(BukkitTask.class);
+        when(scheduler.runTaskTimer(eq(plugin), any(Runnable.class), anyLong(), anyLong())).thenReturn(task);
+        when(scheduler.runTaskTimerAsynchronously(eq(plugin), any(Runnable.class), anyLong(), anyLong())).thenReturn(task);
+        RewardService rewards = mock(RewardService.class);
+        when(rewards.isAvailable()).thenReturn(true);
+        Path file = folder.resolve("stats.yml");
+        Files.writeString(file, "players:\n  " + id + ":\n    wins: 1\n    best-win-streak: 1\n");
+        byte[] before = Files.readAllBytes(file);
+        try (var bukkit = mockStatic(Bukkit.class)) {
+            bukkit.when(Bukkit::getPluginManager).thenReturn(manager);
+            bukkit.when(Bukkit::getScheduler).thenReturn(scheduler);
+            bukkit.when(Bukkit::getOnlinePlayers).thenReturn(List.of(player));
+            bukkit.when(() -> Bukkit.getPlayer(id)).thenReturn(player);
+            ProviderRewardTracker tracker = new ProviderRewardTracker(plugin, rewards);
+            tracker.tick();
+            verify(rewards).observeProviderProgress(player, Map.of());
+            tracker.duels().refresh();
+            tracker.tick();
+            assertEquals(1000, tracker.progress(id).get("warzone_duels/first_blood"));
+            verify(rewards).observeProviderProgress(eq(player), argThat(map -> Integer.valueOf(1000).equals(map.get("warzone_duels/first_blood"))));
+            assertTrue(tracker.takeCelebrations(id).isEmpty(), "Historical observations are silent");
+            assertArrayEquals(before, Files.readAllBytes(file));
+            tracker.onJoin(new PlayerJoinEvent(player, (net.kyori.adventure.text.Component) null));
+            tracker.tick();
+            verify(rewards, times(2)).observeProviderProgress(player, Map.of());
+            tracker.duels().refresh();
+            tracker.tick();
+            assertTrue(tracker.takeCelebrations(id).isEmpty());
+            tracker.resetSessions();
+            tracker.tick();
+            verify(rewards, times(3)).observeProviderProgress(player, Map.of());
+            tracker.duels().refresh();
+            tracker.tick();
+            assertTrue(tracker.takeCelebrations(id).isEmpty());
+            Files.writeString(file, "players: broken");
+            assertThrows(Exception.class, () -> tracker.duels().refresh());
+            tracker.tick();
+            verify(rewards, times(4)).observeProviderProgress(player, Map.of());
+            assertEquals(1000, tracker.progress(id).get("warzone_duels/first_blood"), "Known display progress is retained");
+            tracker.close();
+            tracker.close();
+            clearInvocations(rewards);
+            tracker.tick();
+            verifyNoInteractions(rewards);
+        }
+    }
+}

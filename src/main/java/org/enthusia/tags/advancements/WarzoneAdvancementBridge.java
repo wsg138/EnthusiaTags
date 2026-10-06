@@ -53,6 +53,12 @@ final class WarzoneAdvancementBridge {
             ? null : snapshot.players().getOrDefault(player, new DuelMilestoneProgress.Stats(0, 0));
         return sessions.computeIfAbsent(player, ignored -> new DuelMilestoneProgress()).observe(stats);
     }
+    boolean evidenceAvailable(UUID player) {
+        var snapshot = latest;
+        Long joined = sessionStarted.get(player);
+        return snapshot != null && joined != null && snapshot.readStarted() - joined >= 0;
+    }
+
     void forget(UUID player) { sessions.remove(player); sessionStarted.remove(player); }
     static List<ProjectionService.Node> nodes(int baseY) {
         return List.of(

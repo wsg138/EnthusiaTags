@@ -29,7 +29,7 @@ class ExpressStatsReaderTest {
         long modified = Files.getLastModifiedTime(database).toMillis();
         var result = ExpressStatsReader.read(database);
         var senderStats = result.get(sender);
-        assertEquals(4, senderStats.sentPackages());
+        assertEquals(1, senderStats.sentPackages());
         assertEquals(1, senderStats.sentLetters());
         assertEquals(64, senderStats.maxPackedItems());
         assertEquals(1, senderStats.returnedClaims());
@@ -101,6 +101,76 @@ class ExpressStatsReaderTest {
         Files.writeString(invalid, "not sqlite");
         assertThrows(Exception.class, () -> ExpressStatsReader.read(invalid));
     }
+    @Test void repeatedExchangesCountOnlyDistinctPeoplePerMailType() throws Exception {
+        Path database = directory.resolve("unique.db");
+        createCurrentSchema(database);
+        UUID third = UUID.randomUUID();
+        try (var connection = DriverManager.getConnection("jdbc:sqlite:" + database)) {
+            for (int index = 0; index < 50; index++) {
+                insert(connection, sender, recipient, "PACKAGE", "CLAIMED", 8, 0, 0);
+                insert(connection, recipient, sender, "PACKAGE", "CLAIMED", 8, 0, 0);
+                insert(connection, sender, recipient, "LETTER", "UNCLAIMED", 0, 0, 0);
+                insert(connection, recipient, sender, "LETTER", "UNCLAIMED", 0, 0, 0);
+            }
+            insert(connection, sender, third, "PACKAGE", "UNCLAIMED", 64, 1, 0);
+            insert(connection, third, sender, "PACKAGE", "CLAIMED", 4, 0, 1);
+            insert(connection, third, sender, "LETTER", "UNCLAIMED", 0, 1, 0);
+        }
+        byte[] before = Files.readAllBytes(database);
+        var stats = ExpressStatsReader.read(database, java.util.Set.of(sender)).get(sender);
+        assertEquals(2, stats.sentPackages());
+        assertEquals(1, stats.sentLetters());
+        assertEquals(1, stats.claimedPackages(), "Pending delivery is not received evidence");
+        assertEquals(1, stats.readLetters(), "Unread letter is not read evidence");
+        assertEquals(64, stats.maxPackedItems());
+        assertArrayEquals(before, Files.readAllBytes(database));
+        try (var connection = DriverManager.getConnection("jdbc:sqlite:" + database);
+             var statement = connection.createStatement()) {
+            statement.executeUpdate("UPDATE mail SET delivery_pending=0, unread=0");
+        }
+        var refreshed = ExpressStatsReader.read(database).get(sender);
+        assertEquals(2, refreshed.claimedPackages());
+        assertEquals(2, refreshed.readLetters());
+    }
+
+    @Test void selfMailAndSenderlessMailDoNotEarnNormalMilestones() throws Exception {
+        Path database = directory.resolve("self.db");
+        createCurrentSchema(database);
+        try (var connection = DriverManager.getConnection("jdbc:sqlite:" + database);
+             var statement = connection.createStatement()) {
+            insert(connection, sender, sender, "PACKAGE", "CLAIMED", 128, 0, 0);
+            insert(connection, sender, sender, "LETTER", "UNCLAIMED", 0, 0, 0);
+            statement.executeUpdate("INSERT INTO mail VALUES(NULL,'" + sender
+                + "','PACKAGE','CLAIMED',128,0,0)");
+            statement.executeUpdate("INSERT INTO mail VALUES(NULL,'" + sender
+                + "','LETTER','UNCLAIMED',0,0,0)");
+            insert(connection, sender, sender, "PACKAGE", "RETURN_CLAIMED", 128, 0, 0);
+        }
+        var stats = ExpressStatsReader.read(database).get(sender);
+        assertEquals(0, stats.sentPackages());
+        assertEquals(0, stats.sentLetters());
+        assertEquals(0, stats.claimedPackages());
+        assertEquals(0, stats.readLetters());
+        assertEquals(0, stats.maxPackedItems());
+        assertEquals(1, stats.returnedClaims(), "Actual returns keep their separate recovery milestone");
+    }
+
+    @Test void legacyHistoryAlsoDeduplicatesExchanges() throws Exception {
+        Path database = directory.resolve("legacy-unique.db");
+        createLegacySchema(database);
+        try (var connection = DriverManager.getConnection("jdbc:sqlite:" + database)) {
+            for (int index = 0; index < 10; index++) {
+                insertLegacy(connection, sender, recipient, "PACKAGE", "CLAIMED", 12, 0);
+                insertLegacy(connection, sender, recipient, "LETTER", "UNCLAIMED", 0, 0);
+            }
+        }
+        var stats = ExpressStatsReader.read(database);
+        assertEquals(1, stats.get(sender).sentPackages());
+        assertEquals(1, stats.get(sender).sentLetters());
+        assertEquals(1, stats.get(recipient).claimedPackages());
+        assertEquals(1, stats.get(recipient).readLetters());
+    }
+
     private void createCurrentSchema(Path database) throws Exception {
         try (var connection = DriverManager.getConnection("jdbc:sqlite:" + database);
              var statement = connection.createStatement()) {
