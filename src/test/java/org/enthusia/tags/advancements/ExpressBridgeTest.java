@@ -31,6 +31,18 @@ class ExpressBridgeTest {
             insert(database, player, other, "PACKAGE", "UNCLAIMED", 1, 1, 0);
         }
         bridge.refresh();
+        var repeated = bridge.observe(player);
+        assertEquals(100, repeated.progress().get("express/frequent_shipper"));
+        assertTrue(repeated.celebrate().isEmpty());
+        bridge.forget(player);
+        bridge.beginSession(player);
+        bridge.refresh();
+        assertEquals(100, bridge.observe(player).progress().get("express/frequent_shipper"));
+        assertTrue(bridge.observe(player).celebrate().isEmpty());
+        for (int i = 0; i < 9; i++) {
+            insert(database, player, UUID.randomUUID(), "PACKAGE", "UNCLAIMED", 1, 1, 0);
+        }
+        bridge.refresh();
         assertEquals(
             java.util.Set.of("express/frequent_shipper"),
             bridge.observe(player).celebrate());

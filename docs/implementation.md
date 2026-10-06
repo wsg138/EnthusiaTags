@@ -33,3 +33,9 @@ Nine milestones ship: first win, five-win best streak and 50 wins use existing s
 ## Verification and rollout
 
 SPEAR cycles: spec, prove (behavioral red), engine (green), architecture, refine. Record test commands and results per task. Validate existing databases through temporary SQLite fixtures, concurrency/restart/recovery tests, then produce a local test artifact only after package verification. Staging must check the actual Paper/client versions, logo pack, toast timing, RoseChat visibility and restart behavior. No live approval can be inferred from unit tests.
+
+## Unique Express correspondents (T-933)
+
+Mail milestones count distinct other UUIDs separately for packages and letters, case-insensitively. Sender snapshots exclude self-mail, senderless mail and returned packages; recipient snapshots require normal claimed packages with delivery confirmation where supported, or read letters from another sender. Recovering one's own returned package remains a separate boolean milestone. Stable advancement keys and thresholds are retained; descriptions now disclose the different-player requirement.
+
+This is a bounded recovery from the preserved production-labelled local candidate into canonical main 28048ca. Current JSON-bound online-player selection, schema validation, read-only SQLite access, background refresh, silent historical/reconnect projection and monotonic per-session progress remain authoritative. Existing reward claims and ownership are untouched. No provider API, database schema, payment, menu/supporter feature or active-playtime migration is replaced. A local candidate hash does not establish the running production binary; deployment requires merged-source build and fresh production/client verification.

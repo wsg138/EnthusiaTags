@@ -1,5 +1,11 @@
 # SPEAR tasks
 
+## T-933 [TDD] Recover unique mail correspondents into canonical source
+References: REQ-933 through REQ-936.
+Evidence: production-labelled local candidate unique-mail-test.1 SHA256 e86dc7402a3110600f7f437d9bad3949d6c562378344bc60ed68531c7801add9 contains distinct correspondent counting absent from canonical main 28048ca. Original dirty checkout preserved. New isolated codex/reconcile-unique-mail starts from current main; port only the behavior with existing JSON-bound selection/schema validation, not older UI/supporter code or active-playtime migration.
+Acceptance: distinct other UUIDs per mail type, case-insensitive identity, confirmed delivery only, separate return recovery, read-only history, reconnect silent; preserve current-main tests and integration contracts. No provider DB/schema, payout, claim ownership or production changes.
+Status: local spec/prove/engine/arch/refine complete. Actual behavioral red unique-red.log: eight reader tests, three assertion failures (repeat traffic 51 versus 2, self-mail 2 versus 0, legacy duplicates 10 versus 1). After the bounded SQL adapter change and truthful descriptions, unique-green.log passes all 16 focused reader/bridge/progress tests. Full Java25.0.3/Maven3.9.11/Paper26.2 clean verify passes 253 tests, zero failures/errors/skips (unique-full-verify.log); EARS, 12 Node tooling tests, refine-state assertion, diff checks and final shaded SQLite read-only probe pass. Current-main JSON selection, validation and provider contracts preserved. Local unmerged artifact 2.2.3-mail-reconcile-SNAPSHOT SHA256 EB7D3767749E5B0E4E44142418F96FE53F4769D0C7A6F54BE2B463AEE90D9B10. Hosted exact-head checks/review and actual player/client acceptance pending. No source merge, deployment or production changes. Local candidate is not freshly hash-matched to production runtime.
+
 ## T-916 [INFRA] Canonical advancement presentation dependency
 
 References: REQ-916; implementation.md Presentation and Verification and rollout.

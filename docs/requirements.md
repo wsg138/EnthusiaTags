@@ -97,3 +97,8 @@ The user explicitly authorized the remaining non-guild WarzoneDuels advancement 
 - REQ-905: WHEN local workflow tooling reads or modifies task state THE SYSTEM SHALL reject malformed state, serialize concurrent operations, enforce required evidence, and replace files atomically.
 
 - REQ-906: IF a companion linkage error occurs during projection or tree removal THEN THE SYSTEM SHALL contain and log that integration failure while preserving retry/cleanup behavior without swallowing fatal virtual-machine errors.
+
+- REQ-933: WHEN Express mail history is read THE SYSTEM SHALL count sent packages and letters once per distinct other recipient and confirmed packages and read letters once per distinct other sender, ignoring UUID case.
+- REQ-934: IF mail is self-addressed, sender-less, pending delivery or rewritten as a return THEN THE SYSTEM SHALL exclude it from normal correspondent milestones while preserving the separate confirmed return recovery milestone.
+- REQ-935: WHEN a player reconnects or historical rows repeat THE SYSTEM SHALL retain read-only provider access, silent historical reconciliation and existing awarded reward ownership without resetting progress or payments.
+- REQ-936: WHEN unique-correspondent milestones are displayed THE SYSTEM SHALL describe the different-player requirements while preserving stable node keys, thresholds and current-main verification and active-playtime safeguards.
