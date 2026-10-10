@@ -97,3 +97,6 @@ The user explicitly authorized the remaining non-guild WarzoneDuels advancement 
 - REQ-905: WHEN local workflow tooling reads or modifies task state THE SYSTEM SHALL reject malformed state, serialize concurrent operations, enforce required evidence, and replace files atomically.
 
 - REQ-906: IF a companion linkage error occurs during projection or tree removal THEN THE SYSTEM SHALL contain and log that integration failure while preserving retry/cleanup behavior without swallowing fatal virtual-machine errors.
+
+- REQ-907: WHEN a player selects KOTH in /rewards THE SYSTEM SHALL open only that caller's menu using the enabled owner-registered KOTH navigation provider and SHALL preserve provider-owned eligibility and payout authority.
+- REQ-908: IF the KOTH navigation provider is absent, disabled, replaced or incompatible THEN THE SYSTEM SHALL resolve fresh registration ownership and fail with a clear unavailable message without granting any reward.

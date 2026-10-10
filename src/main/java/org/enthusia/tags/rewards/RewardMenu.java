@@ -8,6 +8,7 @@ import org.bukkit.enchantments.Enchantment;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemFlag;
 import org.bukkit.inventory.Inventory;
+import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.persistence.PersistentDataType;
@@ -27,6 +28,8 @@ public final class RewardMenu {
     private final NamespacedKey backKey;
     private final NamespacedKey nextKey;
     private final NamespacedKey prevKey;
+    private final NamespacedKey kothKey;
+    private final KothRewardsHook koth;
 
     public RewardMenu(RewardService rewardService, TagService tagService) {
         this.rewardService = rewardService;
@@ -36,6 +39,8 @@ public final class RewardMenu {
         this.backKey = new NamespacedKey(tagService.getPlugin(), "reward_back");
         this.nextKey = new NamespacedKey(tagService.getPlugin(), "reward_next");
         this.prevKey = new NamespacedKey(tagService.getPlugin(), "reward_prev");
+        this.kothKey = new NamespacedKey(tagService.getPlugin(), "reward_koth_menu");
+        this.koth = new KothRewardsHook(tagService.getPlugin().getServer());
     }
 
     public Inventory create(Player player) {
@@ -53,7 +58,27 @@ public final class RewardMenu {
             }
             inventory.setItem(slot++, createCategoryItem(category));
         }
+        if (koth.installed()) {
+            ItemStack item = new ItemStack(org.bukkit.Material.NETHER_STAR);
+            item.editMeta(meta -> {
+                meta.displayName(Component.text("KOTH"));
+                meta.lore(List.of(Component.text("Challenges, earned rewards and match results"), Component.text("Click to open")));
+                meta.getPersistentDataContainer().set(kothKey, PersistentDataType.BYTE, (byte) 1);
+            });
+            inventory.setItem(22, item);
+        }
         return inventory;
+    }
+
+    public NamespacedKey getKothKey() { return kothKey; }
+    public void openKoth(Player player, String page) {
+        if (!koth.open(player, page)) player.sendMessage(Component.text("KOTH rewards are unavailable. Ask staff to check the KOTH menu integration."));
+    }
+    public void queueKoth(Player player, InventoryHolder holder) {
+        var plugin = tagService.getPlugin();
+        plugin.getServer().getScheduler().runTask(plugin, () -> {
+            if (plugin.isEnabled() && player.isOnline() && player.hasPermission("enthusia.tags.rewards") && player.getOpenInventory().getTopInventory().getHolder() == holder) openKoth(player, "home");
+        });
     }
 
     public Inventory createCategory(Player player, String categoryId) {

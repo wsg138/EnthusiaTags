@@ -29,6 +29,15 @@ public final class RewardsCommand implements CommandExecutor, TabCompleter {
 
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
+        if (args.length > 0 && args[0].equalsIgnoreCase("koth")) {
+            if (!(sender instanceof Player player)) { sender.sendMessage(message("players-only")); return true; }
+            String page = args.length > 1 ? args[1].toLowerCase(java.util.Locale.ROOT) : "home";
+            if (args.length > 2 || !KothRewardsHook.validPage(page)) {
+                player.sendMessage(Component.text("/rewards koth [challenges|claims|results]")); return true;
+            }
+            rewardMenu.openKoth(player, page);
+            return true;
+        }
         if (!rewardService.isAvailable()) {
             sender.sendMessage(message("rewards-service-unavailable"));
             return true;
@@ -68,8 +77,9 @@ public final class RewardsCommand implements CommandExecutor, TabCompleter {
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
         if (args.length == 1) {
             return sender.hasPermission("enthusia.tags.admin")
-                ? List.of("reload", "open", "retryitems") : List.of("retryitems");
+                ? List.of("reload", "open", "retryitems", "koth") : List.of("retryitems", "koth");
         }
+        if (args.length == 2 && args[0].equalsIgnoreCase("koth")) return List.of("challenges", "claims", "results");
         return Collections.emptyList();
     }
 
