@@ -187,13 +187,13 @@ public final class CosmeticsListener implements Listener {
                 player.openInventory(holder.getCategory()==null ? cosmeticsMenu.createMain(player,holder.getPage()+1,holder.isPreview()) : cosmeticsMenu.createCategory(player,holder.getCategory(),holder.getPage()+1,holder.isPreview()));
                 return;
             }
-    
+
             String categoryId = data.get(cosmeticsMenu.getCategoryKey(), PersistentDataType.STRING);
             if (categoryId != null) {
                 player.openInventory(cosmeticsMenu.createCategory(player, categoryId, 0, holder.isPreview()));
                 return;
             }
-    
+
             String cosmeticId = data.get(cosmeticsMenu.getCosmeticKey(), PersistentDataType.STRING);
             if (cosmeticId == null) return;
             if (holder.isPreview()) {
@@ -201,7 +201,7 @@ public final class CosmeticsListener implements Listener {
                     .deserialize(cosmeticsService.formatMessage("admin-preview-readonly")));
                 return;
             }
-    
+
             CosmeticDefinition cosmetic = cosmeticsService.getCosmetics().get(cosmeticId.toLowerCase(Locale.ROOT));
             if (cosmetic == null) return;
             boolean ok = cosmeticsService.toggleCosmetic(player, cosmetic);

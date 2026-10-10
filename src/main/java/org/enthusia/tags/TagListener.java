@@ -155,7 +155,7 @@ public final class TagListener implements Listener {
                 player.openInventory(tagMenu.create(player, holder.getFilter(), holder.getPage(), false));
                 return;
             }
-    
+
             String tagId = data.get(tagMenu.getTagIdKey(), PersistentDataType.STRING);
             if (tagId == null) return;
             if (holder.isPreview()) {

@@ -324,7 +324,6 @@ References: REQ-960.
 Evidence: Existing Tags and Cosmetics fill slots zero onward and truncate collections; KOTH uses an unframed 28-entry inventory. Regression covers reserved frame slots and paging.
 Status: spec.
 
-T-980 local proof: production All Tags control regression failed with one assertion on old source. Restored source passes 278 Java tests with zero failures/errors, EARS validation and 12 tooling tests. Inventory fixture verifies production control/footer placement, pagination, seven-category cosmetic dashboards and admin-gated preview. Listener tests execute deferred tag/cosmetic preview clicks and prove no selection/clear/toggle calls. Source metadata is read-only and excludes player grant lists. Preview published from 9ddd18d35c36c211acda1e7055beeb4079ec40cd; native client acceptance remains separate. Hosted review and TEST activation pending.
 T-960 Status: 273 Java tests pass, zero failures/errors/skips; 12 SPEAR tooling tests and EARS pass. Actual newly built KOTH shadow JAR/Tags JAR navigation contract passes. Shared layout is infrastructure presentation; existing grant/claim storage is unchanged. Hosted final-head checks and in-game acceptance remain separate.
 T-960 Hosted refinement: Codacy annotation114281598687 identified one repeated KOTH category literal. Centralized KOTH_CATEGORY without a behavior change; repeated 273-test verification passes. KOTH hosted build passes. Final Tags hosted checks remain to be inspected.
 
@@ -342,3 +341,5 @@ Status: implementation, local proof, hosted code checks and TEST activation veri
 References: REQ-980.
 Evidence: Production binary unique-mail-test.1 exposes filters, preview and full navigation absent from deployed source. Preserved production source pr-work/EnthusiaTags contains the same API and slots. Recover presentation and click handlers without importing unrelated entitlement grant/storage machinery; use read-only source metadata. Keep holiday and provider reward catalogs unchanged. TEST upload/restart authorized; production read-only.
 Status: spec.
+
+T-980 local proof: production All Tags control regression failed with one assertion on old source. Restored source passes 278 Java tests with zero failures/errors, EARS validation and 12 tooling tests. Inventory fixture verifies production control/footer placement, pagination, seven-category cosmetic dashboards and admin-gated preview. Listener tests execute deferred tag/cosmetic preview clicks and prove no selection/clear/toggle calls. Source metadata is read-only and excludes player grant lists. Preview published from 9ddd18d35c36c211acda1e7055beeb4079ec40cd; native client acceptance remains separate. Hosted review and TEST activation pending.
