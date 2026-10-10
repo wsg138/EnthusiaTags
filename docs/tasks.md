@@ -325,3 +325,10 @@ Evidence: Existing Tags and Cosmetics fill slots zero onward and truncate collec
 Status: spec.
 T-960 Status: 273 Java tests pass, zero failures/errors/skips; 12 SPEAR tooling tests and EARS pass. Actual newly built KOTH shadow JAR/Tags JAR navigation contract passes. Shared layout is infrastructure presentation; existing grant/claim storage is unchanged. Hosted final-head checks and in-game acceptance remain separate.
 T-960 Hosted refinement: Codacy annotation114281598687 identified one repeated KOTH category literal. Centralized KOTH_CATEGORY without a behavior change; repeated 273-test verification passes. KOTH hosted build passes. Final Tags hosted checks remain to be inspected.
+
+## T-970 [TDD] Production defaults and advancement subcategories
+References: REQ-970, REQ-971.
+Evidence: Live production rewards read-only snapshot contains Commend, Express, DiaryKeeper and Warzone Duels rewards; bundled defaults omit production categories. copyMissing iterates root keys recursively rather than current section keys. Regression pending.
+Status: spec.
+
+T-970 evidence: Two initial behavioral regressions failed (provider filtering and missing default categories), then 276 Java tests passed. Actual inventory test proves Commend child, original claim ID, focused link and parent Back. Migration test proves idempotence and preservation of administrator reward definitions. Default reward/payout entries remain unchanged; only production category defaults are added. Live production/TEST catalogs inspected read-only. No server writes for this correction yet.

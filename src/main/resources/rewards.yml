@@ -51,6 +51,18 @@ categories:
   misc:
     name: "&dMisc"
     icon: "NAME_TAG"
+  advancements:
+    name: '&dAdvancements'
+    icon: NETHER_STAR
+  supporter:
+    name: '&6Supporter'
+    icon: GOLD_INGOT
+  legacy:
+    name: '&bLegacy'
+    icon: ECHO_SHARD
+  events:
+    name: '&5Events'
+    icon: AMETHYST_SHARD
 underground-max-y: 56
 rewards:
   first_hour:

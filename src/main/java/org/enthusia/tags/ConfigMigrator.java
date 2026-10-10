@@ -218,7 +218,9 @@ public final class ConfigMigrator {
                                 String resourceName,
                                 MigrationReport report) {
         boolean changed = false;
-        for (String key : defaults.getKeys(false)) {
+        ConfigurationSection currentDefaults = path.isBlank() ? defaults : defaults.getConfigurationSection(path);
+        if (currentDefaults == null) return false;
+        for (String key : currentDefaults.getKeys(false)) {
             String childPath = path.isBlank() ? key : path + "." + key;
             if ("config-version".equals(childPath)) {
                 continue;

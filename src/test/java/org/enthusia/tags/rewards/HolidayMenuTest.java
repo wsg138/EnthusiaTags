@@ -64,6 +64,18 @@ class HolidayMenuTest {
             when(plugins.getPlugin("EnthusiaKOTH")).thenReturn(mock(org.bukkit.plugin.Plugin.class));
             menu.create(player,RewardMenuState.dashboard().withPage(1));
             assertTrue(java.util.stream.IntStream.range(0,45).mapToObj(held[0]::action).filter(Objects::nonNull).anyMatch(a->a.type()==RewardMenuAction.Type.KOTH));
+            var criterion=new RewardCriterion(RewardCriterionType.CUSTOM_COUNTER,1,null,"advancement_reward:reputation/a_good_word",0,"Commend");
+            var reward=new RewardDefinition("adv_commend_a_good_word","A Good Word",List.of(),Material.EMERALD,List.of(criterion),List.of(),"advancements");
+            when(service.getRewards()).thenReturn(Map.of(reward.getId(),reward));
+            when(service.evaluate(any(),any(),any())).thenReturn(new RewardEvaluation(RewardStatus.LOCKED,Map.of(),false,false,"Requirements not reached"));
+            when(service.getVerifiedMenuProgress(any(),any(),any())).thenReturn(java.util.OptionalLong.of(0));
+            menu.createCategory(player,"advancements");
+            assertEquals(new RewardMenuAction(RewardMenuAction.Type.CATEGORY,"advancements/commend"),held[0].action(19));
+            assertFalse(java.util.stream.IntStream.range(0,54).mapToObj(held[0]::action).filter(Objects::nonNull).anyMatch(a->a.type()==RewardMenuAction.Type.CLAIM));
+            menu.createCategory(player,"advancements/commend");
+            assertEquals(new RewardMenuAction(RewardMenuAction.Type.CLAIM,reward.getId()),held[0].action(19));
+            assertEquals("advancements",menu.parentState("advancements/commend").category());
+            menu.createFocused(player,reward); assertEquals("advancements/commend",held[0].state().category());
             verify(service,never()).claimAsync(any(),any());
         }
     }

@@ -84,7 +84,7 @@ public final class RewardMenuModel {
         return List.copyOf(selected);
     }
     private static boolean included(Entry row, RewardMenuState state) {
-        if (state.view() == RewardMenuState.View.CATEGORY && !row.reward().getCategory().equalsIgnoreCase(state.category())) return false;
+        if (state.view() == RewardMenuState.View.CATEGORY && !AdvancementCategories.matches(row.reward(),state.category())) return false;
         if (!matches(row, state.filter())) return false;
         return state.group() == RewardMenuState.Group.ALL || row.group() == state.group();
     }

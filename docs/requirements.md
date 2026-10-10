@@ -117,3 +117,6 @@ The user explicitly authorized the remaining non-guild WarzoneDuels advancement 
 - REQ-921: WHEN a seasonal catalog is browsed THE SYSTEM SHALL show earned or locked tags without claiming event awards and return Back to the parent holiday category.
 
 - REQ-960: WHEN Tags, Cosmetics or KOTH progression is browsed THE SYSTEM SHALL retain the production rewards frame, reserved controls, pagination and provider-owned award authority.
+
+- REQ-970: WHEN a player opens rewards THE SYSTEM SHALL retain production default categories, frame and controls, add Holidays and optional KOTH, and expose advancement rewards in provider subcategories while preserving reward definitions and claims.
+- REQ-971: WHEN missing nested defaults are copied THE SYSTEM SHALL traverse each actual child section once without constructing repeated parent paths or overwriting administrator values.

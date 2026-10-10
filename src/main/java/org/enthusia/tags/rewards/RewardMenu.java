@@ -51,7 +51,7 @@ public final class RewardMenu implements AutoCloseable {
     public Inventory createCategory(Player player, String category, int page) { return create(player, RewardMenuState.category(category).withPage(page)); }
     public Inventory createFocused(Player player, RewardDefinition target) {
         Snapshot snapshot = snapshot(player);
-        RewardMenuState state = RewardMenuState.category(target.getCategory()).focus(target.getId());
+        RewardMenuState state = RewardMenuState.category(AdvancementCategories.category(target)).focus(target.getId());
         List<RewardMenuModel.Entry> selected = RewardMenuModel.select(snapshot.entries(), state);
         int index = 0;
         while (index < selected.size() && !selected.get(index).id().equalsIgnoreCase(target.getId())) index++;
@@ -101,9 +101,14 @@ public final class RewardMenu implements AutoCloseable {
         for (String id : List.of("playtime","advancements","supporter","legacy","events","mining","combat","deaths","economy","exploration","misc")) {
             if (configured.containsKey(id)) categories.put(id,configured.get(id));
         }
-        configured.values().stream().sorted(java.util.Comparator.comparing(RewardCategory::id))
+        configured.values().stream()
             .forEach(c -> categories.putIfAbsent(c.id().toLowerCase(Locale.ROOT),c));
         Map<String,RewardDefinition> rewards = service.getRewards();
+        if (configured.containsKey(AdvancementCategories.ROOT)) {
+            for (var child : AdvancementCategories.CHILDREN) {
+                if (rewards.values().stream().anyMatch(r->AdvancementCategories.category(r).equals(child.id()))) categories.putIfAbsent(child.id(),child);
+            }
+        }
         for (RewardDefinition reward : rewards.values()) {
             String category = reward.getCategory().toLowerCase(Locale.ROOT);
             categories.putIfAbsent(category,defaultCategory(category));
@@ -193,7 +198,7 @@ public final class RewardMenu implements AutoCloseable {
         String name = state.view()==RewardMenuState.View.READY ? "Ready to Claim"
             : current == null ? "Rewards" : RewardMenuText.categoryName(current);
         var groupRows = snapshot.entries().stream()
-            .filter(e->state.category()==null || e.reward().getCategory().equalsIgnoreCase(state.category())).toList();
+            .filter(e->state.category()==null || AdvancementCategories.matches(e.reward(),state.category())).toList();
         RewardMenuModel.Summary viewSummary = RewardMenuModel.summary(groupRows);
         Material headerIcon = state.view()==RewardMenuState.View.READY ? Material.CHEST
             : current == null ? Material.PAPER : current.icon();
@@ -212,7 +217,7 @@ public final class RewardMenu implements AutoCloseable {
     private void holidayCatalog(Player player, RewardMenuHolder holder, Snapshot snapshot, RewardCategory current) {
         var entries = new ArrayList<java.util.function.Supplier<ItemStack>>();
         var actions = new ArrayList<RewardMenuAction>();
-        for (RewardCategory child : service.getConfig().categories().values()) {
+        for (RewardCategory child : snapshot.categories()) {
             if (!current.id().equals(child.parent())) continue;
             entries.add(() -> items.category(child, summaryFor(snapshot, child.id()), false));
             actions.add(new RewardMenuAction(CATEGORY, child.id()));
@@ -237,7 +242,7 @@ public final class RewardMenu implements AutoCloseable {
         if (page.entries().isEmpty()) holder.getInventory().setItem(31,
             RewardMenuItems.item(Material.PAPER, "&fNo holiday tags configured"));
         if (current.parent() != null) put(holder,45,
-            RewardMenuItems.item(Material.BOOK,"&fBack to Holidays","&7Return to the holiday categories."),BACK);
+            RewardMenuItems.item(Material.BOOK,"&fBack to " + RewardMenuText.titleCase(current.parent()),"&7Return to the parent category."),BACK);
     }
     private ItemStack holidayTag(Player player, org.enthusia.tags.TagDefinition tag) {
         ItemStack stack = new ItemStack(tag.getIcon());
@@ -251,6 +256,7 @@ public final class RewardMenu implements AutoCloseable {
         meta.lore(lore); stack.setItemMeta(meta); return stack;
     }
     public RewardMenuState parentState(String categoryId) {
+        if (categoryId != null && categoryId.startsWith(AdvancementCategories.ROOT+"/")) return RewardMenuState.category(AdvancementCategories.ROOT);
         RewardCategory category = categoryId == null ? null : service.getConfig().categories().get(categoryId);
         return category == null || category.parent() == null ? RewardMenuState.dashboard() : RewardMenuState.category(category.parent());
     }
@@ -294,6 +300,7 @@ public final class RewardMenu implements AutoCloseable {
             state.view()==RewardMenuState.View.READY ? "&fNo rewards ready to claim" : "&fNo matching rewards",
             "&7Try another filter or category.","&7Click the header to refresh."));
         put(holder,45,RewardMenuItems.item(Material.BOOK,"&fCategories","&7Return to the rewards dashboard."),BACK);
+        if (state.category()!=null && state.category().startsWith(AdvancementCategories.ROOT+"/")) put(holder,45,RewardMenuItems.item(Material.BOOK,"&fBack to Advancements","&7Return to advancement categories."),BACK);
         put(holder,46,RewardMenuItems.item(Material.NAME_TAG,"&bTags","&7Open your tags."),TAGS);
         if(holder.getPage()>0) put(holder,47,RewardMenuItems.item(Material.ARROW,"&fPrevious Page"),PREVIOUS);
         put(holder,49,RewardMenuItems.item(Material.PAPER,"&fPage "+(holder.getPage()+1)+" &8/ &f"+holder.pageCount(),
@@ -305,10 +312,11 @@ public final class RewardMenu implements AutoCloseable {
     private String title(RewardMenuState state) {
         if(state.view()==RewardMenuState.View.DASHBOARD) return "&6Enthusia &8• &fRewards";
         if(state.view()==RewardMenuState.View.READY) return "&6Enthusia &8• &aReady to Claim";
+        for (var child : AdvancementCategories.CHILDREN) if(child.id().equals(state.category())) return "&6Enthusia &8• &f"+child.name();
         return "&6Enthusia &8• &f"+RewardMenuText.titleCase(state.category()==null ? "Rewards" : state.category());
     }
     private RewardMenuModel.Summary summaryFor(Snapshot snapshot,String category) {
-        return RewardMenuModel.summary(snapshot.entries().stream().filter(e->e.reward().getCategory().equalsIgnoreCase(category)).toList());
+        return RewardMenuModel.summary(snapshot.entries().stream().filter(e->AdvancementCategories.matches(e.reward(),category)).toList());
     }
     private ItemStack choice(Material material,String title,String selected,List<String> options) {
         var lore=new ArrayList<String>();
