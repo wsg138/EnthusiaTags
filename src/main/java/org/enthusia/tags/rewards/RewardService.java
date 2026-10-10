@@ -1026,6 +1026,16 @@ public final class RewardService {
         };
     }
 
+    java.util.OptionalLong getVerifiedMenuProgress(Player player, RewardCriterion criterion, ProgressSnapshot snapshot) {
+        if (!isAvailable() || criterion == null || !criterion.isValid() || snapshot == null)
+            return java.util.OptionalLong.empty();
+        RewardPlayerState state = getLoadedState(player.getUniqueId());
+        if (state == null || !state.isLoaded() || !isCriterionAvailable(criterion)) return java.util.OptionalLong.empty();
+        long value = getProgress(player, criterion, snapshot);
+        if (value < 0 || snapshot.unavailableCriteria().contains(criterionCacheKey(criterion))) return java.util.OptionalLong.empty();
+        return java.util.OptionalLong.of(value);
+    }
+
     public String formatProgress(Player player, RewardCriterion criterion) {
         long current = getProgress(player, criterion);
         long goal = criterion.getAmount();

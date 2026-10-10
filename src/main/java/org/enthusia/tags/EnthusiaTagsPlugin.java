@@ -35,6 +35,7 @@ public final class EnthusiaTagsPlugin extends JavaPlugin {
     private LoreItemRewardRuntime loreItemRewardRuntime;
     private LoreItemRewardAdmin loreItemRewardAdmin;
     private NativeAdvancementController nativeAdvancements;
+    private org.enthusia.tags.rewards.RewardMenu rewardMenu;
 
     @Override
     public void onEnable() {
@@ -100,6 +101,7 @@ public final class EnthusiaTagsPlugin extends JavaPlugin {
 
     @Override
     public void onDisable() {
+        if (rewardMenu != null) rewardMenu.close();
         if (nativeAdvancements != null) nativeAdvancements.close();
         Bukkit.getServicesManager().unregister(tagService);
         if (rewardTracker != null) {
@@ -176,8 +178,10 @@ public final class EnthusiaTagsPlugin extends JavaPlugin {
         Bukkit.getPluginManager().registerEvents(new CosmeticsListener(cosmeticsService, tagService, messages, rewardService), this);
         RoseChatPresenceHook.register(this, cosmeticsService);
         RewardsCommand rewardsCommand = new RewardsCommand(rewardService, tagService, messages, this);
+        rewardMenu = rewardsCommand.getRewardMenu();
         if (rewardService.isAvailable()) {
-            Bukkit.getPluginManager().registerEvents(new RewardListener(rewardService, rewardsCommand.getRewardMenu()), this);
+            Bukkit.getPluginManager().registerEvents(new RewardListener(rewardService, rewardMenu), this);
+            rewardMenu.startRefresh();
             Bukkit.getPluginManager().registerEvents(rewardTracker, this);
             if (naturalBlockTracker != null) {
                 Bukkit.getPluginManager().registerEvents(naturalBlockTracker, this);

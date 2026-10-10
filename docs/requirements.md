@@ -105,3 +105,13 @@ The user explicitly authorized the remaining non-guild WarzoneDuels advancement 
 ## Holiday reward tags (EnthusiaHolidays)
 
 - REQ-910: WHEN the plugin starts THE SYSTEM SHALL install any missing EnthusiaHolidays reward tag definitions (pumpkin_hunter, no_pumpkin_left_behind, present_seeker, home_for_the_holidays, advent_keeper, secret_santa, seen_the_watcher, pumpkin_king) without overwriting administrator edits, so that `tag give <player> <id>` from holiday events always names a known tag.
+
+## Reward browser source recovery
+
+- REQ-945: WHEN a player browses rewards THE SYSTEM SHALL expose the preserved dashboard, category, ready, filter, sorting, grouping and focused navigation without changing reward definitions or claiming during navigation.
+- REQ-946: WHEN reward progress or delivery is displayed THE SYSTEM SHALL distinguish unavailable evidence, incomplete, ready, claimed, queued, pending, failed, withheld and review states using existing RewardService authority.
+- REQ-947: WHEN a reward menu receives interaction THE SYSTEM SHALL accept only its own server-side top-inventory actions and recheck permission, online session and inventory before deferred navigation or ordinary left-click claims.
+- REQ-948: WHEN a claim finishes or a reward browser refreshes THE SYSTEM SHALL retain stable visible slots and release in-flight guards without reopening a closed inventory or moving a new session into an old view.
+
+- REQ-920: WHEN Holidays is browsed THE SYSTEM SHALL retain the production 45-slot framed dashboard, seven-category pagination, 54-slot framed browser, existing controls and reward actions while adding Holidays and nested seasonal catalogs.
+- REQ-921: WHEN a seasonal catalog is browsed THE SYSTEM SHALL show earned or locked tags without claiming event awards and return Back to the parent holiday category.

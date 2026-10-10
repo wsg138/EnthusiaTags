@@ -5,6 +5,16 @@
 References: REQ-917..919; implementation.md Presentation.
 Evidence: HolidayCatalogTest initially failed compilation for the missing hierarchy and migration APIs; after implementation all three focused tests pass. Clean Maven verify passes 258 tests; EARS validation and all 12 Node tooling tests pass. The schema assertion was updated from 5 to 7 for the new configuration version. Existing runtime catalog fields and custom Pumpkin King styling are preserved by copy-missing migration. No claims, permissions or server activation changed.
 Status: local verification complete; exact-head hosted review and native client acceptance pending.
+## T-945 [TDD] Recover reward browser source
+
+References: REQ-945 through REQ-948.
+Evidence: fresh canonical main28048ca; isolated codex/recover-reward-menu. The preserved production-labelled candidate has six browser presentation/state classes and a holder-owned action listener missing from main. Main interprets item metadata without checking top-slot/click/service ownership. Candidate is read-only and not proven equivalent to the running production binary.
+Acceptance: presentation-only recovery, exact existing claim/data policy, verified readings and delivery states, trusted holder actions, permission/session checks, queued-item retry preserved, focused/manual guide compatibility, stable refresh slots and lifecycle cleanup. Supporter entitlements/config/presence/tag menus remain excluded.
+Status: local engine verified. menu-red.log records two actual interaction assertion failures with zero errors against canonical main. New browser model, inventory, verified progress and interaction cases pass; clean Java 25 Maven verify passes all 262 tests with zero failures/errors/skips, including existing claim/IP/storage/lifecycle and pinned companion contracts. EARS and all 12 Node tooling tests pass; shaded SQLite read-only probe and diff checks pass. Architecture/rollout boundaries recorded in implementation.md. Hosted exact-head refinement and source/client acceptance remain separate.
+
+Refinement: initial PR #28 head 7154512 passed hosted build and Sentinel, while Codacy rejected 34 maintainability findings. Split rendering/refresh/progress helpers, immutable presentation tables, cached interaction dispatch, and distinct field names retain behavior. Holder maps remain server-thread confined with narrowly documented PMD annotations. Java 25 clean verify still passes 262 tests; EARS, 12 Node tooling tests and shaded SQLite read-only probe pass. Exact-head hosted refinement remains pending.
+
+
 
 ## T-916 [INFRA] Canonical advancement presentation dependency
 
@@ -301,3 +311,10 @@ Evidence: `HolidayTagCatalogTest` failed first on the missing `pumpkin_king` id,
   Evidence: `HolidayTagCatalogTest.pumpkinKingWearsThePumpkinGlyphOnBothSides` failed first on the old text, then passed. `mvn verify` passes.
 
   Owner's choice (2026-10-09): option B, the candle-lit pumpkin, with the tag text `<b><gradient:#FF3A00:#FF5A00>Pumpkin King</gradient></b>`. The sculk version is kept as `pumpkin_sculk_alt.png`.
+
+## T-920 [TDD] Preserve production reward menu for Holidays
+References: REQ-920, REQ-921.
+Evidence: Production JAR unique-mail-test.1 downloaded read-only; javap confirms production RewardMenuState/dashboard/browser family. Rejected build replaced that family. Regression checks will assert original frame and controls, nested catalogs and no award actions.
+Status: spec; TEST rollback underway; no production writes.
+
+T-920 Status: local269 tests,12 tooling tests and EARS pass. Existing production browser recovered; sameframe seasonal navigation implemented. TEST rollback verified, corrected TEST activation and exact-head hosted review pending.
