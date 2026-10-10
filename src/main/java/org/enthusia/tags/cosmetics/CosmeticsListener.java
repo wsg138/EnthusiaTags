@@ -126,63 +126,92 @@ public final class CosmeticsListener implements Listener {
     public void onInventoryDrag(org.bukkit.event.inventory.InventoryDragEvent event) {
         if(event.getView().getTopInventory().getHolder() instanceof CosmeticsMenuHolder) event.setCancelled(true);
     }
-    private void navigate(Player player,CosmeticsMenuHolder holder,String action) {
-        org.bukkit.Bukkit.getScheduler().runTask(tagService.getPlugin(),()->{
-            if(!player.isOnline() || !player.hasPermission("enthusia.cosmetics.use") || player.getOpenInventory().getTopInventory().getHolder()!=holder) return;
-            if(action.equals("close")) player.closeInventory();
-            else if(action.equals("rewards")) player.performCommand("rewards");
-            else if(action.startsWith("page:")) {
-                int page=Integer.parseInt(action.substring(5));
-                player.openInventory(holder.getCategory()==null ? cosmeticsMenu.createMain(player,page) : cosmeticsMenu.createCategory(player,holder.getCategory(),page));
-            }
-        });
-    }
     @EventHandler
     public void onInventoryClick(InventoryClickEvent event) {
-        InventoryHolder holder = event.getView().getTopInventory().getHolder();
-        if (!(holder instanceof CosmeticsMenuHolder cosmeticHolder) || cosmeticHolder.getCosmeticsService()!=cosmeticsService) {
-            return;
-        }
+        org.bukkit.inventory.Inventory top = event.getView().getTopInventory();
+        InventoryHolder rawHolder = top.getHolder();
+        if (!(rawHolder instanceof CosmeticsMenuHolder holder)
+            || holder.getCosmeticsService() != cosmeticsService) return;
         event.setCancelled(true);
-        if (!(event.getWhoClicked() instanceof Player player) || !player.hasPermission("enthusia.cosmetics.use")) {
-            return;
-        }
-        if(event.getClickedInventory()!=event.getView().getTopInventory() || !event.isLeftClick()) return;
-        ItemStack clicked = event.getCurrentItem();
-        if (clicked == null || !clicked.hasItemMeta()) {
-            return;
-        }
+        if (!(event.getWhoClicked() instanceof Player player) || !player.hasPermission("enthusia.cosmetics.use")) return;
+        if (event.getClick()!=org.bukkit.event.inventory.ClickType.LEFT) return;
+        if (event.getClickedInventory() != top || event.getRawSlot() < 0 || event.getRawSlot() >= top.getSize()) return;
+
+        ItemStack clicked = top.getItem(event.getRawSlot());
+        if (clicked == null || !clicked.hasItemMeta()) return;
         ItemMeta meta = clicked.getItemMeta();
         PersistentDataContainer data = meta.getPersistentDataContainer();
-        String navigation=data.get(org.enthusia.tags.CollectionMenuLayout.actionKey(tagService.getPlugin()),PersistentDataType.STRING);
-        if(navigation!=null) { navigate(player,(CosmeticsMenuHolder)holder,navigation); return; }
-        if (data.has(cosmeticsMenu.getBackKey(), PersistentDataType.BYTE)) {
-            player.openInventory(cosmeticsMenu.createMain(player));
-            return;
-        }
-        if (data.has(cosmeticsMenu.getTagsKey(), PersistentDataType.BYTE)) {
-            player.openInventory(tagMenu.create(player));
-            return;
-        }
-        String categoryId = data.get(cosmeticsMenu.getCategoryKey(), PersistentDataType.STRING);
-        if (categoryId != null) {
-            player.openInventory(cosmeticsMenu.createCategory(player, categoryId));
-            return;
-        }
-        String cosmeticId = data.get(cosmeticsMenu.getCosmeticKey(), PersistentDataType.STRING);
-        if (cosmeticId == null) {
-            return;
-        }
-        CosmeticDefinition cosmetic = cosmeticsService.getCosmetics().get(cosmeticId.toLowerCase(Locale.ROOT));
-        if (cosmetic == null) {
-            return;
-        }
-        boolean ok = cosmeticsService.toggleCosmetic(player, cosmetic);
-        if (!ok) {
-            player.sendMessage(LegacyComponentSerializer.legacyAmpersand()
-                .deserialize(cosmeticsService.formatMessage("cosmetics-locked-msg")));
-            return;
-        }
-        player.openInventory(cosmeticsMenu.createCategory(player, cosmetic.getCategory(),cosmeticHolder.getPage()));
+
+        org.bukkit.Bukkit.getScheduler().runTask(tagService.getPlugin(), () -> {
+            if(!player.isOnline() || !player.hasPermission("enthusia.cosmetics.use") || player.getOpenInventory().getTopInventory()!=top) return;
+            if (data.has(cosmeticsMenu.getCloseKey(), PersistentDataType.BYTE)) {
+                player.closeInventory();
+                return;
+            }
+            if (data.has(cosmeticsMenu.getRewardsKey(), PersistentDataType.BYTE)) {
+                if (!rewardService.isAvailable()) {
+                    player.sendMessage(LegacyComponentSerializer.legacyAmpersand()
+                        .deserialize(cosmeticsService.formatMessage("rewards-service-unavailable")));
+                    return;
+                }
+                player.performCommand("rewards");
+                return;
+            }
+            if (data.has(cosmeticsMenu.getTagsKey(), PersistentDataType.BYTE)) {
+                if(player.hasPermission("enthusia.tags.use")) player.openInventory(tagMenu.create(player, holder.isPreview()));
+                return;
+            }
+            if (data.has(cosmeticsMenu.getPreviewKey(), PersistentDataType.BYTE)) {
+                if (!player.hasPermission("enthusia.tags.admin")) {
+                    player.sendMessage(LegacyComponentSerializer.legacyAmpersand()
+                        .deserialize(cosmeticsService.formatMessage("no-permission")));
+                    return;
+                }
+                if (holder.getCategory() == null) {
+                    player.openInventory(cosmeticsMenu.createMain(player, !holder.isPreview()));
+                } else {
+                    player.openInventory(cosmeticsMenu.createCategory(
+                        player, holder.getCategory(), holder.getPage(), !holder.isPreview()));
+                }
+                return;
+            }
+            if (data.has(cosmeticsMenu.getBackKey(), PersistentDataType.BYTE)) {
+                player.openInventory(cosmeticsMenu.createMain(player, holder.isPreview()));
+                return;
+            }
+            if (data.has(cosmeticsMenu.getPrevKey(), PersistentDataType.BYTE)) {
+                player.openInventory(holder.getCategory()==null ? cosmeticsMenu.createMain(player,holder.getPage()-1,holder.isPreview()) : cosmeticsMenu.createCategory(player,holder.getCategory(),holder.getPage()-1,holder.isPreview()));
+                return;
+            }
+            if (data.has(cosmeticsMenu.getNextKey(), PersistentDataType.BYTE)) {
+                player.openInventory(holder.getCategory()==null ? cosmeticsMenu.createMain(player,holder.getPage()+1,holder.isPreview()) : cosmeticsMenu.createCategory(player,holder.getCategory(),holder.getPage()+1,holder.isPreview()));
+                return;
+            }
+    
+            String categoryId = data.get(cosmeticsMenu.getCategoryKey(), PersistentDataType.STRING);
+            if (categoryId != null) {
+                player.openInventory(cosmeticsMenu.createCategory(player, categoryId, 0, holder.isPreview()));
+                return;
+            }
+    
+            String cosmeticId = data.get(cosmeticsMenu.getCosmeticKey(), PersistentDataType.STRING);
+            if (cosmeticId == null) return;
+            if (holder.isPreview()) {
+                player.sendMessage(LegacyComponentSerializer.legacyAmpersand()
+                    .deserialize(cosmeticsService.formatMessage("admin-preview-readonly")));
+                return;
+            }
+    
+            CosmeticDefinition cosmetic = cosmeticsService.getCosmetics().get(cosmeticId.toLowerCase(Locale.ROOT));
+            if (cosmetic == null) return;
+            boolean ok = cosmeticsService.toggleCosmetic(player, cosmetic);
+            if (!ok) {
+                player.sendMessage(LegacyComponentSerializer.legacyAmpersand()
+                    .deserialize(cosmeticsService.formatMessage("cosmetics-locked-msg")));
+                return;
+            }
+            player.openInventory(cosmeticsMenu.createCategory(
+                player, cosmetic.getCategory(), holder.getPage(), false));
+        });
     }
 }

@@ -6,7 +6,7 @@
 
     <groupId>org.enthusia</groupId>
     <artifactId>EnthusiaTags</artifactId>
-    <version>2.2.3-menu-recovery-SNAPSHOT</version>
+    <version>2.2.3-production-collections-SNAPSHOT</version>
 
     <properties>
         <maven.compiler.release>25</maven.compiler.release>

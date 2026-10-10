@@ -323,6 +323,8 @@ T-920 Status: local269 tests,12 tooling tests and EARS pass. Existing production
 References: REQ-960.
 Evidence: Existing Tags and Cosmetics fill slots zero onward and truncate collections; KOTH uses an unframed 28-entry inventory. Regression covers reserved frame slots and paging.
 Status: spec.
+
+T-980 local proof: production All Tags control regression failed with one assertion on old source. Restored source passes 278 Java tests with zero failures/errors, EARS validation and 12 tooling tests. Inventory fixture verifies production control/footer placement, pagination, seven-category cosmetic dashboards and admin-gated preview. Listener tests execute deferred tag/cosmetic preview clicks and prove no selection/clear/toggle calls. Source metadata is read-only and excludes player grant lists. Preview published from 9ddd18d35c36c211acda1e7055beeb4079ec40cd; native client acceptance remains separate. Hosted review and TEST activation pending.
 T-960 Status: 273 Java tests pass, zero failures/errors/skips; 12 SPEAR tooling tests and EARS pass. Actual newly built KOTH shadow JAR/Tags JAR navigation contract passes. Shared layout is infrastructure presentation; existing grant/claim storage is unchanged. Hosted final-head checks and in-game acceptance remain separate.
 T-960 Hosted refinement: Codacy annotation114281598687 identified one repeated KOTH category literal. Centralized KOTH_CATEGORY without a behavior change; repeated 273-test verification passes. KOTH hosted build passes. Final Tags hosted checks remain to be inspected.
 
@@ -335,3 +337,8 @@ T-970 evidence: Two initial behavioral regressions failed (provider filtering an
 
 T-970 refinement and TEST activation: source 2e455da43f3ba7133dc5d45fe6591bedde60f8e9 passes both exact-head GitHub workflows (verification run 38078106063, Sentinel run 38078106085); Codacy reports zero new issues and review threads are empty. 12 tooling tests and EARS pass. Unmerged TEST JAR SHA-256 165E1B38EB862398EC27F0DFE491BA70358A7317F0F26ED137B209D58FF0F766 matches downloaded installed bytes. SMP Test 5d109214 restarted 2026-10-10 15:04:44 EDT, Done 15:05:33 (39.100s), Tags enabled 15:05:24 and startup summary warnings=0; version confirms 2.2.3-menu-recovery-SNAPSHOT. Previous artifact retained with .disabled rollback suffix. KOTH artifact unchanged, enabled 15:05:29; its existing progression/configuration limitations remain separate. Production untouched. Owner-private preview version appgver_74ac105841088191a15003b1b4cfbc45 published from 2cff75e3548a36fa83707f6884a47411cda72134 using remote-build fallback because the local packager requires unavailable Bash. Authenticated preview QA at 390px confirms no document overflow, ten Commend rewards, reward inspection and parent Back. Native Minecraft appearance, progress and claim acceptance remain pending.
 Status: implementation, local proof, hosted code checks and TEST activation verified; in-game/client acceptance pending.
+
+## T-980 [TDD] Restore complete production collection menus
+References: REQ-980.
+Evidence: Production binary unique-mail-test.1 exposes filters, preview and full navigation absent from deployed source. Preserved production source pr-work/EnthusiaTags contains the same API and slots. Recover presentation and click handlers without importing unrelated entitlement grant/storage machinery; use read-only source metadata. Keep holiday and provider reward catalogs unchanged. TEST upload/restart authorized; production read-only.
+Status: spec.
