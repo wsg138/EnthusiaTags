@@ -29,34 +29,19 @@ public final class TagMenu {
         this.rewardsKey = new NamespacedKey(tagService.getPlugin(), "open_rewards");
     }
 
-    public Inventory create(Player player) {
-        TagMenuHolder holder = new TagMenuHolder(tagService);
-        Inventory inventory = Bukkit.createInventory(holder, 54, TagTextFormat.deserializeCompat(tagService.getGuiTitle()));
-        holder.setInventory(inventory);
-
-        PlayerTagData data = tagService.getPlayerData(player.getUniqueId());
-        Set<String> owned = data.getOwnedTags();
-        if (owned.isEmpty()) {
-            inventory.setItem(22, createNoTagsItem());
-            inventory.setItem(45, createRewardsItem());
-            return inventory;
-        }
-
-        int slot = 0;
-        for (String tagId : owned) {
-            TagDefinition definition = tagService.getRegistry().get(tagId);
-            if (definition == null) {
-                continue;
-            }
-            inventory.setItem(slot++, createTagItem(definition));
-            if (slot >= 53) {
-                break;
-            }
-        }
-
-        inventory.setItem(45, createRewardsItem());
-        inventory.setItem(53, createClearItem());
-        return inventory;
+    public Inventory create(Player player) { return create(player,0); }
+    public Inventory create(Player player,int requestedPage) {
+        TagMenuHolder holder=new TagMenuHolder(tagService);
+        Inventory inventory=Bukkit.createInventory(holder,54,TagTextFormat.deserializeCompat(tagService.getGuiTitle()));holder.setInventory(inventory);
+        var definitions=tagService.getPlayerData(player.getUniqueId()).getOwnedTags().stream().sorted()
+            .map(id->tagService.getRegistry().get(id)).filter(java.util.Objects::nonNull).toList();
+        int page=CollectionMenuLayout.page(requestedPage,definitions.size());
+        CollectionMenuLayout.frame(inventory,"Tags",page,definitions.size());
+        for(int i=page*21;i<Math.min(definitions.size(),(page+1)*21);i++) inventory.setItem(CollectionMenuLayout.SLOTS.get(i-page*21),createTagItem(definitions.get(i),tagService.getPlayerData(player.getUniqueId()).getSelectedTag()));
+        if(definitions.isEmpty()) inventory.setItem(31,createNoTagsItem());
+        inventory.setItem(45,createRewardsItem());inventory.setItem(46,createClearItem());
+        CollectionMenuLayout.button(inventory,tagService.getPlugin(),52,Material.FEATHER,"&bCosmetics","cosmetics");
+        CollectionMenuLayout.footer(inventory,tagService.getPlugin(),page,definitions.size());return inventory;
     }
 
     public NamespacedKey getTagIdKey() {
@@ -71,10 +56,11 @@ public final class TagMenu {
         return rewardsKey;
     }
 
-    private ItemStack createTagItem(TagDefinition tag) {
+    private ItemStack createTagItem(TagDefinition tag,String selected) {
         ItemStack stack = new ItemStack(tag.getIcon());
         ItemMeta meta = stack.getItemMeta();
         meta.displayName(TagTextFormat.deserializeCompat(tag.getDisplayName()));
+        meta.setEnchantmentGlintOverride(tag.getId().equalsIgnoreCase(selected));
         if (!tag.getDescription().isEmpty()) {
             List<Component> lore = new ArrayList<>();
             for (String line : tag.getDescription()) {

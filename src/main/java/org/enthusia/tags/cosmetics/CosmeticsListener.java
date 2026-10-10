@@ -26,6 +26,7 @@ import java.util.Locale;
 
 public final class CosmeticsListener implements Listener {
     private final CosmeticsService cosmeticsService;
+    private final TagService tagService;
     private final CosmeticsMenu cosmeticsMenu;
     private final TagMenu tagMenu;
     private final RewardService rewardService;
@@ -36,6 +37,7 @@ public final class CosmeticsListener implements Listener {
                              org.enthusia.tags.Messages messages,
                              RewardService rewardService) {
         this.cosmeticsService = cosmeticsService;
+        this.tagService = tagService;
         this.cosmeticsMenu = new CosmeticsMenu(cosmeticsService, tagService, messages);
         this.tagMenu = new TagMenu(tagService);
         this.rewardService = rewardService;
@@ -121,21 +123,39 @@ public final class CosmeticsListener implements Listener {
     }
 
     @EventHandler
+    public void onInventoryDrag(org.bukkit.event.inventory.InventoryDragEvent event) {
+        if(event.getView().getTopInventory().getHolder() instanceof CosmeticsMenuHolder) event.setCancelled(true);
+    }
+    private void navigate(Player player,CosmeticsMenuHolder holder,String action) {
+        org.bukkit.Bukkit.getScheduler().runTask(tagService.getPlugin(),()->{
+            if(!player.isOnline() || !player.hasPermission("enthusia.cosmetics.use") || player.getOpenInventory().getTopInventory().getHolder()!=holder) return;
+            if(action.equals("close")) player.closeInventory();
+            else if(action.equals("rewards")) player.performCommand("rewards");
+            else if(action.startsWith("page:")) {
+                int page=Integer.parseInt(action.substring(5));
+                player.openInventory(holder.getCategory()==null ? cosmeticsMenu.createMain(player,page) : cosmeticsMenu.createCategory(player,holder.getCategory(),page));
+            }
+        });
+    }
+    @EventHandler
     public void onInventoryClick(InventoryClickEvent event) {
         InventoryHolder holder = event.getView().getTopInventory().getHolder();
-        if (!(holder instanceof CosmeticsMenuHolder)) {
+        if (!(holder instanceof CosmeticsMenuHolder cosmeticHolder) || cosmeticHolder.getCosmeticsService()!=cosmeticsService) {
             return;
         }
         event.setCancelled(true);
-        if (!(event.getWhoClicked() instanceof Player player)) {
+        if (!(event.getWhoClicked() instanceof Player player) || !player.hasPermission("enthusia.cosmetics.use")) {
             return;
         }
+        if(event.getClickedInventory()!=event.getView().getTopInventory() || !event.isLeftClick()) return;
         ItemStack clicked = event.getCurrentItem();
         if (clicked == null || !clicked.hasItemMeta()) {
             return;
         }
         ItemMeta meta = clicked.getItemMeta();
         PersistentDataContainer data = meta.getPersistentDataContainer();
+        String navigation=data.get(org.enthusia.tags.CollectionMenuLayout.actionKey(tagService.getPlugin()),PersistentDataType.STRING);
+        if(navigation!=null) { navigate(player,(CosmeticsMenuHolder)holder,navigation); return; }
         if (data.has(cosmeticsMenu.getBackKey(), PersistentDataType.BYTE)) {
             player.openInventory(cosmeticsMenu.createMain(player));
             return;
@@ -163,6 +183,6 @@ public final class CosmeticsListener implements Listener {
                 .deserialize(cosmeticsService.formatMessage("cosmetics-locked-msg")));
             return;
         }
-        player.openInventory(cosmeticsMenu.createCategory(player, cosmetic.getCategory()));
+        player.openInventory(cosmeticsMenu.createCategory(player, cosmetic.getCategory(),cosmeticHolder.getPage()));
     }
 }

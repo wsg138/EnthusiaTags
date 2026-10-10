@@ -12,6 +12,7 @@ import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.persistence.PersistentDataType;
 import org.enthusia.tags.Messages;
+import org.enthusia.tags.CollectionMenuLayout;
 import org.enthusia.tags.TagService;
 
 import java.util.ArrayList;
@@ -39,43 +40,32 @@ public final class CosmeticsMenu {
         this.tagsKey = new NamespacedKey(tagService.getPlugin(), "cosmetics_tags");
     }
 
-    public Inventory createMain(Player player) {
-        CosmeticsMenuHolder holder = new CosmeticsMenuHolder(cosmeticsService, null);
-        Component title = LegacyComponentSerializer.legacyAmpersand()
-            .deserialize(messages.get("cosmetics-gui-title"));
-        Inventory inventory = Bukkit.createInventory(holder, INVENTORY_SIZE, title);
-        holder.setInventory(inventory);
-
-        int slot = 0;
-        for (CosmeticsCategory category : cosmeticsService.getCategories().values()) {
-            if (slot >= NAVIGATION_SLOT) {
-                break;
-            }
-            inventory.setItem(slot++, createCategoryItem(category));
-        }
-        inventory.setItem(NAVIGATION_SLOT, createTagsItem());
-        return inventory;
+    public Inventory createMain(Player player) { return createMain(player,0); }
+    public Inventory createMain(Player player,int requestedPage) {
+        var choices=new java.util.ArrayList<>(cosmeticsService.getCategories().values());
+        var holder=new CosmeticsMenuHolder(cosmeticsService,null);
+        var inventory=Bukkit.createInventory(holder,54,LegacyComponentSerializer.legacyAmpersand().deserialize(messages.get("cosmetics-gui-title")));holder.setInventory(inventory);
+        int page=CollectionMenuLayout.page(requestedPage,choices.size());holder.setPage(page);
+        CollectionMenuLayout.frame(inventory,"Cosmetics",page,choices.size());
+        for(int i=page*21;i<Math.min(choices.size(),(page+1)*21);i++) inventory.setItem(CollectionMenuLayout.SLOTS.get(i-page*21),createCategoryItem(choices.get(i)));
+        navigation(inventory,page,choices.size());return inventory;
     }
-
-    public Inventory createCategory(Player player, String categoryId) {
-        CosmeticsMenuHolder holder = new CosmeticsMenuHolder(cosmeticsService, categoryId);
-        CosmeticsCategory category = cosmeticsService.getCategories().get(categoryId);
-        String titleText = category == null
-            ? messages.get("cosmetics-gui-title")
-            : messages.get("cosmetics-category-title").replace("{category}", category.name());
-        Component title = LegacyComponentSerializer.legacyAmpersand().deserialize(titleText);
-        Inventory inventory = Bukkit.createInventory(holder, INVENTORY_SIZE, title);
-        holder.setInventory(inventory);
-
-        int slot = 0;
-        for (CosmeticDefinition cosmetic : categoryChoices(cosmeticsService.getCosmetics().values(), categoryId)) {
-            if (slot >= NAVIGATION_SLOT) {
-                break;
-            }
-            inventory.setItem(slot++, createCosmeticItem(player, cosmetic));
-        }
-        inventory.setItem(NAVIGATION_SLOT, createBackItem());
-        return inventory;
+    public Inventory createCategory(Player player,String categoryId) { return createCategory(player,categoryId,0); }
+    public Inventory createCategory(Player player,String categoryId,int requestedPage) {
+        var choices=categoryChoices(cosmeticsService.getCosmetics().values(),categoryId);
+        var category=cosmeticsService.getCategories().get(categoryId);
+        String title=category==null ? messages.get("cosmetics-gui-title") : messages.get("cosmetics-category-title").replace("{category}",category.name());
+        var holder=new CosmeticsMenuHolder(cosmeticsService,categoryId);
+        var inventory=Bukkit.createInventory(holder,54,LegacyComponentSerializer.legacyAmpersand().deserialize(title));holder.setInventory(inventory);
+        int page=CollectionMenuLayout.page(requestedPage,choices.size());holder.setPage(page);
+        CollectionMenuLayout.frame(inventory,title,page,choices.size());
+        for(int i=page*21;i<Math.min(choices.size(),(page+1)*21);i++) inventory.setItem(CollectionMenuLayout.SLOTS.get(i-page*21),createCosmeticItem(player,choices.get(i)));
+        navigation(inventory,page,choices.size());inventory.setItem(45,createBackItem());return inventory;
+    }
+    private void navigation(Inventory inventory,int page,int count) {
+        inventory.setItem(46,createTagsItem());
+        CollectionMenuLayout.button(inventory,tagService.getPlugin(),52,org.bukkit.Material.CHEST,"&6Rewards","rewards");
+        CollectionMenuLayout.footer(inventory,tagService.getPlugin(),page,count);
     }
 
     public NamespacedKey getCosmeticKey() {

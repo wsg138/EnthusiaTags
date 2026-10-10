@@ -115,3 +115,5 @@ The user explicitly authorized the remaining non-guild WarzoneDuels advancement 
 
 - REQ-920: WHEN Holidays is browsed THE SYSTEM SHALL retain the production 45-slot framed dashboard, seven-category pagination, 54-slot framed browser, existing controls and reward actions while adding Holidays and nested seasonal catalogs.
 - REQ-921: WHEN a seasonal catalog is browsed THE SYSTEM SHALL show earned or locked tags without claiming event awards and return Back to the parent holiday category.
+
+- REQ-960: WHEN Tags, Cosmetics or KOTH progression is browsed THE SYSTEM SHALL retain the production rewards frame, reserved controls, pagination and provider-owned award authority.

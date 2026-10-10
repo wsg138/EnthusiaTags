@@ -60,6 +60,7 @@ public final class RewardListener implements Listener {
     private record Interaction(Player player, RewardMenuHolder holder, RewardMenuAction action, boolean reverse) {}
     private java.util.Map<RewardMenuAction.Type, java.util.function.Consumer<Interaction>> handlers() {
         return java.util.Map.ofEntries(
+            java.util.Map.entry(RewardMenuAction.Type.KOTH, input -> menu.openKoth(input.player(),"home")), 
             java.util.Map.entry(RewardMenuAction.Type.CATEGORY, input -> { menu.navigate(input.player(),input.holder(),RewardMenuState.category(input.action().value())); }),
             java.util.Map.entry(RewardMenuAction.Type.BACK, input -> { menu.navigate(input.player(),input.holder(),menu.parentState(input.holder().getCategory())); }),
             java.util.Map.entry(RewardMenuAction.Type.READY, input -> { menu.navigate(input.player(),input.holder(),RewardMenuState.ready()); }),

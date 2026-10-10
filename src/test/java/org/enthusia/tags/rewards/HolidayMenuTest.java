@@ -59,6 +59,11 @@ class HolidayMenuTest {
             data.getOwnedTags().add("pumpkin_hunter"); menu.createCategory(player,"halloween");
             verify(slots.get(19).getItemMeta()).lore(argThat(lines->lines.stream().anyMatch(line->net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer.plainText().serialize(line).contains("Earned"))));
             assertEquals("holidays",menu.parentState("halloween").category()); assertEquals(RewardMenuState.View.DASHBOARD,menu.parentState("holidays").view());
+            var server=mock(Server.class);var plugins=mock(org.bukkit.plugin.PluginManager.class);
+            when(plugin.getServer()).thenReturn(server);when(server.getPluginManager()).thenReturn(plugins);
+            when(plugins.getPlugin("EnthusiaKOTH")).thenReturn(mock(org.bukkit.plugin.Plugin.class));
+            menu.create(player,RewardMenuState.dashboard().withPage(1));
+            assertTrue(java.util.stream.IntStream.range(0,45).mapToObj(held[0]::action).filter(Objects::nonNull).anyMatch(a->a.type()==RewardMenuAction.Type.KOTH));
             verify(service,never()).claimAsync(any(),any());
         }
     }

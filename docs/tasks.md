@@ -318,3 +318,9 @@ Evidence: Production JAR unique-mail-test.1 downloaded read-only; javap confirms
 Status: spec; TEST rollback underway; no production writes.
 
 T-920 Status: local269 tests,12 tooling tests and EARS pass. Existing production browser recovered; sameframe seasonal navigation implemented. TEST rollback verified, corrected TEST activation and exact-head hosted review pending.
+
+## T-960 [TDD] Consistent collection and KOTH menus
+References: REQ-960.
+Evidence: Existing Tags and Cosmetics fill slots zero onward and truncate collections; KOTH uses an unframed 28-entry inventory. Regression covers reserved frame slots and paging.
+Status: spec.
+T-960 Status: 273 Java tests pass, zero failures/errors/skips; 12 SPEAR tooling tests and EARS pass. Actual newly built KOTH shadow JAR/Tags JAR navigation contract passes. Shared layout is infrastructure presentation; existing grant/claim storage is unchanged. Hosted final-head checks and in-game acceptance remain separate.

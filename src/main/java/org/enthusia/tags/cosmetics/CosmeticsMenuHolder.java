@@ -7,6 +7,9 @@ public final class CosmeticsMenuHolder implements InventoryHolder {
     private final CosmeticsService cosmeticsService;
     private final String category;
     private Inventory inventory;
+    private int page;
+    public int getPage() { return page; }
+    public void setPage(int page) { this.page=page; }
 
     public CosmeticsMenuHolder(CosmeticsService cosmeticsService, String category) {
         this.cosmeticsService = cosmeticsService;

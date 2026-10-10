@@ -42,6 +42,9 @@ public final class RewardMenu implements AutoCloseable {
         rewardKey = new NamespacedKey(plugin,"reward_id"); categoryKey = new NamespacedKey(plugin,"reward_category");
         backKey = new NamespacedKey(plugin,"reward_back"); nextKey = new NamespacedKey(plugin,"reward_next"); prevKey = new NamespacedKey(plugin,"reward_prev");
     }
+    public void openKoth(Player player, String page) {
+        if (!new KothRewardsHook(plugin.getServer()).open(player,page)) player.sendMessage(net.kyori.adventure.text.Component.text("KOTH rewards are unavailable. Ask staff to check the KOTH menu integration."));
+    }
     public Inventory create(Player player) { return create(player, RewardMenuState.dashboard()); }
     public Inventory createCategory(Player player, String category) { return create(player, RewardMenuState.category(category)); }
     public Inventory createCategory(Player player, String category, int page) { return create(player, RewardMenuState.category(category).withPage(page)); }
@@ -104,6 +107,7 @@ public final class RewardMenu implements AutoCloseable {
             String category = reward.getCategory().toLowerCase(Locale.ROOT);
             categories.putIfAbsent(category,defaultCategory(category));
         }
+        if (plugin.getServer() != null && plugin.getServer().getPluginManager() != null && new KothRewardsHook(plugin.getServer()).installed()) categories.put("koth",new RewardCategory("koth","KOTH",Material.NETHER_STAR));
         var ids = new ArrayList<>(categories.keySet());
         var progress = service.getProgressSnapshot(player);
         var rows = new ArrayList<RewardMenuModel.Entry>();
@@ -316,9 +320,9 @@ public final class RewardMenu implements AutoCloseable {
             List.of("&7Eligible rewards from every category.","&7Each reward is claimed individually.","","&eClick to browse"),count>0),READY);
     }
     private void putCategory(RewardMenuHolder holder,int slot,RewardCategory category,RewardMenuModel.Summary summary,boolean selected) {
-        ItemStack item=items.category(category,summary,selected);
+        ItemStack item="koth".equals(category.id()) ? RewardMenuItems.item(Material.NETHER_STAR,"&6KOTH","&7Challenges, earned rewards and match results.","&7KOTH owns progress and claims.","&eClick to open") : items.category(category,summary,selected);
         var meta=item.getItemMeta();meta.getPersistentDataContainer().set(categoryKey,PersistentDataType.STRING,category.id());item.setItemMeta(meta);
-        put(holder,slot,item,new RewardMenuAction(CATEGORY,category.id()));
+        put(holder,slot,item,new RewardMenuAction("koth".equals(category.id()) ? KOTH : CATEGORY,category.id()));
     }
     private void put(RewardMenuHolder holder,int slot,ItemStack item,RewardMenuAction.Type type) { put(holder,slot,item,new RewardMenuAction(type)); }
     private void put(RewardMenuHolder holder,int slot,ItemStack item,RewardMenuAction action) { holder.getInventory().setItem(slot,item);holder.action(slot,action); }

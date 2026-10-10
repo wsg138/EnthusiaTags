@@ -92,14 +92,15 @@ public final class TagListener implements Listener {
     @EventHandler
     public void onInventoryClick(InventoryClickEvent event) {
         InventoryHolder holder = event.getView().getTopInventory().getHolder();
-        if (!(holder instanceof TagMenuHolder)) {
+        if (!(holder instanceof TagMenuHolder tagHolder) || tagHolder.getTagService()!=tagService) {
             return;
         }
         event.setCancelled(true);
-        if (!(event.getWhoClicked() instanceof Player player)) {
+        if (!(event.getWhoClicked() instanceof Player player) || !player.hasPermission("enthusia.tags.use")) {
             return;
         }
 
+        if(event.getClickedInventory()!=event.getView().getTopInventory() || !event.isLeftClick()) return;
         ItemStack clicked = event.getCurrentItem();
         if (clicked == null || !clicked.hasItemMeta()) {
             return;
@@ -107,6 +108,8 @@ public final class TagListener implements Listener {
         ItemMeta meta = clicked.getItemMeta();
         PersistentDataContainer data = meta.getPersistentDataContainer();
 
+        String navigation=data.get(org.enthusia.tags.CollectionMenuLayout.actionKey(tagService.getPlugin()),PersistentDataType.STRING);
+        if(navigation!=null) { navigate(player,(TagMenuHolder)holder,navigation); return; }
         if (data.has(tagMenu.getRewardsKey(), PersistentDataType.BYTE)) {
             if (!rewardService.isAvailable()) {
                 player.sendMessage(message("rewards-service-unavailable"));
@@ -131,6 +134,18 @@ public final class TagListener implements Listener {
         player.sendMessage(updated ? message("tag-selected-self") : message("tag-not-owned-self"));
     }
 
+
+    @EventHandler public void onInventoryDrag(org.bukkit.event.inventory.InventoryDragEvent event) {
+        if(event.getView().getTopInventory().getHolder() instanceof TagMenuHolder) event.setCancelled(true);
+    }
+    private void navigate(Player player,TagMenuHolder holder,String action) {
+        Bukkit.getScheduler().runTask(tagService.getPlugin(),()->{
+            if(!player.isOnline() || !player.hasPermission("enthusia.tags.use") || player.getOpenInventory().getTopInventory().getHolder()!=holder) return;
+            if(action.equals("close")) player.closeInventory();
+            else if(action.equals("cosmetics")) player.performCommand("cosmetics");
+            else if(action.startsWith("page:")) player.openInventory(tagMenu.create(player,Integer.parseInt(action.substring(5))));
+        });
+    }
     private void reconcilePortableEntitlements(Player player) {
         if (!player.isOnline()) {
             return;
