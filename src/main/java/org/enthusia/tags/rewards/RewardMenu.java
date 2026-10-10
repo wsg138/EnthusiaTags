@@ -22,6 +22,7 @@ import static org.enthusia.tags.rewards.RewardMenuAction.Type.*;
 
 public final class RewardMenu implements AutoCloseable {
     private static final int BROWSER_SIZE = 54;
+    private static final String KOTH_CATEGORY = "koth";
     private final RewardService service;
     private final Plugin plugin;
     private final TagService tags;
@@ -107,7 +108,7 @@ public final class RewardMenu implements AutoCloseable {
             String category = reward.getCategory().toLowerCase(Locale.ROOT);
             categories.putIfAbsent(category,defaultCategory(category));
         }
-        if (plugin.getServer() != null && plugin.getServer().getPluginManager() != null && new KothRewardsHook(plugin.getServer()).installed()) categories.put("koth",new RewardCategory("koth","KOTH",Material.NETHER_STAR));
+        if (plugin.getServer() != null && plugin.getServer().getPluginManager() != null && new KothRewardsHook(plugin.getServer()).installed()) categories.put(KOTH_CATEGORY,new RewardCategory(KOTH_CATEGORY,"KOTH",Material.NETHER_STAR));
         var ids = new ArrayList<>(categories.keySet());
         var progress = service.getProgressSnapshot(player);
         var rows = new ArrayList<RewardMenuModel.Entry>();
@@ -320,9 +321,9 @@ public final class RewardMenu implements AutoCloseable {
             List.of("&7Eligible rewards from every category.","&7Each reward is claimed individually.","","&eClick to browse"),count>0),READY);
     }
     private void putCategory(RewardMenuHolder holder,int slot,RewardCategory category,RewardMenuModel.Summary summary,boolean selected) {
-        ItemStack item="koth".equals(category.id()) ? RewardMenuItems.item(Material.NETHER_STAR,"&6KOTH","&7Challenges, earned rewards and match results.","&7KOTH owns progress and claims.","&eClick to open") : items.category(category,summary,selected);
+        ItemStack item=KOTH_CATEGORY.equals(category.id()) ? RewardMenuItems.item(Material.NETHER_STAR,"&6KOTH","&7Challenges, earned rewards and match results.","&7KOTH owns progress and claims.","&eClick to open") : items.category(category,summary,selected);
         var meta=item.getItemMeta();meta.getPersistentDataContainer().set(categoryKey,PersistentDataType.STRING,category.id());item.setItemMeta(meta);
-        put(holder,slot,item,new RewardMenuAction("koth".equals(category.id()) ? KOTH : CATEGORY,category.id()));
+        put(holder,slot,item,new RewardMenuAction(KOTH_CATEGORY.equals(category.id()) ? KOTH : CATEGORY,category.id()));
     }
     private void put(RewardMenuHolder holder,int slot,ItemStack item,RewardMenuAction.Type type) { put(holder,slot,item,new RewardMenuAction(type)); }
     private void put(RewardMenuHolder holder,int slot,ItemStack item,RewardMenuAction action) { holder.getInventory().setItem(slot,item);holder.action(slot,action); }
