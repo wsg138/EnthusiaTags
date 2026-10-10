@@ -10,4 +10,6 @@ Proof: observed red enabled-owner assertion followed by green. Full Maven verifi
 
 Architecture: optional Bukkit/reflection adapter stays in existing infrastructure rewards package. LayerRulesTest passes. Domain, payout/eligibility/IP ownership, exclusive claims and native categories are unchanged. No network/plugin load-order dependency cycle was added: lookup is lazy after KOTH enablement.
 
+Hosted review refinement: initial 7e331bc Codacy check 114261041579 reported eight style/complexity findings. Provider resolution and artifact probe were decomposed; repeated literals centralized. The only dispositions are narrow private-method PMD.UseProperClassLoader annotations: this Bukkit owner/explicit artifact contract must not use a J2EE thread context classloader. No analyzer excludes or gate changes. The same 256-test verification and actual-artifact probe pass after refinement; hosted final-head checks remain separate.
+
 Interactive schematic: https://enthusia-koth-setup-preview.awareyak.chatgpt.site/cleanup.html. Owner-private sign-in; local 390x844 layout checks pass. Website example states do not issue rewards; actual server/client and mobile sign-in acceptance remain pending. No server upload or restart occurred for this change.
