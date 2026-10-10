@@ -22,6 +22,10 @@ public final class TagMenu {
         28,29,30,31,32,33,34,
         37,38,39,40,41,42,43);
     private static final int PAGE_SIZE = CONTENT_SLOTS.size();
+    private static final String ALL = "all";
+    private static final String LEGACY = "legacy";
+    private static final String SUPPORTER = "supporter";
+    private static final String ADVANCEMENT_EVENT = "advancement_event";
 
     private final TagService tagService;
     private final EnthusiaTagsPlugin plugin;
@@ -52,13 +56,13 @@ public final class TagMenu {
     }
 
     public Inventory create(Player player) {
-        return create(player, "all", 0, false);
+        return create(player, ALL, 0, false);
     }
 
-    public Inventory create(Player player, int page) { return create(player, "all", page, false); }
+    public Inventory create(Player player, int page) { return create(player, ALL, page, false); }
 
     public Inventory create(Player player, boolean preview) {
-        return create(player, "all", 0, preview);
+        return create(player, ALL, 0, preview);
     }
 
     public Inventory create(Player player, String filter, int requestedPage, boolean preview) {
@@ -76,10 +80,17 @@ public final class TagMenu {
         frame(inventory);
         PlayerTagData data = tagService.getPlayerData(player.getUniqueId());
         inventory.setItem(4, header(data, tags.size(), normalizedFilter, adminPreview));
-        putFilter(inventory, 10, "all", Material.NAME_TAG, "&fAll Tags", normalizedFilter);
-        putFilter(inventory, 12, "legacy", Material.ECHO_SHARD, "&bLegacy", normalizedFilter);
-        putFilter(inventory, 14, "supporter", Material.GOLD_INGOT, "&6Supporter", normalizedFilter);
-        putFilter(inventory, 16, "advancement_event", Material.NETHER_STAR, "&dAdvancement / Event", normalizedFilter);
+        populateFilters(player, inventory, normalizedFilter, adminPreview);
+        populateTags(inventory, data, tags, page, adminPreview);
+        populateFooter(inventory, data, tags.size(), page, pageCount);
+        return inventory;
+    }
+
+    private void populateFilters(Player player, Inventory inventory, String normalizedFilter, boolean adminPreview) {
+        putFilter(inventory, 10, ALL, Material.NAME_TAG, "&fAll Tags", normalizedFilter);
+        putFilter(inventory, 12, LEGACY, Material.ECHO_SHARD, "&bLegacy", normalizedFilter);
+        putFilter(inventory, 14, SUPPORTER, Material.GOLD_INGOT, "&6Supporter", normalizedFilter);
+        putFilter(inventory, 16, ADVANCEMENT_EVENT, Material.NETHER_STAR, "&dAdvancement / Event", normalizedFilter);
         if (player.hasPermission("enthusia.tags.admin")) {
             inventory.setItem(17, action(Material.SPYGLASS,
                 adminPreview ? "&eAdmin Preview: &aON" : "&eAdmin Preview: &cOFF",
@@ -91,6 +102,9 @@ public final class TagMenu {
                     "&eClick to toggle"), previewKey));
         }
 
+    }
+
+    private void populateTags(Inventory inventory, PlayerTagData data, List<TagDefinition> tags, int page, boolean adminPreview) {
         int from = page * PAGE_SIZE;
         int to = Math.min(tags.size(), from + PAGE_SIZE);
         for (int i = from; i < to; i++) {
@@ -102,17 +116,19 @@ public final class TagMenu {
                 "&7Try another filter.", adminPreview ? "&7Preview is showing the full catalog." : "&7Earn tags through rewards and events."));
         }
 
+    }
+
+    private void populateFooter(Inventory inventory, PlayerTagData data, int tagCount, int page, int pageCount) {
         inventory.setItem(45, action(Material.CHEST, "&6Rewards",
             List.of("&7Open your reward browser.", "&eClick to open"), rewardsKey));
         if (page > 0) inventory.setItem(46, action(Material.ARROW, "&fPrevious Page", List.of("&eClick"), prevKey));
         inventory.setItem(47, action(Material.FEATHER, "&bCosmetics",
             List.of("&7Open the cosmetics browser.", "&eClick to open"), cosmeticsKey));
         inventory.setItem(49, plain(Material.PAPER, "&fPage " + (page + 1) + " &8/ &f" + pageCount,
-            "&7Showing " + tags.size() + (tags.size() == 1 ? " tag" : " tags") + "."));
+            "&7Showing " + tagCount + (tagCount == 1 ? " tag" : " tags") + "."));
         inventory.setItem(51, clearItem(data));
         if (page + 1 < pageCount) inventory.setItem(52, action(Material.ARROW, "&fNext Page", List.of("&eClick"), nextKey));
         inventory.setItem(53, action(Material.BARRIER, "&cClose", List.of("&7Close this menu."), closeKey));
-        return inventory;
     }
 
     private void frame(Inventory inventory) {
@@ -150,7 +166,18 @@ public final class TagMenu {
         boolean owned = data.getOwnedTags().contains(tag.getId().toLowerCase(Locale.ROOT));
         boolean selected = tag.getId().equalsIgnoreCase(data.getSelectedTag());
         List<String> lore = new ArrayList<>(tag.getDescription());
-        List<Source> sources = entitlements == null ? List.of() : entitlements.definitionsForTag(tag.getId());
+        addTagSources(lore, tag);
+        addTagStatus(lore, selected, owned, preview);
+        ItemStack item = plain(tag.getIcon(), tag.getDisplayName(), lore.toArray(String[]::new));
+        ItemMeta meta = item.getItemMeta();
+        meta.setEnchantmentGlintOverride(selected);
+        meta.getPersistentDataContainer().set(tagIdKey, PersistentDataType.STRING, tag.getId().toLowerCase(Locale.ROOT));
+        item.setItemMeta(meta);
+        return item;
+    }
+
+    private void addTagSources(List<String> lore, TagDefinition tag) {
+        List<Source> sources = entitlements.definitionsForTag(tag.getId());
         if (!sources.isEmpty()) {
             lore.add("");
             lore.add("&7Source:");
@@ -159,6 +186,9 @@ public final class TagMenu {
             lore.add("");
             lore.add("&7Source: &fCustom Advancement");
         }
+    }
+
+    private void addTagStatus(List<String> lore, boolean selected, boolean owned, boolean preview) {
         lore.add("");
         if (selected) {
             lore.add("&a✓ Currently Selected");
@@ -171,12 +201,6 @@ public final class TagMenu {
             lore.add("&ePreview Only");
             lore.add("&7Not owned by your account.");
         }
-        ItemStack item = plain(tag.getIcon(), tag.getDisplayName(), lore.toArray(String[]::new));
-        ItemMeta meta = item.getItemMeta();
-        meta.setEnchantmentGlintOverride(selected);
-        meta.getPersistentDataContainer().set(tagIdKey, PersistentDataType.STRING, tag.getId().toLowerCase(Locale.ROOT));
-        item.setItemMeta(meta);
-        return item;
     }
 
     private ItemStack clearItem(PlayerTagData data) {
@@ -212,29 +236,33 @@ public final class TagMenu {
     }
 
     private boolean matchesFilter(TagDefinition tag, String filter) {
-        if ("all".equals(filter)) return true;
+        if (ALL.equals(filter)) return true;
         String id = tag.getId().toLowerCase(Locale.ROOT);
-        List<Source> sources = entitlements == null ? List.of() : entitlements.definitionsForTag(id);
+        List<Source> sources = entitlements.definitionsForTag(id);
         String joined = sources.stream().map(Source::source)
             .map(value -> value.toLowerCase(Locale.ROOT)).reduce("", (a, b) -> a + " " + b);
         return switch (filter) {
-            case "legacy" -> joined.contains("legacy");
-            case "supporter" -> joined.contains("supporter") || joined.contains("glorious");
-            case "advancement_event" -> id.startsWith("adv_") || joined.contains("event") || joined.contains("achievement");
+            case LEGACY -> joined.contains(LEGACY);
+            case SUPPORTER -> joined.contains(SUPPORTER) || joined.contains("glorious");
+            case ADVANCEMENT_EVENT -> isAdvancementOrEvent(id, joined);
             default -> true;
         };
     }
 
+    private boolean isAdvancementOrEvent(String id, String sources) {
+        return id.startsWith("adv_") || sources.contains("event") || sources.contains("achievement");
+    }
+
     private String normalizeFilter(String filter) {
-        String value = filter == null ? "all" : filter.toLowerCase(Locale.ROOT);
-        return Set.of("all", "legacy", "supporter", "advancement_event").contains(value) ? value : "all";
+        String value = filter == null ? ALL : filter.toLowerCase(Locale.ROOT);
+        return Set.of(ALL, LEGACY, SUPPORTER, ADVANCEMENT_EVENT).contains(value) ? value : ALL;
     }
 
     private String filterName(String filter) {
         return switch (filter) {
-            case "legacy" -> "Legacy";
-            case "supporter" -> "Supporter";
-            case "advancement_event" -> "Advancement / Event";
+            case LEGACY -> "Legacy";
+            case SUPPORTER -> "Supporter";
+            case ADVANCEMENT_EVENT -> "Advancement / Event";
             default -> "All";
         };
     }

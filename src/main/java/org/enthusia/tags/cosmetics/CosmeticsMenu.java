@@ -26,6 +26,10 @@ public final class CosmeticsMenu {
         37,38,39,40,41,42,43);
     private static final int PAGE_SIZE = CONTENT_SLOTS.size();
     private static final List<Integer> DASHBOARD_SLOTS = List.of(19, 21, 23, 25, 29, 31, 33);
+    private static final String ADMIN_PERMISSION = "enthusia.tags.admin";
+    private static final String COUNT_SEPARATOR = " &8/ &f";
+    private static final String CLICK_OPEN = "&eClick to open";
+    private static final String CLICK = "&eClick";
 
     private final CosmeticsService cosmeticsService;
     private final TagService tagService;
@@ -64,7 +68,7 @@ public final class CosmeticsMenu {
     public Inventory createMain(Player player, int page) { return createMain(player, page, false); }
     public Inventory createMain(Player player, boolean preview) { return createMain(player, 0, preview); }
     public Inventory createMain(Player player, int requestedPage, boolean preview) {
-        boolean adminPreview = preview && player.hasPermission("enthusia.tags.admin");
+        boolean adminPreview = preview && player.hasPermission(ADMIN_PERMISSION);
         int pageCount=Math.max(1,(cosmeticsService.getCategories().size()+6)/7);
         int page=Math.max(0,Math.min(requestedPage,pageCount-1));
         CosmeticsMenuHolder holder = new CosmeticsMenuHolder(cosmeticsService, null, page, adminPreview);
@@ -73,24 +77,33 @@ public final class CosmeticsMenu {
         holder.setInventory(inventory);
         frame(inventory);
 
+        populateMainHeader(player, inventory, adminPreview);
+        populateMainNavigation(player, inventory, adminPreview);
+        populateDashboard(player, inventory, page, adminPreview);
+        populateMainFooter(inventory, page, pageCount);
+        return inventory;
+    }
+
+    private void populateMainHeader(Player player, Inventory inventory, boolean adminPreview) {
         int total = cosmeticsService.getCosmetics().size();
         int unlocked = (int) cosmeticsService.getCosmetics().values().stream()
             .filter(cosmetic -> canUse(player, cosmetic)).count();
         long equipped = cosmeticsService.getCategories().keySet().stream()
             .filter(category -> cosmeticsService.getSelection(player.getUniqueId(), category) != null).count();
         long special = cosmeticsService.getCosmetics().values().stream()
-            .filter(cosmetic -> entitlements != null && !entitlements.definitionsForCosmetic(cosmetic.getId()).isEmpty())
+            .filter(cosmetic -> !entitlements.definitionsForCosmetic(cosmetic.getId()).isEmpty())
             .count();
 
         inventory.setItem(4, plain(Material.FEATHER, adminPreview ? "&eCosmetic Catalog Preview" : "&6Your Cosmetics",
-            "&7Unlocked: &f" + unlocked + " &8/ &f" + total,
+            "&7Unlocked: &f" + unlocked + COUNT_SEPARATOR + total,
             "&7Currently Equipped: &f" + equipped,
             "&7Special / Legacy: &f" + special,
             adminPreview ? "" : "&7Choose a category below.",
             adminPreview ? "&eADMIN PREVIEW &7- read-only" : ""));
 
-        populateMainNavigation(player, inventory, adminPreview);
+    }
 
+    private void populateDashboard(Player player, Inventory inventory, int page, boolean adminPreview) {
         List<CosmeticsCategory> categories = new ArrayList<>(cosmeticsService.getCategories().values());
         categories.sort(Comparator.comparing(CosmeticsCategory::id));
         for (int i = 0; i < DASHBOARD_SLOTS.size() && page*7+i < categories.size(); i++) {
@@ -98,10 +111,13 @@ public final class CosmeticsMenu {
             inventory.setItem(DASHBOARD_SLOTS.get(i), createCategoryItem(player, category, adminPreview));
         }
 
+    }
+
+    private void populateMainFooter(Inventory inventory, int page, int pageCount) {
         inventory.setItem(45, action(Material.CHEST, "&6Rewards",
-            List.of("&7Browse progression and entitlement rewards.", "&eClick to open"), rewardsKey));
+            List.of("&7Browse progression and entitlement rewards.", CLICK_OPEN), rewardsKey));
         inventory.setItem(47, action(Material.NAME_TAG, "&bTags",
-            List.of("&7Browse and equip your tags.", "&eClick to open"), tagsKey));
+            List.of("&7Browse and equip your tags.", CLICK_OPEN), tagsKey));
         inventory.setItem(49, plain(Material.BOOK, "&fHow Cosmetics Work",
             "&7Owned cosmetics can be equipped from category pages.",
             "&7Legacy and supporter cosmetics explain their source.",
@@ -109,13 +125,12 @@ public final class CosmeticsMenu {
             "",
             "&7Admin preview is read-only."));
         inventory.setItem(53, action(Material.BARRIER, "&cClose", List.of("&7Close this menu."), closeKey));
-        if(page>0) inventory.setItem(46,action(Material.ARROW,"&fPrevious Page",List.of("&eClick"),prevKey));
-        if(page+1<pageCount) inventory.setItem(52,action(Material.ARROW,"&fNext Page",List.of("&eClick"),nextKey));
-        return inventory;
+        if(page>0) inventory.setItem(46,action(Material.ARROW,"&fPrevious Page",List.of(CLICK),prevKey));
+        if(page+1<pageCount) inventory.setItem(52,action(Material.ARROW,"&fNext Page",List.of(CLICK),nextKey));
     }
 
     private void populateMainNavigation(Player player, Inventory inventory, boolean adminPreview) {
-        if (player.hasPermission("enthusia.tags.admin")) {
+        if (player.hasPermission(ADMIN_PERMISSION)) {
             inventory.setItem(14, action(Material.SPYGLASS,
                 adminPreview ? "&eAdmin Preview: &aON" : "&eAdmin Preview: &cOFF",
                 List.of(adminPreview
@@ -126,9 +141,9 @@ public final class CosmeticsMenu {
                     "&eClick to toggle"), previewKey));
         }
         inventory.setItem(10, action(Material.NAME_TAG, "&bTags",
-            List.of("&7Open your tag collection.", "&eClick to open"), tagsKey));
+            List.of("&7Open your tag collection.", CLICK_OPEN), tagsKey));
         inventory.setItem(16, action(Material.CHEST, "&6Rewards",
-            List.of("&7Open the rewards browser.", "&eClick to open"), rewardsKey));
+            List.of("&7Open the rewards browser.", CLICK_OPEN), rewardsKey));
     }
 
     public Inventory createCategory(Player player, String categoryId) {
@@ -137,7 +152,7 @@ public final class CosmeticsMenu {
 
     public Inventory createCategory(Player player, String categoryId, int page) { return createCategory(player,categoryId,page,false); }
     public Inventory createCategory(Player player, String categoryId, int requestedPage, boolean preview) {
-        boolean adminPreview = preview && player.hasPermission("enthusia.tags.admin");
+        boolean adminPreview = preview && player.hasPermission(ADMIN_PERMISSION);
         CosmeticsCategory category = cosmeticsService.getCategories().get(categoryId);
         List<CosmeticDefinition> choices = categoryChoices(cosmeticsService.getCosmetics().values(), categoryId);
         int pageCount = Math.max(1, (choices.size() + PAGE_SIZE - 1) / PAGE_SIZE);
@@ -150,25 +165,44 @@ public final class CosmeticsMenu {
         holder.setInventory(inventory);
         frame(inventory);
 
+        populateCategoryHeader(player, inventory, categoryId, category, choices, adminPreview);
+        populateCategoryNavigation(player, inventory, adminPreview);
+        populateChoices(player, inventory, choices, page, adminPreview);
+        populateCategoryFooter(inventory, choices.size(), page, pageCount);
+        return inventory;
+    }
+
+    private void populateCategoryHeader(Player player, Inventory inventory, String categoryId,
+                                        CosmeticsCategory category, List<CosmeticDefinition> choices, boolean adminPreview) {
         int unlocked = (int) choices.stream().filter(cosmetic -> canUse(player, cosmetic)).count();
         String selectedId = cosmeticsService.getSelection(player.getUniqueId(), categoryId);
         CosmeticDefinition selected = selectedId == null ? null : cosmeticsService.getCosmetics().get(selectedId.toLowerCase(Locale.ROOT));
-        inventory.setItem(4, plain(category == null || category.icon() == null ? Material.PAPER : category.icon(),
+        inventory.setItem(4, plain(categoryIcon(category),
             category == null ? "&fCosmetics" : category.name(),
-            "&7Unlocked: &f" + unlocked + " &8/ &f" + choices.size(),
+            "&7Unlocked: &f" + unlocked + COUNT_SEPARATOR + choices.size(),
             "&7Selected: " + (selected == null ? "&fNone" : selected.getName()),
             adminPreview ? "&eADMIN PREVIEW &7- read-only" : "&7Click an available cosmetic to equip it."));
 
-        if (player.hasPermission("enthusia.tags.admin")) {
+    }
+
+    private Material categoryIcon(CosmeticsCategory category) {
+        return category == null || category.icon() == null ? Material.PAPER : category.icon();
+    }
+
+    private void populateCategoryNavigation(Player player, Inventory inventory, boolean adminPreview) {
+        if (player.hasPermission(ADMIN_PERMISSION)) {
             inventory.setItem(14, action(Material.SPYGLASS,
                 adminPreview ? "&eAdmin Preview: &aON" : "&eAdmin Preview: &cOFF",
                 List.of("&7Preview never persists cosmetic selections.", "", "&eClick to toggle"), previewKey));
         }
         inventory.setItem(10, action(Material.NAME_TAG, "&bTags",
-            List.of("&7Open your tag collection.", "&eClick to open"), tagsKey));
+            List.of("&7Open your tag collection.", CLICK_OPEN), tagsKey));
         inventory.setItem(16, action(Material.CHEST, "&6Rewards",
-            List.of("&7Open the rewards browser.", "&eClick to open"), rewardsKey));
+            List.of("&7Open the rewards browser.", CLICK_OPEN), rewardsKey));
 
+    }
+
+    private void populateChoices(Player player, Inventory inventory, List<CosmeticDefinition> choices, int page, boolean adminPreview) {
         int from = page * PAGE_SIZE;
         int to = Math.min(choices.size(), from + PAGE_SIZE);
         for (int i = from; i < to; i++) {
@@ -179,14 +213,16 @@ public final class CosmeticsMenu {
                 "&7This category does not contain any cosmetics."));
         }
 
+    }
+
+    private void populateCategoryFooter(Inventory inventory, int choiceCount, int page, int pageCount) {
         inventory.setItem(45, action(Material.BOOK, "&fCategories",
             List.of("&7Return to the cosmetics dashboard.", "&eClick to go back"), backKey));
-        if (page > 0) inventory.setItem(47, action(Material.ARROW, "&fPrevious Page", List.of("&eClick"), prevKey));
-        inventory.setItem(49, plain(Material.PAPER, "&fPage " + (page + 1) + " &8/ &f" + pageCount,
-            "&7" + choices.size() + (choices.size() == 1 ? " cosmetic" : " cosmetics") + " in this category."));
-        if (page + 1 < pageCount) inventory.setItem(51, action(Material.ARROW, "&fNext Page", List.of("&eClick"), nextKey));
+        if (page > 0) inventory.setItem(47, action(Material.ARROW, "&fPrevious Page", List.of(CLICK), prevKey));
+        inventory.setItem(49, plain(Material.PAPER, "&fPage " + (page + 1) + COUNT_SEPARATOR + pageCount,
+            "&7" + choiceCount + (choiceCount == 1 ? " cosmetic" : " cosmetics") + " in this category."));
+        if (page + 1 < pageCount) inventory.setItem(51, action(Material.ARROW, "&fNext Page", List.of(CLICK), nextKey));
         inventory.setItem(53, action(Material.BARRIER, "&cClose", List.of("&7Close this menu."), closeKey));
-        return inventory;
     }
 
     public NamespacedKey getCosmeticKey() { return cosmeticKey; }
@@ -213,7 +249,7 @@ public final class CosmeticsMenu {
         List<String> lore = new ArrayList<>();
         lore.add(categoryDescription(category.id()));
         lore.add("");
-        lore.add("&7Unlocked: &f" + unlocked + " &8/ &f" + entries.size());
+        lore.add("&7Unlocked: &f" + unlocked + COUNT_SEPARATOR + entries.size());
         lore.add("&7Selected: " + (selected == null ? "&fNone" : selected.getName()));
         if (preview) lore.add("&ePreviewing full catalog");
         lore.add("");
@@ -231,11 +267,23 @@ public final class CosmeticsMenu {
         boolean active = has && selected != null && selected.equalsIgnoreCase(cosmetic.getId());
         List<String> lore = new ArrayList<>();
 
+        addCosmeticSources(lore, cosmetic);
+        addCosmeticStatus(lore, active, has, preview);
+
+        ItemStack stack = plain(cosmetic.getIcon(), cosmetic.getName(), lore.toArray(String[]::new));
+        ItemMeta meta = stack.getItemMeta();
+        meta.setEnchantmentGlintOverride(active);
+        meta.getPersistentDataContainer().set(cosmeticKey, PersistentDataType.STRING, cosmetic.getId());
+        stack.setItemMeta(meta);
+        return stack;
+    }
+
+    private void addCosmeticSources(List<String> lore, CosmeticDefinition cosmetic) {
         if (cosmetic.getType() == CosmeticType.ORIGINAL) {
             lore.add("&7Use the server's normal message/effect.");
         }
 
-        List<Source> sources = entitlements == null ? List.of() : entitlements.definitionsForCosmetic(cosmetic.getId());
+        List<Source> sources = entitlements.definitionsForCosmetic(cosmetic.getId());
         if (!sources.isEmpty()) {
             lore.add("");
             lore.add("&7Source:");
@@ -247,6 +295,9 @@ public final class CosmeticsMenu {
             }
         }
 
+    }
+
+    private void addCosmeticStatus(List<String> lore, boolean active, boolean has, boolean preview) {
         lore.add("");
         if (active) {
             lore.add("&a✓ Equipped");
@@ -262,12 +313,6 @@ public final class CosmeticsMenu {
             lore.add("&cLocked");
         }
 
-        ItemStack stack = plain(cosmetic.getIcon(), cosmetic.getName(), lore.toArray(String[]::new));
-        ItemMeta meta = stack.getItemMeta();
-        meta.setEnchantmentGlintOverride(active);
-        meta.getPersistentDataContainer().set(cosmeticKey, PersistentDataType.STRING, cosmetic.getId());
-        stack.setItemMeta(meta);
-        return stack;
     }
 
     private boolean canUse(Player player,CosmeticDefinition cosmetic) { return player.hasPermission(cosmetic.getPermission()); }
