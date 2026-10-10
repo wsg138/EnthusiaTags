@@ -6,6 +6,7 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryCloseEvent;
+import org.bukkit.event.inventory.InventoryDragEvent;
 import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
@@ -41,12 +42,17 @@ public final class RewardListener implements Listener {
         if (!(event.getWhoClicked() instanceof Player player)) {
             return;
         }
+        if (event.getClickedInventory() != event.getView().getTopInventory()) return;
         ItemStack clicked = event.getCurrentItem();
         if (clicked == null || !clicked.hasItemMeta()) {
             return;
         }
         ItemMeta meta = clicked.getItemMeta();
         PersistentDataContainer data = meta.getPersistentDataContainer();
+        if (data.has(rewardMenu.getKothKey(), PersistentDataType.BYTE)) {
+            rewardMenu.queueKoth(player, holder);
+            return;
+        }
         if (data.has(rewardMenu.getBackKey(), PersistentDataType.BYTE)) {
             player.openInventory(rewardMenu.create(player));
             return;
@@ -90,6 +96,10 @@ public final class RewardListener implements Listener {
                 }
                 sendClaimResult(currentPlayer, result);
             }));
+    }
+
+    @EventHandler public void onInventoryDrag(InventoryDragEvent event) {
+        if (event.getView().getTopInventory().getHolder() instanceof RewardMenuHolder) event.setCancelled(true);
     }
 
     private void sendClaimResult(Player player, RewardClaimResult result) {

@@ -18,6 +18,8 @@ Only additive schema changes. Preserve reward_claims, reward_unlocks and existin
 
 ## Presentation
 
+KOTH is an optional navigation entry in /rewards using its enabled owner-registered KothRewardsMenuV1. It opens only the caller's own UI; KOTH retains eligibility, claim storage and payout authority. Tags does not package that API or add mirrored KOTH rewards. Resolve provider classloader/registration/ownership per click to handle staggered upgrades and reloads. The companion artifact probe is an explicit local integration check using the real built KOTH JAR.
+
 EnthusiaTags remains authoritative. Native advancement progress is a rebuildable projection. Historical reconciliation is silent; live completion is celebrated once. Native advancement criteria do not invoke reward commands. Existing claim UI remains accessible because vanilla advancement clicks are not an ordinary server-side claim interface. Missing dependencies disable the projection without disabling claims.
 
 ## Presence integration
