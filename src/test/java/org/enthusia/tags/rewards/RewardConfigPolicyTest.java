@@ -26,7 +26,7 @@ class RewardConfigPolicyTest {
                 new InputStreamReader(stream, StandardCharsets.UTF_8));
         }
 
-        assertEquals(5, config.getInt("config-version"));
+        assertEquals(7, config.getInt("config-version"));
         ConfigurationSection rewards = config.getConfigurationSection("rewards");
         assertNotNull(rewards);
         assertEquals(100, rewards.getKeys(false).size());

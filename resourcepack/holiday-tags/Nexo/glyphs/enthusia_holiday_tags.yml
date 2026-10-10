@@ -1,0 +1,9 @@
+# Icons used inside holiday reward tag text (HolidayTagCatalog). Not chat emojis: no placeholder or permission.
+# The char is written straight into the tag text, so it must stay U+A0A0 (ꂠ). It lives in minecraft:default
+# (not Nexo's own font) so it draws everywhere the tag text goes, including TAB and legacy-formatted chat.
+pumpkin_king_icon:
+  texture: enthusia:font/tags/pumpkin.png
+  font: minecraft:default
+  height: 9
+  ascent: 8
+  char: ꂠ

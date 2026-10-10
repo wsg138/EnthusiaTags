@@ -1,4 +1,4 @@
-config-version: 5
+config-version: 7
 
 placeholders:
   # Placeholder fallback values. These are only used if
@@ -17,6 +17,19 @@ integrations:
     plugin-name: "EnthusiaCurrency"
 
 categories:
+  holidays:
+    name: "&6&lHolidays"
+    icon: FIREWORK_ROCKET
+  halloween:
+    name: "&6&lHalloween"
+    icon: JACK_O_LANTERN
+    parent: holidays
+    tags: [pumpkin_hunter, no_pumpkin_left_behind, pumpkin_king, seen_the_watcher]
+  christmas:
+    name: "&a&lChristmas"
+    icon: SPRUCE_SAPLING
+    parent: holidays
+    tags: [present_seeker, home_for_the_holidays, advent_keeper, secret_santa]
   playtime:
     name: "&bPlaytime"
     icon: "CLOCK"
@@ -38,6 +51,18 @@ categories:
   misc:
     name: "&dMisc"
     icon: "NAME_TAG"
+  advancements:
+    name: '&dAdvancements'
+    icon: NETHER_STAR
+  supporter:
+    name: '&6Supporter'
+    icon: GOLD_INGOT
+  legacy:
+    name: '&bLegacy'
+    icon: ECHO_SHARD
+  events:
+    name: '&5Events'
+    icon: AMETHYST_SHARD
 underground-max-y: 56
 rewards:
   first_hour:

@@ -1,5 +1,9 @@
 # EnthusiaTags advancement pilot
 
+- REQ-917: WHEN a player opens rewards THE SYSTEM SHALL display a Holidays category containing configurable Halloween and Christmas subcategories with event-earned tag descriptions and ownership, without granting rewards from catalog entries.
+- REQ-918: WHEN reward categories are nested THE SYSTEM SHALL support parent navigation and pagination without hiding existing categories or changing reward claims.
+- REQ-919: WHEN holiday tag defaults are installed THE SYSTEM SHALL make Pumpkin Hunter bold and preserve configured colors, custom tags, earned ownership, and reward history.
+
 - REQ-916: WHEN companion sources are verified THE SYSTEM SHALL use the canonical merged advancement presentation provider with matching Maven coordinates and reject unapproved repositories, versions or commits without changing reward behavior.
 
 - REQ-914: WHEN playtime reward requirements are loaded THE SYSTEM SHALL use active playtime for every bundled and existing total or AFK minute criterion, retaining thresholds, payouts, custom non-time criteria, historical claims, and administrator descriptions.
@@ -97,3 +101,23 @@ The user explicitly authorized the remaining non-guild WarzoneDuels advancement 
 - REQ-905: WHEN local workflow tooling reads or modifies task state THE SYSTEM SHALL reject malformed state, serialize concurrent operations, enforce required evidence, and replace files atomically.
 
 - REQ-906: IF a companion linkage error occurs during projection or tree removal THEN THE SYSTEM SHALL contain and log that integration failure while preserving retry/cleanup behavior without swallowing fatal virtual-machine errors.
+
+## Holiday reward tags (EnthusiaHolidays)
+
+- REQ-910: WHEN the plugin starts THE SYSTEM SHALL install any missing EnthusiaHolidays reward tag definitions (pumpkin_hunter, no_pumpkin_left_behind, present_seeker, home_for_the_holidays, advent_keeper, secret_santa, seen_the_watcher, pumpkin_king) without overwriting administrator edits, so that `tag give <player> <id>` from holiday events always names a known tag.
+
+## Reward browser source recovery
+
+- REQ-945: WHEN a player browses rewards THE SYSTEM SHALL expose the preserved dashboard, category, ready, filter, sorting, grouping and focused navigation without changing reward definitions or claiming during navigation.
+- REQ-946: WHEN reward progress or delivery is displayed THE SYSTEM SHALL distinguish unavailable evidence, incomplete, ready, claimed, queued, pending, failed, withheld and review states using existing RewardService authority.
+- REQ-947: WHEN a reward menu receives interaction THE SYSTEM SHALL accept only its own server-side top-inventory actions and recheck permission, online session and inventory before deferred navigation or ordinary left-click claims.
+- REQ-948: WHEN a claim finishes or a reward browser refreshes THE SYSTEM SHALL retain stable visible slots and release in-flight guards without reopening a closed inventory or moving a new session into an old view.
+
+- REQ-920: WHEN Holidays is browsed THE SYSTEM SHALL retain the production 45-slot framed dashboard, seven-category pagination, 54-slot framed browser, existing controls and reward actions while adding Holidays and nested seasonal catalogs.
+- REQ-921: WHEN a seasonal catalog is browsed THE SYSTEM SHALL show earned or locked tags without claiming event awards and return Back to the parent holiday category.
+
+- REQ-960: WHEN Tags, Cosmetics or KOTH progression is browsed THE SYSTEM SHALL retain the production rewards frame, reserved controls, pagination and provider-owned award authority.
+
+- REQ-970: WHEN a player opens rewards THE SYSTEM SHALL retain production default categories, frame and controls, add Holidays and optional KOTH, and expose advancement rewards in provider subcategories while preserving reward definitions and claims.
+- REQ-971: WHEN missing nested defaults are copied THE SYSTEM SHALL traverse each actual child section once without constructing repeated parent paths or overwriting administrator values.
+- REQ-980: WHEN Tags or Cosmetics is opened THE SYSTEM SHALL retain the production dashboard slots, filters, headers, source descriptions, navigation and permission-gated read-only Admin Preview while preserving selections, ownership and existing reward categories.

@@ -1,5 +1,21 @@
 # SPEAR tasks
 
+## T-917 [TDD] Holiday reward catalog
+
+References: REQ-917..919; implementation.md Presentation.
+Evidence: HolidayCatalogTest initially failed compilation for the missing hierarchy and migration APIs; after implementation all three focused tests pass. Clean Maven verify passes 258 tests; EARS validation and all 12 Node tooling tests pass. The schema assertion was updated from 5 to 7 for the new configuration version. Existing runtime catalog fields and custom Pumpkin King styling are preserved by copy-missing migration. No claims, permissions or server activation changed.
+Status: local verification complete; exact-head hosted review and native client acceptance pending.
+## T-945 [TDD] Recover reward browser source
+
+References: REQ-945 through REQ-948.
+Evidence: fresh canonical main28048ca; isolated codex/recover-reward-menu. The preserved production-labelled candidate has six browser presentation/state classes and a holder-owned action listener missing from main. Main interprets item metadata without checking top-slot/click/service ownership. Candidate is read-only and not proven equivalent to the running production binary.
+Acceptance: presentation-only recovery, exact existing claim/data policy, verified readings and delivery states, trusted holder actions, permission/session checks, queued-item retry preserved, focused/manual guide compatibility, stable refresh slots and lifecycle cleanup. Supporter entitlements/config/presence/tag menus remain excluded.
+Status: local engine verified. menu-red.log records two actual interaction assertion failures with zero errors against canonical main. New browser model, inventory, verified progress and interaction cases pass; clean Java 25 Maven verify passes all 262 tests with zero failures/errors/skips, including existing claim/IP/storage/lifecycle and pinned companion contracts. EARS and all 12 Node tooling tests pass; shaded SQLite read-only probe and diff checks pass. Architecture/rollout boundaries recorded in implementation.md. Hosted exact-head refinement and source/client acceptance remain separate.
+
+Refinement: initial PR #28 head 7154512 passed hosted build and Sentinel, while Codacy rejected 34 maintainability findings. Split rendering/refresh/progress helpers, immutable presentation tables, cached interaction dispatch, and distinct field names retain behavior. Holder maps remain server-thread confined with narrowly documented PMD annotations. Java 25 clean verify still passes 262 tests; EARS, 12 Node tooling tests and shaded SQLite read-only probe pass. Exact-head hosted refinement remains pending.
+
+
+
 ## T-916 [INFRA] Canonical advancement presentation dependency
 
 References: REQ-916; implementation.md Presentation and Verification and rollout.
@@ -271,3 +287,66 @@ References: REQ-906; implementation.md Presentation.
 Evidence: Current owner-bound projection API and scheduler integration; completion-linkage-red.log reproduced two uncaught linkage errors using a captured real scheduled callback. A separate fatal-error test proves VM failures must not be swallowed.
 Acceptance: RuntimeException and LinkageError are contained at projection/removal boundaries; no broad catch-all for Error/Throwable, no reward changes, and all dependent PRs inherit the fix.
 Status: complete locally. Java 25 clean Maven verification passes 149 tests with zero failures and errors; hosted review remains pending.
+
+## T-910 [TDD] Holiday reward tags for EnthusiaHolidays
+
+References: REQ-910; EnthusiaHolidays `tag:` rewards (`integrations.tag-command: "tag give {player} {tag}"`).
+Evidence: `HolidayTagCatalog` mirrors `FrontierPortableTagCatalog` (set-if-missing, single save, no reload loop) and installs from the same `TagListener` hook with one `reloadAll`. Ids are year-agnostic so later events reuse them; tags are owned directly through `tag give`, so no `entitlement-permission` is written. `HolidayTagCatalogTest` (2) checks the exact id set the bundled holiday events grant, lower-case ids, and that an admin's custom display name survives while missing fields are filled once.
+Status: complete locally. Java 25 `mvn -B -ntp clean verify` after the repo's own bootstrap scripts: 252 tests, zero failures/errors/skips. Hosted CI and Codacy pending.
+
+## T-911 [TDD] Watcher reward tag
+
+References: REQ-910; EnthusiaHolidays `docs/watcher.md` (The Watcher, D6).
+Evidence: `HolidayTagCatalogTest` failed first on the missing `seen_the_watcher` id, then passed with the catalog entry (same set-if-missing install path as T-910).
+Status: complete locally; hosted CI and Codacy pending.
+
+- [x] Add the `pumpkin_king` holiday reward tag (REQ-910): EnthusiaHolidays gives it to the first player to find every pumpkin (`hunt.first-finishers`, count 1).
+
+Evidence: `HolidayTagCatalogTest` failed first on the missing `pumpkin_king` id, then passed with the catalog entry. It is installed through the same set-if-missing path as T-910.
+
+- [x] Give `pumpkin_king` a pumpkin on each side (owner, 2026-10-09: "🎃Pumpkin King🎃, with a nice orange color with a slight gradient").
+
+  The tag text is `ꂠ<bold><gradient:#FFB347:#FF7518>Pumpkin King</gradient></bold>ꂠ`. U+A0A0 is the Nexo glyph `pumpkin_king_icon` in `resourcepack/holiday-tags`, which reuses the LumaGuilds Halloween menu's jack o'lantern pixel for pixel. A candle-lit version ships beside it as an alternative.
+
+  Evidence: `HolidayTagCatalogTest.pumpkinKingWearsThePumpkinGlyphOnBothSides` failed first on the old text, then passed. `mvn verify` passes.
+
+  Owner's choice (2026-10-09): option B, the candle-lit pumpkin, with the tag text `<b><gradient:#FF3A00:#FF5A00>Pumpkin King</gradient></b>`. The sculk version is kept as `pumpkin_sculk_alt.png`.
+
+## T-920 [TDD] Preserve production reward menu for Holidays
+References: REQ-920, REQ-921.
+Evidence: Production JAR unique-mail-test.1 downloaded read-only; javap confirms production RewardMenuState/dashboard/browser family. Rejected build replaced that family. Regression checks will assert original frame and controls, nested catalogs and no award actions.
+Status: spec; TEST rollback underway; no production writes.
+
+T-920 Status: local269 tests,12 tooling tests and EARS pass. Existing production browser recovered; sameframe seasonal navigation implemented. TEST rollback verified, corrected TEST activation and exact-head hosted review pending.
+
+## T-960 [TDD] Consistent collection and KOTH menus
+References: REQ-960.
+Evidence: Existing Tags and Cosmetics fill slots zero onward and truncate collections; KOTH uses an unframed 28-entry inventory. Regression covers reserved frame slots and paging.
+Status: spec.
+
+T-960 Status: 273 Java tests pass, zero failures/errors/skips; 12 SPEAR tooling tests and EARS pass. Actual newly built KOTH shadow JAR/Tags JAR navigation contract passes. Shared layout is infrastructure presentation; existing grant/claim storage is unchanged. Hosted final-head checks and in-game acceptance remain separate.
+T-960 Hosted refinement: Codacy annotation114281598687 identified one repeated KOTH category literal. Centralized KOTH_CATEGORY without a behavior change; repeated 273-test verification passes. KOTH hosted build passes. Final Tags hosted checks remain to be inspected.
+
+## T-970 [TDD] Production defaults and advancement subcategories
+References: REQ-970, REQ-971.
+Evidence: Live production rewards read-only snapshot contains Commend, Express, DiaryKeeper and Warzone Duels rewards; bundled defaults omit production categories. copyMissing iterates root keys recursively rather than current section keys. Regression pending.
+Status: spec.
+
+T-970 evidence: Two initial behavioral regressions failed (provider filtering and missing default categories), then 276 Java tests passed. Actual inventory test proves Commend child, original claim ID, focused link and parent Back. Migration test proves idempotence and preservation of administrator reward definitions. Default reward/payout entries remain unchanged; only production category defaults are added. Live production/TEST catalogs inspected read-only. No server writes for this correction yet.
+
+T-970 refinement and TEST activation: source 2e455da43f3ba7133dc5d45fe6591bedde60f8e9 passes both exact-head GitHub workflows (verification run 38078106063, Sentinel run 38078106085); Codacy reports zero new issues and review threads are empty. 12 tooling tests and EARS pass. Unmerged TEST JAR SHA-256 165E1B38EB862398EC27F0DFE491BA70358A7317F0F26ED137B209D58FF0F766 matches downloaded installed bytes. SMP Test 5d109214 restarted 2026-10-10 15:04:44 EDT, Done 15:05:33 (39.100s), Tags enabled 15:05:24 and startup summary warnings=0; version confirms 2.2.3-menu-recovery-SNAPSHOT. Previous artifact retained with .disabled rollback suffix. KOTH artifact unchanged, enabled 15:05:29; its existing progression/configuration limitations remain separate. Production untouched. Owner-private preview version appgver_74ac105841088191a15003b1b4cfbc45 published from 2cff75e3548a36fa83707f6884a47411cda72134 using remote-build fallback because the local packager requires unavailable Bash. Authenticated preview QA at 390px confirms no document overflow, ten Commend rewards, reward inspection and parent Back. Native Minecraft appearance, progress and claim acceptance remain pending.
+Status: implementation, local proof, hosted code checks and TEST activation verified; in-game/client acceptance pending.
+
+## T-980 [TDD] Restore complete production collection menus
+References: REQ-980.
+Evidence: Production binary unique-mail-test.1 exposes filters, preview and full navigation absent from deployed source. Preserved production source pr-work/EnthusiaTags contains the same API and slots. Recover presentation and click handlers without importing unrelated entitlement grant/storage machinery; use read-only source metadata. Keep holiday and provider reward catalogs unchanged. TEST upload/restart authorized; production read-only.
+Status: spec.
+
+T-980 local proof: production All Tags control regression failed with one assertion on old source. Restored source passes 278 Java tests with zero failures/errors, EARS validation and 12 tooling tests. Inventory fixture verifies production control/footer placement, pagination, seven-category cosmetic dashboards and admin-gated preview. Listener tests execute deferred tag/cosmetic preview clicks and prove no selection/clear/toggle calls. Source metadata is read-only and excludes player grant lists. Preview published from 9ddd18d35c36c211acda1e7055beeb4079ec40cd; native client acceptance remains separate. Hosted review and TEST activation pending.
+
+T-980 hosted refinement: exact-head verification job 114294883979 passed build, tests and shaded SQLite. Codacy gate 114295138173 identified repeated literals and complex menu assemblers. Extracted presentation helpers and filter constants without changing slots, lore, navigation or ownership; repeated 278-test verification passes (production-collections-refine.log). Replacement TEST artifact and final-head hosted review pending.
+
+T-980 refined proof: dd95c040b918b82e1a16b1aa5a6175c98c5fedda passes verification 38080444535 (including exact-head Codacy with zero annotations), Sentinel 38080444527 and CodeRabbit; no inline threads. Clean verify repeats 278 tests, zero failures/errors/skips; 12 tooling tests pass. Corrected the static plugin.yml version to match the POM so runtime identification distinguishes this production collection restoration. Published owner-private preview appgver_c210408ec8648191b5b52e7c1e156b51 is checked at 390px with no document overflow; preview remains a simulation and Minecraft acceptance pending.
+
+T-980 TEST activation: deployed source 331c05ac6e3089e17a781258d0c1bfff2761ec68 passes verification 38080640138 (including exact-head Codacy), Sentinel 38080640120 and CodeRabbit; no inline threads. Clean build passes 278 tests, zero failures/errors/skips. Unmerged TEST artifact EnthusiaTags-PR29-331c05a-PRODUCTION-COLLECTIONS-UNMERGED-TEST.jar SHA-256 069C5DEB70392CE6CF947918807622BE409C023EE8844461350E94CE434B7078 matches downloaded installed bytes. SMP Test 5d109214 restarted 2026-10-10 15:43:58 EDT; Tags enabled 15:44:37, startup summary warnings=0; Done 15:44:46 (38.202s). Console confirms 2.2.3-production-collections-SNAPSHOT at 15:45:16. Previous JARs retained disabled; KOTH artifact unchanged and enabled. Existing nametag consumer compatibility and KOTH load/configuration warnings remain separate. Production untouched. Delivery record contains startup log, console snapshot and screenshot.
+Status: implementation, local proof, hosted review and TEST activation verified; native client acceptance pending. PR remains unmerged.

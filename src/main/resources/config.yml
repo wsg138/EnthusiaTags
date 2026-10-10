@@ -1,4 +1,4 @@
-config-version: 5
+config-version: 7
 
 # Display-only native advancement pilot. Claims still use /rewards.
 advancements:
