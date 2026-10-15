@@ -21,6 +21,7 @@ import static org.mockito.Mockito.*;
 class NativeShutdownTest {
     @Test void providerFailureDoesNotEscapeAndCloseIsIdempotent() {
         JavaPlugin plugin = mock(JavaPlugin.class);
+        when(plugin.getDataFolder()).thenReturn(new java.io.File("target/shutdown-test"));
         when(plugin.getConfig()).thenReturn(new YamlConfiguration());
         when(plugin.getLogger()).thenReturn(Logger.getLogger("shutdown-test"));
         RewardService rewards = mock(RewardService.class);

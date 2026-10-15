@@ -26,6 +26,8 @@ import org.bukkit.inventory.ItemStack;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitTask;
 import org.enthusia.tags.advancements.domain.PendingCelebrations;
+import org.enthusia.tags.advancements.application.CompletionHistory;
+import org.enthusia.tags.advancements.application.CompletionLedger;
 import org.enthusia.tags.rewards.RewardAction;
 import org.enthusia.tags.rewards.RewardDefinition;
 import org.enthusia.tags.rewards.RewardService;
@@ -36,6 +38,9 @@ public final class NativeAdvancementController implements Listener, AutoCloseabl
     private final RewardService rewards;
     private final ProjectionService projection;
     private final Map<UUID, Set<String>> pendingCelebrations = new HashMap<>();
+    private final CompletionLedger completionLedger;
+    private final Map<UUID, CompletionHistory> completionHistories = new HashMap<>();
+    private Set<String> registeredKeys = Set.of();
     private final ArrayDeque<UUID> queue = new ArrayDeque<>();
     private Map<String, RewardDefinition> definitions;
     private BukkitTask task;
@@ -51,10 +56,15 @@ public final class NativeAdvancementController implements Listener, AutoCloseabl
     private boolean registered;
 
     public NativeAdvancementController(JavaPlugin plugin, RewardService rewards) {
+        this(plugin, rewards, new SqliteCompletionLedger(plugin.getDataFolder().toPath().resolve("advancement-history.db")));
+    }
+
+    NativeAdvancementController(JavaPlugin plugin, RewardService rewards, CompletionLedger ledger) {
         this.plugin = plugin;
         this.rewards = rewards;
         projection = Bukkit.getServicesManager().load(ProjectionService.class);
         if (projection == null) throw new IllegalStateException("EnthusiaAdvancements projection service unavailable; install the pilot companion build");
+        completionLedger = ledger;
         initializeBridges();
         rebuild();
         scheduleBridgeRefreshes();
@@ -233,6 +243,11 @@ public final class NativeAdvancementController implements Listener, AutoCloseabl
         meta.setCustomModelData(plugin.getConfig().getInt("advancements.logo-custom-model-data", 815001));
         icon.setItemMeta(meta);
         projection.registerTree(plugin, "enthusia", icon, AdvancementNodeOrder.parentFirst(nodes));
+        // RewardService already commits reward_unlocks before its asynchronous callback.
+        // Do not silently seed those keys ahead of that callback and suppress a new reward toast.
+        registeredKeys = nodes.stream().map(ProjectionService.Node::key)
+            .filter(key -> !key.startsWith("tags/"))
+            .collect(java.util.stream.Collectors.toUnmodifiableSet());
         registered = true;
         definitions = next;
         plugin.getLogger().info("Enthusia native track: " + nodes.size() + " challenges; no reward execution in renderer.");
@@ -303,6 +318,8 @@ public final class NativeAdvancementController implements Listener, AutoCloseabl
         rewards.queueProgressRefresh(player);
         if (!projection.ready(player)) return;
         Map<String, Integer> progress = collectProgress(player);
+        Set<String> pending = pendingCelebrations.computeIfAbsent(player.getUniqueId(), ignored -> new HashSet<>());
+        if (!history(player).reconcile(progress, pending, registeredKeys)) return;
         projection.project(plugin, "enthusia", player, progress);
         celebratePending(player, progress);
     }
@@ -349,9 +366,18 @@ public final class NativeAdvancementController implements Listener, AutoCloseabl
     private void celebratePending(Player player, Map<String, Integer> progress) {
         Set<String> pending = pendingCelebrations.get(player.getUniqueId());
         if (pending == null) return;
+        if (!history(player).reconcile(progress, pending, registeredKeys)) return;
         PendingCelebrations.deliver(
-            pending, progress, key -> projection.celebrate(plugin, "enthusia", player, key));
+            pending, progress, key -> {
+                // The renderer can throw after a toast or some audience sends succeeded.
+                // Provider keys are already durable; never retry an uncertain dispatch.
+                history(player).consumeAuthorization(key);
+                projection.celebrate(plugin, "enthusia", player, key);
+            });
         if (pending.isEmpty()) pendingCelebrations.remove(player.getUniqueId());
+    }
+    private CompletionHistory history(Player player) {
+        return completionHistories.computeIfAbsent(player.getUniqueId(), id -> new CompletionHistory(completionLedger, id));
     }
     private void warnAndRetry(Throwable error) {
         if (System.currentTimeMillis() >= nextWarning) {
@@ -369,6 +395,7 @@ public final class NativeAdvancementController implements Listener, AutoCloseabl
     @EventHandler public void onQuit(PlayerQuitEvent event) {
         UUID id = event.getPlayer().getUniqueId();
         pendingCelebrations.remove(id);
+        completionHistories.remove(id);
         if (duels != null) duels.forget(id);
         if (commend != null) commend.forget(id);
         if (express != null) express.forget(id);
@@ -391,6 +418,8 @@ public final class NativeAdvancementController implements Listener, AutoCloseabl
         } finally {
             registered = false;
             pendingCelebrations.clear();
+            completionHistories.clear();
+            completionLedger.close();
             queue.clear();
         }
     }

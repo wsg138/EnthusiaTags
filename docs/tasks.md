@@ -1,5 +1,19 @@
 # SPEAR tasks
 
+## T-923 [TDD] Review correction: uncertain renderer delivery and method complexity
+
+References: REQ-923, REQ-921; implementation.md Presentation.
+Evidence: PR #31 at e1a1c938 acknowledges provider authorization after renderer return; a renderer that sends and then throws is invoked again. Codacy identifies reconcile cyclomatic complexity 10, limit 8.
+Acceptance: controller-level partial-send regression; consume only the attempted provider authorization before renderer invocation; retain remaining keys and storage retries; ordinary reward path unchanged; split reconciliation stages without suppressions; clean build and exact-head hosted checks. No deployment/restart/reload/merge.
+Status: local spec/prove/engine/arch/refine complete. The partial-send regression reproduced two calls on e1a1c938, then passed after consume-before-dispatch. An additional regression preserves unrelated pending keys. Java 25 clean Maven verify passes 263 tests, zero failures/errors/skips; EARS, 12 Node tests, 10 Python bootstrap tests and architecture checks pass. reconcile is split into small stages without a Codacy suppression. Exact-head hosted build/Codacy validation remains pending the push. No server changes.
+
+## T-920 [TDD] Durable advancement completion and announcement boundary
+
+References: REQ-920, REQ-921, REQ-922; implementation.md Presentation.
+Evidence: John_Raidfarms has two First Class Discord announcements about eleven days apart. Production read-only inspection confirms Tags 2.2.2-unique-mail-test.1 and Express 1.2.1 loaded. Session-only provider projections and PendingCelebrations have no durable cross-session announcement boundary. The exact historical trigger is unproven; normal rejoin alone is silent and Express expiration does not delete sender history.
+Acceptance: persistent UUID/key uniqueness; silent history backfill; monotonic earned display; reconnect/restart/provider regression deduplication; independent players and keys; retry failed storage; no SQL on Bukkit thread; quit/close fences; no reward/provider DB changes. No server restart, reload, deployment or merge is authorized by this task.
+Status: local spec/prove/engine/architecture/refine complete. The existing controller failed the new behavioral regression (two renderer calls instead of one), then the implementation passed. Final clean Java 25 Maven verify passes 261 tests, zero failures/errors/skips, including an additional asynchronous reward-notification ordering regression. Pinned renderer build passes 40 tests; companion validators, 10 Python bootstrap tests, EARS and 12 Node tests pass. No GUI/layout, reward, permission or provider-state changes. Hosted exact-head checks, canonical merge, monorepo pin reconciliation and real server/client acceptance remain delivery gates; no server files changed. See docs/evidence/durable-advancement-completions.md.
+
 ## T-916 [INFRA] Canonical advancement presentation dependency
 
 References: REQ-916; implementation.md Presentation and Verification and rollout.

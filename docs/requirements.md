@@ -1,5 +1,10 @@
 # EnthusiaTags advancement pilot
 
+- REQ-920: WHEN a known advancement completes again after reconnect, restart or provider regression THE SYSTEM SHALL restore its completion silently using durable per-player and advancement-key evidence without repeating its announcement or executing rewards.
+- REQ-921: IF completion history cannot be loaded or committed THEN THE SYSTEM SHALL defer announcements and retry without substituting empty history or consuming pending live evidence.
+- REQ-922: WHEN historical completions are first reconciled THE SYSTEM SHALL seed durable completion history silently and reserve a new live announcement before calling the renderer, accepting a lost notification after an interrupted process rather than replaying it on restart.
+- REQ-923: IF a companion-provider renderer invocation throws after dispatch begins THEN THE SYSTEM SHALL consume that invocation's session authorization without retrying an uncertain delivery, while retaining retries for failures before dispatch and preserving ordinary reward notification behavior.
+
 - REQ-916: WHEN companion sources are verified THE SYSTEM SHALL use the canonical merged advancement presentation provider with matching Maven coordinates and reject unapproved repositories, versions or commits without changing reward behavior.
 
 - REQ-914: WHEN playtime reward requirements are loaded THE SYSTEM SHALL use active playtime for every bundled and existing total or AFK minute criterion, retaining thresholds, payouts, custom non-time criteria, historical claims, and administrator descriptions.
@@ -91,7 +96,7 @@ The user explicitly authorized the remaining non-guild WarzoneDuels advancement 
 ## PR cleanup safety and verification
 
 - REQ-901: WHEN a live completion is observed THE SYSTEM SHALL recognize its transition once while retaining unacknowledged live evidence across retryable persistence failures.
-- REQ-902: IF the renderer rejects a pending celebration THEN THE SYSTEM SHALL retain that pending work for a later attempt.
+- REQ-902: IF a pending celebration fails before renderer dispatch THEN THE SYSTEM SHALL retain that pending work for a later attempt without replaying uncertain companion-provider dispatches covered by REQ-923.
 - REQ-903: WHEN RoseChat enables after Tags THE SYSTEM SHALL install its per-viewer presence binding once while preserving RoseChat audience restrictions and defaults when the API is unavailable.
 - REQ-904: WHEN repeated playtime unit tokens are parsed THE SYSTEM SHALL count every occurrence with checked arithmetic and combine seconds before rounding.
 - REQ-905: WHEN local workflow tooling reads or modifies task state THE SYSTEM SHALL reject malformed state, serialize concurrent operations, enforce required evidence, and replace files atomically.
