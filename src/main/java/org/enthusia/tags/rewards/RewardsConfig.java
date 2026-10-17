@@ -20,10 +20,8 @@ public record RewardsConfig(String playtimeActivePlaceholder,
         var section = config.getConfigurationSection("categories");
         if (section != null) {
             for (String key : section.getKeys(false)) {
-                String name = section.getString(key + ".name", key);
-                Material icon = Material.matchMaterial(section.getString(key + ".icon", "PAPER"));
-                String normalizedKey = key.toLowerCase(Locale.ROOT);
-                categories.put(normalizedKey, new RewardCategory(normalizedKey, name, icon));
+                RewardCategory category = loadCategory(section, key);
+                categories.put(category.id(), category);
             }
         }
         if (categories.isEmpty()) {
@@ -34,6 +32,7 @@ public record RewardsConfig(String playtimeActivePlaceholder,
             categories.put("economy", new RewardCategory("economy", "&6Economy", Material.GOLD_INGOT));
             categories.put("misc", new RewardCategory("misc", "&dMisc", Material.NAME_TAG));
         }
+        validateParents(categories);
         return new RewardsConfig(
             config.getString("placeholders.playtime-active-minutes", "%playtime_active%"),
             config.getString("placeholders.playtime-afk-minutes", "%playtime_afk%"),
@@ -44,5 +43,26 @@ public record RewardsConfig(String playtimeActivePlaceholder,
             config.getString("integrations.baltop.plugin-name", "EnthusiaCurrency"),
             categories
         );
+    }
+
+    private static void validateParents(Map<String, RewardCategory> categories) {
+        var visited = new java.util.HashSet<String>();
+        for (RewardCategory category : categories.values()) {
+            visited.clear();
+            for (RewardCategory node = category; node.parent() != null; node = categories.get(node.parent())) {
+                if (!visited.add(node.id()) || !categories.containsKey(node.parent())) {
+                    throw new IllegalArgumentException("Invalid reward category parent chain: " + category.id());
+                }
+            }
+        }
+    }
+
+    private static RewardCategory loadCategory(org.bukkit.configuration.ConfigurationSection section, String key) {
+        String name = section.getString(key + ".name", key);
+        Material icon = Material.matchMaterial(section.getString(key + ".icon", "PAPER"));
+        String parent = section.getString(key + ".parent");
+        if (parent != null) parent = parent.toLowerCase(Locale.ROOT);
+        return new RewardCategory(key.toLowerCase(Locale.ROOT), name, icon, parent,
+            section.getStringList(key + ".tags").stream().map(id -> id.toLowerCase(Locale.ROOT)).toList());
     }
 }

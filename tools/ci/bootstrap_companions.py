@@ -55,7 +55,7 @@ def load_pins(root):
     require_hex(rose.get("sha256"), 64)
     version = pins["renderer"].get("version")
     if not isinstance(version, str) or not re.fullmatch(
-        r"[0-9]+\.[0-9]+\.[0-9]+-pilot\.[0-9]+(?:-chat-colors-test\.[0-9]+)?", version
+        r"[0-9]+\.[0-9]+\.[0-9]+-pilot\.[0-9]+(?:-(?:chat-colors|watcher-brackets)-test\.[0-9]+)?", version
     ):
         raise ValueError("Unexpected renderer version")
     return pins

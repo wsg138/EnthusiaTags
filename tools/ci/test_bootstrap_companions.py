@@ -74,12 +74,28 @@ class BootstrapCompanionsTest(unittest.TestCase):
 
     def test_presentation_versions_cannot_include_arbitrary_suffixes(self):
         for version in ("1.0.0-pilot.6-chat-colors-test.4;bad", "1.0.0-pilot.6-anything",
+                        "1.0.0-pilot.6-watcher-brackets-test.6;bad", "1.0.0-pilot.6-watcher-brackets-test.",
                         "1.0.0-pilot.6-chat-colors-test.", "../pilot.6"):
             with self.subTest(version=version):
                 self.pins["renderer"]["version"] = version
                 self.write("tools/ci/companions.json", json.dumps(self.pins))
                 with self.assertRaises(ValueError):
                     bootstrap.load_pins(self.root)
+
+    def test_watcher_palette_provider_requires_matching_pom_and_commit(self):
+        version = "1.0.0-pilot.6-watcher-brackets-test.6"
+        self.pins["renderer"]["version"] = version
+        self.write("tools/ci/companions.json", json.dumps(self.pins))
+        pins = bootstrap.load_pins(self.root)
+        self.poms(version)
+        with self.assertRaises(ValueError):
+            bootstrap.verify_renderer(self.root, pins, "a" * 40)
+        self.write("pom.xml", '<project xmlns="http://maven.apache.org/POM/4.0.0">'
+                   '<dependencies><dependency><artifactId>EnthusiaAdvancements-pilot</artifactId>'
+                   '<version>' + version + '</version></dependency></dependencies></project>')
+        bootstrap.verify_renderer(self.root, pins, "a" * 40)
+        with self.assertRaises(ValueError):
+            bootstrap.verify_renderer(self.root, pins, "c" * 40)
 
     def test_dtd_and_external_entities_are_rejected(self):
         for declaration in (

@@ -12,6 +12,7 @@ import org.enthusia.tags.cosmetics.CosmeticsListener;
 import org.enthusia.tags.cosmetics.CosmeticsService;
 import org.enthusia.tags.rewards.NaturalBlockTracker;
 import org.enthusia.tags.rewards.RewardListener;
+import org.enthusia.tags.rewards.RewardMenu;
 import org.enthusia.tags.rewards.RewardService;
 import org.enthusia.tags.rewards.RewardTracker;
 import org.enthusia.tags.rewards.RewardsCommand;
@@ -35,6 +36,7 @@ public final class EnthusiaTagsPlugin extends JavaPlugin {
     private LoreItemRewardRuntime loreItemRewardRuntime;
     private LoreItemRewardAdmin loreItemRewardAdmin;
     private NativeAdvancementController nativeAdvancements;
+    private RewardMenu rewardMenu;
 
     @Override
     public void onEnable() {
@@ -100,6 +102,7 @@ public final class EnthusiaTagsPlugin extends JavaPlugin {
 
     @Override
     public void onDisable() {
+        if (rewardMenu != null) rewardMenu.close();
         if (nativeAdvancements != null) nativeAdvancements.close();
         Bukkit.getServicesManager().unregister(tagService);
         if (rewardTracker != null) {
@@ -176,8 +179,10 @@ public final class EnthusiaTagsPlugin extends JavaPlugin {
         Bukkit.getPluginManager().registerEvents(new CosmeticsListener(cosmeticsService, tagService, messages, rewardService), this);
         RoseChatPresenceHook.register(this, cosmeticsService);
         RewardsCommand rewardsCommand = new RewardsCommand(rewardService, tagService, messages, this);
+        rewardMenu = rewardsCommand.getRewardMenu();
         if (rewardService.isAvailable()) {
-            Bukkit.getPluginManager().registerEvents(new RewardListener(rewardService, rewardsCommand.getRewardMenu()), this);
+            Bukkit.getPluginManager().registerEvents(new RewardListener(rewardService, rewardMenu), this);
+            rewardMenu.startRefresh();
             Bukkit.getPluginManager().registerEvents(rewardTracker, this);
             if (naturalBlockTracker != null) {
                 Bukkit.getPluginManager().registerEvents(naturalBlockTracker, this);

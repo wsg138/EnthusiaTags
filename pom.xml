@@ -6,7 +6,7 @@
 
     <groupId>org.enthusia</groupId>
     <artifactId>EnthusiaTags</artifactId>
-    <version>2.2.2-pilot.2</version>
+    <version>2.2.3-production-collections-SNAPSHOT</version>
 
     <properties>
         <maven.compiler.release>25</maven.compiler.release>
@@ -35,7 +35,7 @@
         <dependency>
             <groupId>io.github.badgersmc</groupId>
             <artifactId>EnthusiaAdvancements-pilot</artifactId>
-            <version>1.0.0-pilot.6-chat-colors-test.4</version>
+            <version>1.0.0-pilot.6-watcher-brackets-test.6</version>
             <scope>provided</scope>
         </dependency>
         <dependency>

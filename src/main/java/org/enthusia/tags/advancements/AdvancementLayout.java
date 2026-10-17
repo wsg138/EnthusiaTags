@@ -140,6 +140,7 @@ final class AdvancementLayout {
         root(map, "lag_was_crazy", 1, 25);
         chain(map, "lag_was_crazy", 2, 25,
             "all_rounder", "server_legend", "ultimate_survivor");
+        put(map, "watcher_melody", "ultimate_survivor", 5, 25);
 
         return Map.copyOf(map);
     }

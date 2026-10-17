@@ -1,0 +1,68 @@
+definitions:
+  beta_tester:
+    source: "Legacy: Beta Tester - 4+ hours during Enthusia betas"
+    permanent: true
+    tags: [beta_tester]
+    cosmetics: []
+  prologue_champion:
+    source: "Legacy: Prologue EOTW Champion"
+    permanent: true
+    tags: [prologue_champion]
+    cosmetics: [join_prologue_champion, quit_prologue_champion]
+  bug_hunter_hall_of_fame:
+    source: "Legacy: Bug Hunter's Hall of Fame"
+    permanent: true
+    tags: [exterminator]
+    cosmetics: [trail_bug_hunter]
+  donor_avid:
+    source: "Supporter: Avid"
+    permanent: true
+    tags: [avid]
+    cosmetics: [join_avid_supporter, quit_avid_supporter]
+    active-cosmetics: [kill_sparks, kill_arc, kill_blaze, death_smoke, death_cloud, trail_mist, trail_glow, trail_leaf, proj_spark, proj_flame, trail_spiral_glow, join_clean, quit_clean, km_gg]
+    qualification:
+      permission: "enthusiatags.reward.avid"
+      groups: [avid, avid-founder, devotee, devotee-founder, glorious, glorious-founders, media, media-founder]
+  donor_avid_founder:
+    source: "Legacy Supporter: Avid Founder"
+    permanent: true
+    tags: [founding_avid]
+    cosmetics: [join_founding_avid, quit_founding_avid]
+    qualification:
+      permission: "enthusiatags.reward.avid-founder"
+      groups: [avid-founder, devotee-founder, glorious-founders]
+  donor_devotee:
+    source: "Supporter: Devotee"
+    permanent: true
+    tags: [devotee]
+    cosmetics: [join_devotee_supporter, quit_devotee_supporter]
+    active-cosmetics: [kill_soul, kill_dragon, kill_portal, kill_totem, kill_starfall, death_frost, death_soulfire, death_tnt, trail_dragon, trail_portal, trail_totem, proj_dragon, proj_portal, trail_spiral_portal, join_flashy, quit_smoke, km_obliterated, km_cancelled]
+    qualification:
+      permission: "enthusiatags.reward.devotee"
+      groups: [devotee, devotee-founder, glorious, glorious-founders, media, media-founder]
+  donor_devotee_founder:
+    source: "Legacy Supporter: Devotee Founder"
+    permanent: true
+    tags: [founding_devotee]
+    cosmetics: [join_founding_devotee, quit_founding_devotee]
+    qualification:
+      permission: "enthusiatags.reward.devotee-founder"
+      groups: [devotee-founder, glorious-founders]
+  donor_glorious:
+    source: "Achievement: Glorious - Top Donor of the Month"
+    permanent: true
+    tags: [glorious_fellow]
+    cosmetics: [join_glorious_legacy, quit_glorious_legacy]
+    active-cosmetics: [trail_glorious_current]
+    qualification:
+      permission: "enthusiatags.reward.glorious"
+      groups: [glorious, glorious-founders]
+  donor_glorious_founder:
+    source: "Legacy Supporter: Glorious Founder"
+    permanent: true
+    tags: [founding_glorious]
+    cosmetics: [join_founding_glorious, quit_founding_glorious]
+    qualification:
+      permission: "enthusiatags.reward.glorious-founder"
+      groups: [glorious-founders]
+

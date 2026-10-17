@@ -1026,6 +1026,16 @@ public final class RewardService {
         };
     }
 
+    java.util.OptionalLong getVerifiedMenuProgress(Player player, RewardCriterion criterion, ProgressSnapshot snapshot) {
+        if (!isAvailable() || criterion == null || !criterion.isValid() || snapshot == null)
+            return java.util.OptionalLong.empty();
+        RewardPlayerState state = getLoadedState(player.getUniqueId());
+        if (state == null || !state.isLoaded() || !isCriterionAvailable(criterion)) return java.util.OptionalLong.empty();
+        long value = getProgress(player, criterion, snapshot);
+        if (value < 0 || snapshot.unavailableCriteria().contains(criterionCacheKey(criterion))) return java.util.OptionalLong.empty();
+        return java.util.OptionalLong.of(value);
+    }
+
     public String formatProgress(Player player, RewardCriterion criterion) {
         long current = getProgress(player, criterion);
         long goal = criterion.getAmount();
@@ -1203,6 +1213,9 @@ public final class RewardService {
         if ("reconcile".equals(subcommand)) {
             return handleReconcileCommand(sender, args);
         }
+        if ("counter".equals(subcommand)) {
+            return handleCounterCommand(sender, args);
+        }
         if ("inspect".equals(subcommand)) {
             return handleInspectCommand(sender, args);
         }
@@ -1213,6 +1226,39 @@ public final class RewardService {
             return handleIpReservationCommand(sender, args);
         }
         sendAdminUsage(sender);
+        return true;
+    }
+
+    /**
+     * Adds to a player's custom counter, for other plugins that report progress (the Watcher's theme). Queued until the
+     * player's state loads, the same as any other counter change.
+     */
+    private boolean handleCounterCommand(CommandSender sender, String[] args) {
+        if (args.length != 4) {
+            sender.sendMessage("Usage: /enthusiatags rewards counter <player> <key> <amount>");
+            return true;
+        }
+        OfflinePlayer target = findOfflineCommandTarget(sender, args, 1);
+        if (target == null) return true;
+        String key = args[2].toLowerCase(Locale.ROOT);
+        if (!key.matches("[a-z0-9_]{1,64}")) {
+            sender.sendMessage("Counter keys are 1-64 lowercase letters, digits or underscores.");
+            return true;
+        }
+        long amount;
+        try {
+            amount = Long.parseLong(args[3]);
+        } catch (NumberFormatException e) {
+            amount = 0L;
+        }
+        if (amount <= 0L) {
+            sender.sendMessage("The amount must be a positive whole number.");
+            return true;
+        }
+        UUID playerId = target.getUniqueId();
+        long next = incrementCounter(playerId, key, amount);
+        sender.sendMessage("Counter " + key + " for " + target.getName() + " is now " + next
+            + (isPlayerStateLoaded(playerId) ? "." : " (applies when they next join)."));
         return true;
     }
 
@@ -1727,6 +1773,7 @@ public final class RewardService {
         sender.sendMessage("       /enthusiatags rewards items <player>");
         sender.sendMessage("       /enthusiatags rewards ip <player> <reward> <ip>"
             + " <retain|release|repair> <reason>");
+        sender.sendMessage("       /enthusiatags rewards counter <player> <key> <amount>");
         sender.sendMessage("       /enthusiatags rewards reconcile <player> <reward>"
             + " <action-id|item:action-id|legacy|whole>"
             + " <delivered|retry|force-delivered|force-retry> <reason>");
