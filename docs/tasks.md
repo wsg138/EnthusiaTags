@@ -1,5 +1,11 @@
 # SPEAR tasks
 
+## T-933 [TDD] Recover unique mail correspondents into canonical source
+References: REQ-933 through REQ-936.
+Evidence: production-labelled local candidate unique-mail-test.1 SHA256 e86dc7402a3110600f7f437d9bad3949d6c562378344bc60ed68531c7801add9 contains distinct correspondent counting absent from canonical main 28048ca. Original dirty checkout preserved. New isolated codex/reconcile-unique-mail starts from current main; port only the behavior with existing JSON-bound selection/schema validation, not older UI/supporter code or active-playtime migration.
+Acceptance: distinct other UUIDs per mail type, case-insensitive identity, confirmed delivery only, separate return recovery, read-only history, reconnect silent; preserve current-main tests and integration contracts. No provider DB/schema, payout, claim ownership or production changes.
+Status: local spec/prove/engine/arch/refine complete. Actual behavioral red unique-red.log: eight reader tests, three assertion failures (repeat traffic 51 versus 2, self-mail 2 versus 0, legacy duplicates 10 versus 1). After the bounded SQL adapter change and truthful descriptions, unique-green.log passes all 16 focused reader/bridge/progress tests. Full Java25.0.3/Maven3.9.11/Paper26.2 clean verify passes 253 tests, zero failures/errors/skips (unique-full-verify.log); EARS, 12 Node tooling tests, refine-state assertion, diff checks and final shaded SQLite read-only probe pass. Current-main JSON selection, validation and provider contracts preserved. Local unmerged artifact 2.2.3-mail-reconcile-SNAPSHOT SHA256 EB7D3767749E5B0E4E44142418F96FE53F4769D0C7A6F54BE2B463AEE90D9B10. Hosted exact-head checks/review and actual player/client acceptance pending. No source merge, deployment or production changes. Local candidate is not freshly hash-matched to production runtime.
+
 ## T-916 [INFRA] Canonical advancement presentation dependency
 
 References: REQ-916; implementation.md Presentation and Verification and rollout.
@@ -271,3 +277,13 @@ References: REQ-906; implementation.md Presentation.
 Evidence: Current owner-bound projection API and scheduler integration; completion-linkage-red.log reproduced two uncaught linkage errors using a captured real scheduled callback. A separate fatal-error test proves VM failures must not be swallowed.
 Acceptance: RuntimeException and LinkageError are contained at projection/removal boundaries; no broad catch-all for Error/Throwable, no reward changes, and all dependent PRs inherit the fix.
 Status: complete locally. Java 25 clean Maven verification passes 149 tests with zero failures and errors; hosted review remains pending.
+
+## T-937 [TDD] Preserve museum versus personal-mail boundaries
+
+References: REQ-937; implementation.md Presentation.
+Evidence: Express MailRepository.listSent and listInbox exclude mapart_submissions; museum claiming rewrites recipient_uuid to a curator. ExpressStatsReader must maintain that same boundary. Existing JUnit/SQLite fixtures use rowid-compatible mail records and immutable snapshots, with no new third-party imports.
+Status: spec.
+
+T-937 proof: museum-advancement-red.log reproduced museum cargo earning the personal 64-item milestone. The filtered/all-player reader now excludes mapart_submissions within the same read-only snapshot. Legacy schemas without that table remain supported; SQL player selection stays bound. Focused suite passes 17; full clean verify passes 254 tests, zero failures/errors/skips (mail-pr26-full-review.log). No provider database, reward ownership or live server mutation. Existing hosted checks apply only to the old head; new-head checks must be inspected.
+
+T-937 hosted refinement: Codacy flagged three computed SQL statements on 89eb811. Prepared queries now select between complete static SQL constants; all player IDs remain bound parameters, including null/all-player scope. Full clean verify repeats 254 tests after this refinement (mail-pr26-static-sql-verify.log).
