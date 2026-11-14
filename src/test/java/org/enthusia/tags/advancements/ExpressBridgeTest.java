@@ -74,13 +74,13 @@ class ExpressBridgeTest {
         String config = Files.readString(Path.of("src/main/resources/config.yml"));
         String plugin = Files.readString(Path.of("src/main/resources/plugin.yml"));
         String source = Files.readString(Path.of(
-            "src/main/java/org/enthusia/tags/advancements/NativeAdvancementController.java"));
+            "src/main/java/org/enthusia/tags/advancements/ProviderRewardTracker.java"));
         assertTrue(config.contains("express-enabled: true"));
         assertTrue(plugin.contains("- EnthusiaExpress"));
         assertTrue(source.contains("getPlugin(\"EnthusiaExpress\")"));
         assertTrue(source.contains("ExpressAdvancementBridge"));
         assertTrue(source.contains("express.refresh()"));
-        assertTrue(source.contains("express.observe(player.getUniqueId())"));
+        assertTrue(source.contains("express.observe(id)"));
         assertTrue(source.contains("express.forget(id)"));
         assertTrue(source.contains("expressTask.cancel()"));
     }

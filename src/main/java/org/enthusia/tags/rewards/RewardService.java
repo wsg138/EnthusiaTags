@@ -84,6 +84,7 @@ public final class RewardService {
     private final Map<UUID, RewardPlayerState> playerStates = new ConcurrentHashMap<>();
     private final Map<UUID, CompletableFuture<Void>> pendingLoads = new ConcurrentHashMap<>();
     private final Map<UUID, Map<String, Long>> pendingCounterDeltas = new ConcurrentHashMap<>();
+    private final Map<UUID, Map<String, Integer>> providerProgress = new ConcurrentHashMap<>();
     private final Map<UUID, ProgressSnapshot> progressSnapshots = new ConcurrentHashMap<>();
     private final Map<UUID, Map<String, Long>> lastVerifiedProgress = new ConcurrentHashMap<>();
     private final Map<UUID, org.enthusia.tags.advancements.domain.CompletionBaseline> completionBaselines = new ConcurrentHashMap<>();
@@ -149,6 +150,7 @@ public final class RewardService {
             return thread;
         });
         lifecycle.set(ServiceLifecycle.RELOADING);
+        providerProgress.clear();
         reloadNow();
     }
 
@@ -183,6 +185,7 @@ public final class RewardService {
         pendingCounterDeltas.clear();
         progressSnapshots.clear();
         lastVerifiedProgress.clear();
+        providerProgress.clear();
         completionBaselines.clear();
         advancementNotifications = null;
         rewardSyncQueue.clear();
@@ -203,6 +206,7 @@ public final class RewardService {
             return;
         }
         lifecycle.set(ServiceLifecycle.RELOADING);
+        providerProgress.clear();
         if (!activeOperations.isEmpty()) {
             if (reloadQueued.compareAndSet(false, true)) {
                 CompletableFuture<?>[] claims = activeOperations.toArray(CompletableFuture[]::new);
@@ -329,6 +333,7 @@ public final class RewardService {
         pendingCounterDeltas.remove(playerId);
         progressSnapshots.remove(playerId);
         lastVerifiedProgress.remove(playerId);
+        providerProgress.remove(playerId);
         completionBaselines.remove(playerId);
         playerStates.remove(playerId);
     }
@@ -809,6 +814,39 @@ public final class RewardService {
         }
     }
 
+    /** Uses only loaded durable state; safe for cached placeholder calls and unavailable state fails closed. */
+    public boolean canReveal(Player player, RewardDefinition reward) {
+        return canReveal(player.getUniqueId(), reward);
+    }
+
+    public boolean canReveal(UUID playerId, RewardDefinition reward) {
+        if (!reward.isHiddenUntilEarned()) return true;
+        try {
+            if (!isAvailable()) return false;
+            RewardPlayerState state = getLoadedState(playerId);
+            if (state == null || !state.isLoaded()) return false;
+            String id = reward.getId().toLowerCase(Locale.ROOT);
+            // Holidays reconciles this reserved signal from its durable encounter ledger.
+            // The separate post-event criterion still controls whether the reward can be claimed.
+            boolean earned = "last_watch_remembered_2026".equals(id)
+                && state.getCounter("last_watch_earned_halloween_2026") >= 1;
+            return PrivateRewardVisibility.reveal(true, earned || historicallyCompleted(state, id));
+        } catch (RuntimeException unavailable) {
+            return false;
+        }
+    }
+
+    public boolean canRevealTag(Player player, org.enthusia.tags.TagDefinition tag) {
+        return canRevealTag(player.getUniqueId(), tag);
+    }
+
+    public boolean canRevealTag(UUID playerId, org.enthusia.tags.TagDefinition tag) {
+        String rewardId = tag.getHiddenUntilReward();
+        if (rewardId == null) return true;
+        RewardDefinition reward = rewards.get(rewardId);
+        return reward != null && reward.isHiddenUntilEarned() && canReveal(playerId, reward);
+    }
+
     public boolean isComplete(Player player, RewardDefinition reward) {
         if (!isAvailable()) return false;
         return evaluate(player, reward).claimable();
@@ -969,6 +1007,12 @@ public final class RewardService {
         }
         if (criterion.getSourceType() == RewardSourceType.CUSTOM_COUNTER) {
             String key = criterion.getKey();
+            if (org.enthusia.tags.advancements.domain.ProviderRewardEvidence.supportsCounter(key)) {
+                long earned = getCounter(player.getUniqueId(), key);
+                if (earned >= 1) return earned;
+                String milestone = key.substring(org.enthusia.tags.advancements.domain.ProviderRewardEvidence.COUNTER_PREFIX.length());
+                return providerProgress.getOrDefault(player.getUniqueId(), Map.of()).containsKey(milestone) ? 0 : -1;
+            }
             if ("diamond_ore_mined".equals(key)) {
                 return getCounter(player.getUniqueId(), NaturalBlockPolicy.counterKey(Material.DIAMOND_ORE))
                     + getCounter(player.getUniqueId(), NaturalBlockPolicy.counterKey(Material.DEEPSLATE_DIAMOND_ORE));
@@ -1024,6 +1068,16 @@ public final class RewardService {
             case PROJECTILE_HITS -> getCounter(player.getUniqueId(), "projectile_hits");
             case CUSTOM_COUNTER -> getCounter(player.getUniqueId(), criterion.getKey());
         };
+    }
+
+    java.util.OptionalLong getVerifiedMenuProgress(Player player, RewardCriterion criterion, ProgressSnapshot snapshot) {
+        if (!isAvailable() || criterion == null || !criterion.isValid() || snapshot == null)
+            return java.util.OptionalLong.empty();
+        RewardPlayerState state = getLoadedState(player.getUniqueId());
+        if (state == null || !state.isLoaded() || !isCriterionAvailable(criterion)) return java.util.OptionalLong.empty();
+        long value = getProgress(player, criterion, snapshot);
+        if (value < 0 || snapshot.unavailableCriteria().contains(criterionCacheKey(criterion))) return java.util.OptionalLong.empty();
+        return java.util.OptionalLong.of(value);
     }
 
     public String formatProgress(Player player, RewardCriterion criterion) {
@@ -1120,6 +1174,24 @@ public final class RewardService {
         return next;
     }
 
+    /** Main-thread observation from shared read-only providers; never claims or pays a reward. */
+    public void observeProviderProgress(Player player, Map<String, Integer> progress) {
+        if (!isAvailable() || player == null || !player.isOnline() || Bukkit.getPlayer(player.getUniqueId()) != player) return;
+        UUID id = player.getUniqueId();
+        RewardPlayerState state = getLoadedState(id);
+        if (state == null || !state.isLoaded()) return; // The next fresh tick retries after loading.
+        Map<String, Integer> verified = new java.util.HashMap<>();
+        progress.forEach((key, value) -> {
+            if (org.enthusia.tags.advancements.domain.ProviderRewardEvidence.keys().contains(key)
+                && value != null && value >= 0 && value <= 1000) verified.put(key, value);
+        });
+        providerProgress.put(id, Map.copyOf(verified));
+        for (String key : org.enthusia.tags.advancements.domain.ProviderRewardEvidence.completed(verified))
+            state.raiseCounter(org.enthusia.tags.advancements.domain.ProviderRewardEvidence.counterKey(key), 1L);
+        invalidateProgress(id);
+        queueUnlockCheck(id);
+    }
+
     public void setCounter(UUID playerId, String key, long value) {
         if (!isAvailable()) return;
         RewardPlayerState state = getLoadedState(playerId);
@@ -1203,6 +1275,9 @@ public final class RewardService {
         if ("reconcile".equals(subcommand)) {
             return handleReconcileCommand(sender, args);
         }
+        if ("counter".equals(subcommand)) {
+            return handleCounterCommand(sender, args);
+        }
         if ("inspect".equals(subcommand)) {
             return handleInspectCommand(sender, args);
         }
@@ -1213,6 +1288,39 @@ public final class RewardService {
             return handleIpReservationCommand(sender, args);
         }
         sendAdminUsage(sender);
+        return true;
+    }
+
+    /**
+     * Adds to a player's custom counter, for other plugins that report progress (the Watcher's theme). Queued until the
+     * player's state loads, the same as any other counter change.
+     */
+    private boolean handleCounterCommand(CommandSender sender, String[] args) {
+        if (args.length != 4) {
+            sender.sendMessage("Usage: /enthusiatags rewards counter <player> <key> <amount>");
+            return true;
+        }
+        OfflinePlayer target = findOfflineCommandTarget(sender, args, 1);
+        if (target == null) return true;
+        String key = args[2].toLowerCase(Locale.ROOT);
+        if (!key.matches("[a-z0-9_]{1,64}")) {
+            sender.sendMessage("Counter keys are 1-64 lowercase letters, digits or underscores.");
+            return true;
+        }
+        long amount;
+        try {
+            amount = Long.parseLong(args[3]);
+        } catch (NumberFormatException e) {
+            amount = 0L;
+        }
+        if (amount <= 0L) {
+            sender.sendMessage("The amount must be a positive whole number.");
+            return true;
+        }
+        UUID playerId = target.getUniqueId();
+        long next = incrementCounter(playerId, key, amount);
+        sender.sendMessage("Counter " + key + " for " + target.getName() + " is now " + next
+            + (isPlayerStateLoaded(playerId) ? "." : " (applies when they next join)."));
         return true;
     }
 
@@ -1727,6 +1835,7 @@ public final class RewardService {
         sender.sendMessage("       /enthusiatags rewards items <player>");
         sender.sendMessage("       /enthusiatags rewards ip <player> <reward> <ip>"
             + " <retain|release|repair> <reason>");
+        sender.sendMessage("       /enthusiatags rewards counter <player> <key> <amount>");
         sender.sendMessage("       /enthusiatags rewards reconcile <player> <reward>"
             + " <action-id|item:action-id|legacy|whole>"
             + " <delivered|retry|force-delivered|force-retry> <reason>");
@@ -1852,7 +1961,7 @@ public final class RewardService {
                     if (live == null || throwable != null || persistedUnlocks.isEmpty()
                         || getLoadedState(playerId) != state) return;
                     List<RewardDefinition> celebrations = persistedUnlocks.stream()
-                        .filter(reward -> liveUnlocks.contains(reward.getId().toLowerCase(Locale.ROOT))).toList();
+                        .filter(reward -> !reward.isHiddenUntilEarned() && liveUnlocks.contains(reward.getId().toLowerCase(Locale.ROOT))).toList();
                     if (celebrations.isEmpty()) return;
                     if (advancementNotifications != null && plugin.getConfig().getBoolean("advancements.enabled", true))
                         advancementNotifications.accept(live, celebrations);
@@ -2015,6 +2124,9 @@ public final class RewardService {
     private void playUnlockSound(Player player) {
         if (!plugin.getConfig().getBoolean("rewards.unlock-sound.enabled", true)) return;
         String configured = plugin.getConfig().getString("rewards.unlock-sound.sound", "BLOCK_AMETHYST_BLOCK_CHIME");
+        if (org.enthusia.tags.infrastructure.sound.CustomSound.play(player, configured,
+                (float) plugin.getConfig().getDouble("rewards.unlock-sound.volume", 0.35D),
+                (float) plugin.getConfig().getDouble("rewards.unlock-sound.pitch", 1.15D))) return;
         Sound sound;
         try {
             sound = Sound.valueOf(configured.toUpperCase(Locale.ROOT));
@@ -2819,6 +2931,10 @@ public final class RewardService {
             Material icon = parseMaterial(section.getString(id + ".icon", "NAME_TAG"), "rewards." + id + ".icon", true);
             List<RewardCriterion> criteria = loadCriteria(section.getConfigurationSection(id + ".criteria"));
             List<RewardAction> actions = loadActions(section.getConfigurationSection(id + ".rewards"), id);
+            if ("last_watch_remembered_2026".equalsIgnoreCase(id) && !validRememberedReward(criteria, actions)) {
+                plugin.getLogger().warning("Last Watch reward configuration is invalid; keeping it unavailable");
+                continue;
+            }
             String category = section.getString(id + ".category", inferCategory(criteria));
             RewardCompletionMode completionMode;
             try {
@@ -2829,9 +2945,44 @@ public final class RewardService {
                 plugin.getLogger().warning("Invalid completion-mode for reward " + id + "; using LATCHED");
             }
             loadedRewards.put(id.toLowerCase(Locale.ROOT),
-                new RewardDefinition(id, name, description, icon, criteria, actions, category, completionMode));
+                new RewardDefinition(id, name, description, icon, criteria, actions, category, completionMode)
+                    .withHiddenUntilEarned(privateRewardFlag(section, id))
+                    .withIconModel(iconModel(section.getString(id + ".icon-model"), id))
+                    .withAnnounceCompletion(announceCompletionFlag(section, id)));
         }
         rewards = java.util.Collections.unmodifiableMap(loadedRewards);
+    }
+
+    private String iconModel(String raw, String id) {
+        if (raw == null || raw.isBlank()) return null;
+        if (org.bukkit.NamespacedKey.fromString(raw.trim().toLowerCase(Locale.ROOT)) == null) {
+            plugin.getLogger().warning("Invalid icon-model for reward " + id + "; using the icon material");
+            return null;
+        }
+        return raw.trim().toLowerCase(Locale.ROOT);
+    }
+
+    static boolean validRememberedReward(List<RewardCriterion> criteria, List<RewardAction> actions) {
+        if (criteria.size() != 1 || actions.size() != 1) return false;
+        RewardCriterion criterion = criteria.getFirst();
+        RewardAction action = actions.getFirst();
+        return criterion.isValid() && criterion.getType() == RewardCriterionType.CUSTOM_COUNTER
+            && criterion.getSourceType() == RewardSourceType.CUSTOM_COUNTER
+            && "last_watch_halloween_2026".equals(criterion.getKey()) && criterion.getAmount() == 1
+            && action.isValid() && action.getType() == RewardActionType.TAG && "remembered".equals(action.getValue());
+    }
+
+    static boolean announceCompletionFlag(ConfigurationSection section, String id) {
+        String path = id + ".announce-completion";
+        // Only an explicit boolean false silences; a typo keeps the normal announcement.
+        return !(section.isBoolean(path) && !section.getBoolean(path));
+    }
+
+    static boolean privateRewardFlag(ConfigurationSection section, String id) {
+        String path = id + ".hidden-until-earned";
+        if ("last_watch_remembered_2026".equalsIgnoreCase(id)) return true;
+        // A malformed explicit flag must never silently turn an intended private reward public.
+        return section.contains(path) && (!section.isBoolean(path) || section.getBoolean(path));
     }
 
     List<RewardCriterion> loadCriteria(ConfigurationSection section) {

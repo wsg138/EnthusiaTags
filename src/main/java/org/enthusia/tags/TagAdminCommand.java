@@ -7,6 +7,7 @@ import org.bukkit.OfflinePlayer;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
+import org.bukkit.entity.Player;
 import org.bukkit.command.PluginCommand;
 import org.bukkit.command.TabCompleter;
 import org.enthusia.tags.daily.DailyService;
@@ -283,8 +284,8 @@ public final class TagAdminCommand implements CommandExecutor, TabCompleter {
         String subcommand = args[0].toLowerCase(Locale.ROOT);
         if (COMMAND_SIBLING.equals(subcommand)) return siblingTabComplete(args);
         if (args.length == PLAYER_ARGUMENTS && PLAYER_TARGET_COMMANDS.contains(subcommand)) return onlinePlayerNames();
-        if (args.length == PLAYER_ARGUMENTS && COMMAND_EDIT.equals(subcommand)) return tagIds();
-        if (args.length == TAG_ARGUMENTS && TAG_TARGET_COMMANDS.contains(subcommand)) return tagIds();
+        if (args.length == PLAYER_ARGUMENTS && COMMAND_EDIT.equals(subcommand)) return tagIds(sender);
+        if (args.length == TAG_ARGUMENTS && TAG_TARGET_COMMANDS.contains(subcommand)) return tagIds(sender);
         return Collections.emptyList();
     }
 
@@ -311,9 +312,13 @@ public final class TagAdminCommand implements CommandExecutor, TabCompleter {
         return names;
     }
 
-    private List<String> tagIds() {
+    private List<String> tagIds(CommandSender sender) {
         Set<String> ids = new java.util.HashSet<>();
-        for (TagDefinition tag : tagService.getRegistry().getAll()) ids.add(tag.getId().toLowerCase(Locale.ROOT));
+        for (TagDefinition tag : tagService.getRegistry().getAll()) {
+            if (sender instanceof Player player && tag.getHiddenUntilReward() != null &&
+                (plugin.getRewardService() == null || !plugin.getRewardService().canRevealTag(player, tag))) continue;
+            ids.add(tag.getId().toLowerCase(Locale.ROOT));
+        }
         return new ArrayList<>(ids);
     }
 

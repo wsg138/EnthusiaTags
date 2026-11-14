@@ -140,6 +140,20 @@ final class AdvancementLayout {
         root(map, "lag_was_crazy", 1, 25);
         chain(map, "lag_was_crazy", 2, 25,
             "all_rounder", "server_legend", "ultimate_survivor");
+        put(map, "watcher_melody", "ultimate_survivor", 5, 25);
+        put(map, "last_watch_remembered_2026", "watcher_melody", 6, 25);
+        // The hidden reward above never enters the public graph, so Silent Snow hangs off the melody.
+        put(map, "silent_snow_disc", "watcher_melody", 7, 25);
+
+        // Guild prestige (T-1150): tiers I-VI in one row. The eighth category moves
+        // provider rows to y = 33, so y = 29 is free. Server firsts are hidden until
+        // earned and never projected; they only need unique cells.
+        root(map, "prestige_1", 1, 29);
+        chain(map, "prestige_1", 2, 29,
+            "prestige_2", "prestige_3", "prestige_4", "prestige_5", "prestige_6");
+        for (int tier = 1; tier <= 6; tier++) {
+            put(map, "prestige_first_" + tier, "prestige_" + tier, tier, 30);
+        }
 
         return Map.copyOf(map);
     }

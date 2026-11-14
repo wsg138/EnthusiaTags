@@ -1,0 +1,7 @@
+# Original seed cluster; Pumpkin King's U+A0A0 is unchanged.
+pumpkin_patcher_seeds:
+  texture: enthusia:font/tags/pumpkin_patcher_seeds.png
+  font: minecraft:default
+  height: 10
+  ascent: 8
+  char: ꂡ

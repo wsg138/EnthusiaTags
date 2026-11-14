@@ -1,5 +1,55 @@
 # SPEAR tasks
 
+## INFRA-1129 [INFRA] Canonical release complexity refinement
+
+References: REQ-1125; implementation.md Layer Dependency Rules.
+Evidence: upstream PR32 exact head380497f verify/artifact passed, strict Codacy gate job121840093706 identifies NativeMilestonePresentation.mirrorTarget cyclomatic9 versus limit8. Extract the unchanged four-provider prefix predicate into providerTarget; retain all guards, aliases, IDs, descriptions and reward ownership. Existing NativeMilestonePresentationTest and full305-test suite govern behavior; no new imports or API.
+Acceptance: behavior-preserving extraction, full canonical verification and exact-head hosted review. Prove/engine do not apply to this complexity-only refactor; no behavioral red is invented.
+Status: [x] local complexity-only refinement verified: Java25 clean verify305 tests, zero failures/errors/skips; EARS,12Node and11Python checks pass. Exact-head hosted review remains a separate merge gate.
+
+## T-1128 [TDD] Reconcile provider completion with reward eligibility
+
+References: REQ-1128, REQ-1129; implementation.md Persistence and Presentation.
+Evidence: Discord report 1563592825398886450 shows Correspondent announced but reward 0/1; production GET-only rewards.yml requires advancement_reward:express/correspondent. Canonical main28048ca and fork main6d1acc9 omit a completion writer. Existing proposed PR27 head4e9f174 supplies ProviderRewardTracker and domain ProviderRewardEvidence; reconcile into isolated combined source e3b6f76 preserving PR15 presentation/Diary and exact sound support. Existing org.enthusia.tags.rewards.RewardService, org.enthusia.tags.rewards.RewardStorage, org.enthusia.tags.PerformanceMonitor, io.github.badgersmc.advancements.pilot.ProjectionService and four infrastructure bridges provide the integration seam. Tests use existing org.junit.jupiter.api.Test, org.junit.jupiter.api.io.TempDir, org.junit.jupiter.api.Assertions, org.mockito.Mockito and Paper org.bukkit APIs; JDK reflection only injects test storage. No new dependencies.
+Acceptance: all38 supported provider nodes latch completion once, persist across reload/reconnect without paying or rewriting claims, remain unavailable on failed reads, and preserve duplicate/Diary/sound regressions. Do not silently import PR27's distinct-correspondent counting policy: existing provider criteria remain unchanged. No production/TEST/DB/payout/restart/reload operations.
+Status: [x] locally verified; source review/hosted checks and TEST acceptance remain separate. All38 missing counters reproduced as behavioral assertion failures;305 Java tests pass after reconciliation, plus12 Node and11 Python checks, EARS, architecture and shaded SQLite probe. Custom-counter compatibility failure was also reproduced and repaired. See docs/evidence/provider-reward-completion.md. No server or player-data changes.
+
+## T-1125 [TDD] Single provider presentation and diary model
+
+References: REQ-1125, REQ-1126, REQ-1127.
+Status: locally verified; isolated from existing release checkouts. Publication waits for matching Roundtable acknowledgment.
+Evidence: read-only October 25 audit found 38 mirrored provider/reward cards, no YAML or stable-key duplicates. Production Diary uses WRITABLE_BOOK with item model nexo:diary_book; the bridge instead uses shared PAPER CMD 815002 and ignores the configured item model. Renderer 01fac426 passes the full cloned ItemStack to the Discord image adapter. No production writes or player database reads.
+Acceptance: one visible node and provider-owned notification; preserve historical progress, reward definitions, /rewards claim authority and fallback when providers are absent; do not merge unrelated same-title milestones by title. Dear Diary uses the same model as the physical diary, with configurable override and explicit blank legacy fallback. Live client/Discord image acceptance remains separate.
+
+T-1125 refinement: Java 25 clean verify passes 296 tests, zero failures/errors/skips; EARS, 12 Node and 11 Python tests, presence checksum, matching compiled renderer interface bytes and SHADED_SQLITE_READ_ONLY_OK pass. Independent unchanged-base assertion failures confirm both bugs; chronology and limits are recorded in docs/evidence/single-milestone-diary.md. Private simulation checked at 390px/320px. Local unmerged test artifact 2.2.3-single-milestone-diary-test.1 SHA256 c84cd6e3d9a86681df9a2bc99fce0048df6e30dc8bcade763110e628dd23cdc0. No source publication, live server changes or client acceptance yet.
+
+## INFRA-1122 — Pumpkin Patcher recognition tag
+
+References: REQ-1122; docs/evidence/pumpkin-patcher.md.
+Evidence: owner-approved final visual; live tag absent; all 130 glyph definitions and five external packs have no U+A0A1 conflict. Configuration/asset-only implementation uses the existing runtime APIs; no engine change or behavioral red/green history applies.
+Acceptance: exact seed PNG and font metrics, both glyphs outside bold, source/config preservation, read-only menu metadata and grants limited to ToxikFlame11 and Bobsuit, scoped reload with no restart. Run EARS/state tools and bounded asset/semantic/runtime verification.
+Status: locally verified; runtime activation and named-player grant evidence pending.
+
+## T-20261017 [TDD] Align the merged holiday renderer
+
+References: REQ-REL-001; implementation.md Layer Dependency Rules.
+Evidence: the new watcher palette bootstrap regression failed with Unexpected renderer version before implementation (tags-renderer-red.log). The parent renderer is merged at 01fac426152737c76cd4d2e570e07a33dde99798; release checks must use its actual pilot version, preserve strict SHA/POM validation and rerun the existing suites. No reward, menu, ownership or progression behavior changes.
+
+## T-917 [TDD] Holiday reward catalog
+
+References: REQ-917..919; implementation.md Presentation.
+Evidence: HolidayCatalogTest initially failed compilation for the missing hierarchy and migration APIs; after implementation all three focused tests pass. Clean Maven verify passes 258 tests; EARS validation and all 12 Node tooling tests pass. The schema assertion was updated from 5 to 7 for the new configuration version. Existing runtime catalog fields and custom Pumpkin King styling are preserved by copy-missing migration. No claims, permissions or server activation changed.
+Status: local verification complete; exact-head hosted review and native client acceptance pending.
+
+## T-945 [TDD] Recover reward browser source
+
+References: REQ-945 through REQ-948.
+Evidence: fresh canonical main28048ca; isolated codex/recover-reward-menu. The preserved production-labelled candidate has six browser presentation/state classes and a holder-owned action listener missing from main. Main interprets item metadata without checking top-slot/click/service ownership. Candidate is read-only and not proven equivalent to the running production binary.
+Acceptance: presentation-only recovery, exact existing claim/data policy, verified readings and delivery states, trusted holder actions, permission/session checks, queued-item retry preserved, focused/manual guide compatibility, stable refresh slots and lifecycle cleanup. Supporter entitlements/config/presence/tag menus remain excluded.
+Status: local engine verified. menu-red.log records two actual interaction assertion failures with zero errors against canonical main. New browser model, inventory, verified progress and interaction cases pass; clean Java 25 Maven verify passes all 262 tests with zero failures/errors/skips, including existing claim/IP/storage/lifecycle and pinned companion contracts. EARS and all 12 Node tooling tests pass; shaded SQLite read-only probe and diff checks pass. Architecture/rollout boundaries recorded in implementation.md. Hosted exact-head refinement and source/client acceptance remain separate.
+
+Refinement: initial PR #28 head 7154512 passed hosted build and Sentinel, while Codacy rejected 34 maintainability findings. Split rendering/refresh/progress helpers, immutable presentation tables, cached interaction dispatch, and distinct field names retain behavior. Holder maps remain server-thread confined with narrowly documented PMD annotations. Java 25 clean verify still passes 262 tests; EARS, 12 Node tooling tests and shaded SQLite read-only probe pass. Exact-head hosted refinement remains pending.
+
 ## T-916 [INFRA] Canonical advancement presentation dependency
 
 References: REQ-916; implementation.md Presentation and Verification and rollout.
@@ -271,3 +321,136 @@ References: REQ-906; implementation.md Presentation.
 Evidence: Current owner-bound projection API and scheduler integration; completion-linkage-red.log reproduced two uncaught linkage errors using a captured real scheduled callback. A separate fatal-error test proves VM failures must not be swallowed.
 Acceptance: RuntimeException and LinkageError are contained at projection/removal boundaries; no broad catch-all for Error/Throwable, no reward changes, and all dependent PRs inherit the fix.
 Status: complete locally. Java 25 clean Maven verification passes 149 tests with zero failures and errors; hosted review remains pending.
+
+## T-910 [TDD] Holiday reward tags for EnthusiaHolidays
+
+References: REQ-910; EnthusiaHolidays `tag:` rewards (`integrations.tag-command: "tag give {player} {tag}"`).
+Evidence: `HolidayTagCatalog` mirrors `FrontierPortableTagCatalog` (set-if-missing, single save, no reload loop) and installs from the same `TagListener` hook with one `reloadAll`. Ids are year-agnostic so later events reuse them; tags are owned directly through `tag give`, so no `entitlement-permission` is written. `HolidayTagCatalogTest` (2) checks the exact id set the bundled holiday events grant, lower-case ids, and that an admin's custom display name survives while missing fields are filled once.
+Status: complete locally. Java 25 `mvn -B -ntp clean verify` after the repo's own bootstrap scripts: 252 tests, zero failures/errors/skips. Hosted CI and Codacy pending.
+
+## T-911 [TDD] Watcher reward tag
+
+References: REQ-910; EnthusiaHolidays `docs/watcher.md` (The Watcher, D6).
+Evidence: `HolidayTagCatalogTest` failed first on the missing `seen_the_watcher` id, then passed with the catalog entry (same set-if-missing install path as T-910).
+Status: complete locally; hosted CI and Codacy pending.
+
+- [x] Add the `pumpkin_king` holiday reward tag (REQ-910): EnthusiaHolidays gives it to the first player to find every pumpkin (`hunt.first-finishers`, count 1).
+
+Evidence: `HolidayTagCatalogTest` failed first on the missing `pumpkin_king` id, then passed with the catalog entry. It is installed through the same set-if-missing path as T-910.
+
+- [x] Give `pumpkin_king` a pumpkin on each side (owner, 2026-10-09: "🎃Pumpkin King🎃, with a nice orange color with a slight gradient").
+
+  The tag text is `ꂠ<bold><gradient:#FFB347:#FF7518>Pumpkin King</gradient></bold>ꂠ`. U+A0A0 is the Nexo glyph `pumpkin_king_icon` in `resourcepack/holiday-tags`, which reuses the LumaGuilds Halloween menu's jack o'lantern pixel for pixel. A candle-lit version ships beside it as an alternative.
+
+  Evidence: `HolidayTagCatalogTest.pumpkinKingWearsThePumpkinGlyphOnBothSides` failed first on the old text, then passed. `mvn verify` passes.
+
+  Owner's choice (2026-10-09): option B, the candle-lit pumpkin, with the tag text `<b><gradient:#FF3A00:#FF5A00>Pumpkin King</gradient></b>`. The sculk version is kept as `pumpkin_sculk_alt.png`.
+
+## T-920 [TDD] Preserve production reward menu for Holidays
+
+References: REQ-920, REQ-921.
+Evidence: Production JAR unique-mail-test.1 downloaded read-only; javap confirms production RewardMenuState/dashboard/browser family. Rejected build replaced that family. Regression checks will assert original frame and controls, nested catalogs and no award actions.
+Status: spec; TEST rollback underway; no production writes.
+
+T-920 Status: local269 tests,12 tooling tests and EARS pass. Existing production browser recovered; sameframe seasonal navigation implemented. TEST rollback verified, corrected TEST activation and exact-head hosted review pending.
+
+## T-960 [TDD] Consistent collection and KOTH menus
+
+References: REQ-960.
+Evidence: Existing Tags and Cosmetics fill slots zero onward and truncate collections; KOTH uses an unframed 28-entry inventory. Regression covers reserved frame slots and paging.
+Status: spec.
+
+T-960 Status: 273 Java tests pass, zero failures/errors/skips; 12 SPEAR tooling tests and EARS pass. Actual newly built KOTH shadow JAR/Tags JAR navigation contract passes. Shared layout is infrastructure presentation; existing grant/claim storage is unchanged. Hosted final-head checks and in-game acceptance remain separate.
+T-960 Hosted refinement: Codacy annotation114281598687 identified one repeated KOTH category literal. Centralized KOTH_CATEGORY without a behavior change; repeated 273-test verification passes. KOTH hosted build passes. Final Tags hosted checks remain to be inspected.
+
+## T-970 [TDD] Production defaults and advancement subcategories
+
+References: REQ-970, REQ-971.
+Evidence: Live production rewards read-only snapshot contains Commend, Express, DiaryKeeper and Warzone Duels rewards; bundled defaults omit production categories. copyMissing iterates root keys recursively rather than current section keys. Regression pending.
+Status: spec.
+
+T-970 evidence: Two initial behavioral regressions failed (provider filtering and missing default categories), then 276 Java tests passed. Actual inventory test proves Commend child, original claim ID, focused link and parent Back. Migration test proves idempotence and preservation of administrator reward definitions. Default reward/payout entries remain unchanged; only production category defaults are added. Live production/TEST catalogs inspected read-only. No server writes for this correction yet.
+
+T-970 refinement and TEST activation: source 2e455da43f3ba7133dc5d45fe6591bedde60f8e9 passes both exact-head GitHub workflows (verification run 38078106063, Sentinel run 38078106085); Codacy reports zero new issues and review threads are empty. 12 tooling tests and EARS pass. Unmerged TEST JAR SHA-256 165E1B38EB862398EC27F0DFE491BA70358A7317F0F26ED137B209D58FF0F766 matches downloaded installed bytes. SMP Test 5d109214 restarted 2026-10-10 15:04:44 EDT, Done 15:05:33 (39.100s), Tags enabled 15:05:24 and startup summary warnings=0; version confirms 2.2.3-menu-recovery-SNAPSHOT. Previous artifact retained with .disabled rollback suffix. KOTH artifact unchanged, enabled 15:05:29; its existing progression/configuration limitations remain separate. Production untouched. Owner-private preview version appgver_74ac105841088191a15003b1b4cfbc45 published from 2cff75e3548a36fa83707f6884a47411cda72134 using remote-build fallback because the local packager requires unavailable Bash. Authenticated preview QA at 390px confirms no document overflow, ten Commend rewards, reward inspection and parent Back. Native Minecraft appearance, progress and claim acceptance remain pending.
+Status: implementation, local proof, hosted code checks and TEST activation verified; in-game/client acceptance pending.
+
+## T-980 [TDD] Restore complete production collection menus
+
+References: REQ-980.
+Evidence: Production binary unique-mail-test.1 exposes filters, preview and full navigation absent from deployed source. Preserved production source pr-work/EnthusiaTags contains the same API and slots. Recover presentation and click handlers without importing unrelated entitlement grant/storage machinery; use read-only source metadata. Keep holiday and provider reward catalogs unchanged. TEST upload/restart authorized; production read-only.
+Status: spec.
+
+T-980 local proof: production All Tags control regression failed with one assertion on old source. Restored source passes 278 Java tests with zero failures/errors, EARS validation and 12 tooling tests. Inventory fixture verifies production control/footer placement, pagination, seven-category cosmetic dashboards and admin-gated preview. Listener tests execute deferred tag/cosmetic preview clicks and prove no selection/clear/toggle calls. Source metadata is read-only and excludes player grant lists. Preview published from 9ddd18d35c36c211acda1e7055beeb4079ec40cd; native client acceptance remains separate. Hosted review and TEST activation pending.
+
+T-980 hosted refinement: exact-head verification job 114294883979 passed build, tests and shaded SQLite. Codacy gate 114295138173 identified repeated literals and complex menu assemblers. Extracted presentation helpers and filter constants without changing slots, lore, navigation or ownership; repeated 278-test verification passes (production-collections-refine.log). Replacement TEST artifact and final-head hosted review pending.
+
+T-980 refined proof: dd95c040b918b82e1a16b1aa5a6175c98c5fedda passes verification 38080444535 (including exact-head Codacy with zero annotations), Sentinel 38080444527 and CodeRabbit; no inline threads. Clean verify repeats 278 tests, zero failures/errors/skips; 12 tooling tests pass. Corrected the static plugin.yml version to match the POM so runtime identification distinguishes this production collection restoration. Published owner-private preview appgver_c210408ec8648191b5b52e7c1e156b51 is checked at 390px with no document overflow; preview remains a simulation and Minecraft acceptance pending.
+
+T-980 TEST activation: deployed source 331c05ac6e3089e17a781258d0c1bfff2761ec68 passes verification 38080640138 (including exact-head Codacy), Sentinel 38080640120 and CodeRabbit; no inline threads. Clean build passes 278 tests, zero failures/errors/skips. Unmerged TEST artifact EnthusiaTags-PR29-331c05a-PRODUCTION-COLLECTIONS-UNMERGED-TEST.jar SHA-256 069C5DEB70392CE6CF947918807622BE409C023EE8844461350E94CE434B7078 matches downloaded installed bytes. SMP Test 5d109214 restarted 2026-10-10 15:43:58 EDT; Tags enabled 15:44:37, startup summary warnings=0; Done 15:44:46 (38.202s). Console confirms 2.2.3-production-collections-SNAPSHOT at 15:45:16. Previous JARs retained disabled; KOTH artifact unchanged and enabled. Existing nametag consumer compatibility and KOTH load/configuration warnings remain separate. Production untouched. Delivery record contains startup log, console snapshot and screenshot.
+Status: implementation, local proof, hosted review and TEST activation verified; native client acceptance pending. PR remains unmerged.
+
+## T-1120 [TDD] Native tab logo and live reward layout
+
+Status: spec.
+References: REQ-1120, REQ-007, REQ-033.
+Acceptance: scoped Enthusia logo with configurable legacy fallback; live provider-linked claim cards, four-column fallback branches, no overlapping nodes or dangling parents; stable reward/node identity and unchanged manual payout authority.
+Evidence: production read-only audit has 148 rewards, 48 outside the fixed bundled layout. Provider claim cards fall into an unbounded advancements-category chain. Screenshot shows the wrong PAPER-based icon; installed scoped logo model and original orange logo texture exist in the server pack source. No production mutations authorized for this fix.
+
+T-1120 proof: NativeTabPresentationTest reproduced the legacy behavior with 5 tests, 4 assertion failures and no errors. The implemented organizer and scoped model pass 7 focused tests. Full Maven verification passes 285 tests with zero failures/errors/skips; EARS and all 12 SPEAR tooling tests pass. A read-only public-catalog fixture reconstructed the actual 148 rewards plus 38 provider nodes: all 186 identities remain intact, all positions are unique and parent-first validation passes. Browser review moved claim cards to offset rows so they do not appear to interrupt the provider progression chain.
+Architecture: presentation-only helper copies every node metadata field; no payout, criteria, database, permission or module activation code changes. Scoped item-model mode needs the supplied pack; an explicit empty logo-item-model retains legacy CMD-only behavior. The existing server pack source already contains enthusia:advancement/logo and the original orange logo. A 390px browser check verifies no document overflow and interactive branch selection. In-game pack/client acceptance is pending. Production remains unchanged. Hosted source review and preview publication are recorded separately.
+
+## T-1121 [TDD] Single Forgotten Melody announcement owner
+
+References: REQ-1123, REQ-1124.
+Evidence: Holidays main a5bfa75 grants holidays/forgotten_melody and increments watcher_theme_heard; Tags fork main a2d7d9e celebrates watcher_melody from that same counter. Both call ProjectionService.celebrate. Actual controller regression failed with NeverWantedButInvoked before the ownership filter. Six focused tests and all 288 Java tests now pass, plus EARS, 12 Node and 11 Python tooling tests and the shaded SQLite probe. See docs/evidence/melody-single-announcement.md. No player data resets or runtime changes.
+Status: locally verified; PR/CI and native acceptance separate. SPEAR state selected REQ-1121 before the initial ID collision was caught; authoritative requirement IDs were corrected to REQ-1123/1124 before behavioral proof, and the original local state history is retained without rewriting it.
+
+### TASK-20261025 — Exact custom event support
+
+References: REQ-SOUND-001
+Evidence: Existing enum-only paths reject reviewed enthusia_theme events. Behavioral routing test added; red/green results pending. Preserve installed TEST feature commits in a separate combined TEST branch; source PR remains focused.
+
+## INFRA-1128 [INFRA] Exact-head hosted style refinement
+
+References: REQ-1128; implementation.md Layer Dependency Rules.
+Evidence: PR17 initial head8284348 passed hosted verify121762224361 and artifact121762224207; strict Codacy gate121763174063 reported one heading blank-line issue and two fully qualified ProviderRewardTracker references. Existing org.enthusia.tags.advancements.ProviderRewardTracker supplies the unchanged class imported explicitly; no new dependency or behavior.
+Acceptance: standard import and heading spacing only, full suite and exact-head hosted gates. Prove/engine do not apply to formatting-only infrastructure refinement; no behavioral red is invented.
+Status: [x] local refinement verified; repeated clean verification passes305 tests, zero failures/errors/skips. Updated-head hosted checks remain pending.
+
+## T-1130 [TDD] Optional private reward visibility
+
+References: REQ-PRIVATE-REWARD-001/002. Implement explicit opt-in, preserve ordinary defaults and constructor compatibility, filter before summaries and all UI surfaces, prevent unearned direct opens, avoid native public advancement/celebration, and fail closed when data is unavailable. Verify durable claimed/unlocked status and event-independent claims, tag preview, counts, partial errors, refresh, and no normal reward regression. Provide a mobile-accessible interactive preview of any changed menu behavior; native client acceptance is separate. Do not add user-specific secret content to public documentation or source.
+
+Evidence: Current `RewardMenu` snapshots every configured reward before counting or rendering; direct focused opens and holiday tag catalogs bypass eligibility-based visibility. `TagMenu` admin preview includes every registered tag. `NativeAdvancementController` globally registers all reward nodes. The private projection companion is still an unmerged draft; no private reward configuration or entitlement is being installed by this task.
+
+Tooling note: the first task ID used letters after the hyphen, which the state helper cannot parse; its newly-created transient state was reset before selecting valid task T-1130. No test result was recorded.
+
+Actual prove: the focused `PrivateRewardVisibilityTest` failed test compilation because `PrivateRewardVisibility` did not yet exist; this is contract-red evidence, not a reproduced production leak. Pinned renderer and LoreItems bootstrap checks passed. Proceed to engine.
+
+Result: `mvn clean verify` passed 314 tests; 12 SPEAR Node and 11 companion Python tests passed, as did the EARS check. Source review and a simulated local preview cover the visibility surfaces; paired configuration validation, a mobile-accessible hosted preview, and native/client and producer integration remain release gates. See docs/evidence/private-reward-visibility.md.
+
+## T-1140 [TDD] Recover persisted tag ownership across loading and reconnect
+
+References: REQ-1140 through REQ-1143; implementation.md Tag ownership loading.
+Evidence: The player reports previously claimed/equipped tags missing after reconnect. A read-only stable production tag-only database/WAL summary establishes 35 owned tags including baltop_elite, a saved selection, and valid definitions; no deletion is established. At fork main 6efb25f7, TagService.getPlayerData caches an empty placeholder, both preload paths treat any cache entry as loaded, and asynchronous completion has no attempt/session identity guard. TagStorage.StoredTagData and loadNow/loadAsync, PlayerTagData, existing CompletableFuture, JUnit 5 and Mockito dependencies provide the test seam; no new dependency or live player data fixture is needed. Pinned companion build metadata remains unchanged. Source ownership ACKs 3060-3063 cover the isolated class/tests/docs scope; local JVM memory HOLD remains effective and hosted CI needs a separate capacity claim.
+Acceptance: meaningful unchanged-source service-boundary failures for early access, failed-load recovery, stale reconnect completion and successful synchronous future completion; verified empty loads coalesce and remain cached; no read operation writes grants/revocations/selections, no reward or schema changes. Run existing EARS/state helpers, architecture/tooling checks and canonical clean verification; inspect exact-head CI/review and produce a reviewable PR. No production writes, merge or activation. Shared TEST/client work requires an amended fixture/artifact/session-safe handoff.
+Evidence: Hosted unchanged-source commit e42ae7f produced six behavioral failures among seven new loading tests (328 total, zero errors). Implementation commit 38693a6 passes eleven loading/persistence tests and all 332 tests with zero failures/errors/skips, plus EARS, 12 Node tooling tests, pinned companion bootstrap checks and the shaded SQLite probe. TagService introduces no imports; the test uses existing Java, JUnit and Mockito APIs. LayerRulesTest passes and no domain/application source changes. See docs/evidence/tag-loading-recovery.md for exact runs and acceptance limits.
+
+Status: [x] source regression fix, architecture and refinement verified on d47f596 (332 tests, exact-head Codacy success); version/hash verified in hosted TEST artifact13069785434. Documentation follow-up head still requires hosted checks. Native preflight stopped on a scheduled full-network restart warning before input; TEST/client regression acceptance and production activation remain separate and pending.
+
+## T-1150 [TDD] Bundle the guild prestige advancements
+
+References: REQ-1150 through REQ-1153; LumaGuilds REQ-152 to REQ-154 (counter producer); docs/guild-prestige-advancements.md.
+Evidence: Production renders advancements with the EnthusiaAdvancements pilot (operator-confirmed `1.0.0-pilot…`), whose nodes come from Tags rewards via `NativeAdvancementController.rebuild` (one row per category, hidden-until-earned rewards excluded; frames from `advancements.frames.<id>`). `RewardService.loadRewards` accepts `CUSTOM_COUNTER` criteria with `key`/`amount`, `TAG` actions with `id`, empty action lists, `hidden-until-earned` and LATCHED completion by default. `/enthusiatags rewards counter <player> <key> <amount>` (`handleCounterCommand`) is the documented producer entry point and `PlayerLookup.findPlayer` accepts UUIDs. Tag definitions live under `config.yml` `tags:` (`display-name`, `tag-text`, `icon`). Existing bundled-resource test pattern: `AdvancementCategoriesTest.defaultRootCategoriesIncludeProductionCatalog` (`YamlConfiguration.loadConfiguration` over `/rewards.yml`). Test imports: `org.bukkit.configuration.file.YamlConfiguration`, `org.bukkit.configuration.ConfigurationSection`, `org.junit.jupiter.api.Test`, `java.io.InputStreamReader`, `java.nio.charset.StandardCharsets`, `java.util.Set`, `java.util.List`, `java.util.Locale`.
+Acceptance: a bundled-resource test fails on unchanged source, then passes with the new category, twelve achievements, three cosmetic tags and frames; full `mvn clean verify` stays green. Bundled defaults do not reach an existing production `rewards.yml`; operators merge the documented snippet. No production writes, merge or activation.
+Evidence: Unchanged-source run of the new bundled-resource test failed 4/4 on assertions (category missing, server firsts missing, no tags, frames null), no errors. Full verification then exposed three intentional catalogue pins: `RewardConfigPolicyTest` bundled count 102 -> 114, `RewardConfigV5MigrationTest` migrated count 103 -> 115 (114 bundled + 1 custom), and `AdvancementLayoutTest` requiring a fixed, non-overlapping placement for every bundled reward. `AdvancementLayout` now places tiers I-VI at y = 29 and the hidden server firsts at y = 30; the eighth native category moves provider rows from y = 29 to y = 33 (verified by counting non-hidden categories before/after: 7 -> 8). No new imports in main sources. Final `mvn clean verify` 336 tests, 0 failures/errors/skips, shaded jar built; `tools/spear/ears.mjs` passes; 12 SPEAR Node and 11 companion Python tests pass; companion bootstrap rebuilt the pinned renderer (44 tests).
+
+Status: [x] source, tests and docs verified locally. Hosted checks, operator merge of rewards/tags into production files, TEST/client acceptance and production activation remain separate and pending.
+
+## T-1154 [TDD] Toast-only prestige celebrations
+
+References: REQ-1154; EnthusiaAdvancements REQ-PILOT-QUIET-CELEBRATION-001 (pilot `1.0.0-pilot.7`, FainNeito/EnthusiaAdvancements#14); docs/guild-prestige-advancements.md.
+Evidence: `NativeAdvancementController.celebratePending` calls `ProjectionService.celebrate(owner, namespace, player, key)`, whose pilot implementation shows the toast and then broadcasts chat and DiscordSRV. Tags compiles against pilot.6, pinned to BadgersMC/EnthusiaAdvancements in `tools/ci/companions.json`, which has no toast-only overload, so `CelebrationGateway` looks it up on the installed renderer class at runtime. Reward flags follow `RewardService.privateRewardFlag` and `RewardDefinition.withHiddenUntilEarned`.
+Acceptance: new tests fail first, then pass; full `mvn clean verify` stays green; on pilot.6 nothing changes except one warning.
+Evidence: scaffolded run failed 4 of 8 targeted assertions (flag parsing, definition flag, bundled `announce-completion`, toast-only call); the fallback case passed against the scaffold as intended. Final targeted run 8/8.
+Final `mvn clean verify` 340 tests, 0 failures/errors/skips; `tools/spear/ears.mjs` passes. `PilotPlugin` is a public class whose public five-argument `celebrate` the gateway resolves with `getClass().getMethod`.

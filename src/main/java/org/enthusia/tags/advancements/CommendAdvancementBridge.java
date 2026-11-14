@@ -57,6 +57,12 @@ final class CommendAdvancementBridge {
             player, ignored -> new ReputationMilestoneProgress()).observe(stats);
     }
 
+    boolean evidenceAvailable(UUID player) {
+        var snapshot = latest;
+        Long joined = sessionStarted.get(player);
+        return snapshot != null && joined != null && snapshot.readStarted() - joined >= 0;
+    }
+
     void forget(UUID player) {
         sessions.remove(player);
         sessionStarted.remove(player);

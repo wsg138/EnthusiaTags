@@ -1,5 +1,25 @@
 # EnthusiaTags advancement pilot
 
+- REQ-1140: WHEN tag ownership is read before storage has supplied a successful snapshot THE SYSTEM SHALL permit the persisted load without treating a presentation placeholder as verified empty ownership.
+- REQ-1141: IF a tag ownership read fails THEN THE SYSTEM SHALL permit a subsequent ownership read or preload to retry without granting tags or replaying rewards.
+- REQ-1142: WHEN a tag load completes after its player session or load attempt has been superseded THE SYSTEM SHALL discard the stale result without replacing the current snapshot or removing its pending load.
+- REQ-1143: WHEN storage verifies genuinely empty ownership THE SYSTEM SHALL cache that successful empty snapshot while preserving existing tag, selection, entitlement and claim semantics.
+
+- REQ-1128: WHEN any existing provider milestone is verified complete THE SYSTEM SHALL persist its reward completion counter independently of rendering, preserving manual claims, existing payouts, stored ownership and provider criteria.
+- REQ-1129: IF provider evidence is unavailable, incomplete, stale or belongs to a previous player session THEN THE SYSTEM SHALL avoid inventing completion while retaining previously earned reward eligibility.
+
+- REQ-1125: WHEN a registered provider milestone is the sole one-count criterion of a reward THE SYSTEM SHALL display and celebrate only the provider node, retain reward details and manual claims, and silently project the maximum verified progress without changing stored identifiers or payouts.
+- REQ-1126: IF a provider is unavailable or a reward has additional criteria THE SYSTEM SHALL retain its independent reward card and notification behavior.
+- REQ-1127: WHEN Dear Diary is rendered THE SYSTEM SHALL use the installed diary named item model for both native and Discord rendering, honor explicit custom models and legacy opt-out, and preserve all milestone keys and criteria.
+
+- REQ-1122: WHEN staff install Pumpkin Patcher THE SYSTEM SHALL display its approved sage-to-cream bold title with two original seed clusters, preserve Pumpkin King's existing glyph, expose staff-award source metadata without automatic qualification, and allow the existing grant command to award it only to the requested players.
+
+- REQ-REL-001: WHEN verifying the holiday release THE SYSTEM SHALL compile against the exact immutable merged advancement renderer version while rejecting mismatched commits, mismatched POMs and arbitrary version suffixes.
+
+- REQ-917: WHEN a player opens rewards THE SYSTEM SHALL display a Holidays category containing configurable Halloween and Christmas subcategories with event-earned tag descriptions and ownership, without granting rewards from catalog entries.
+- REQ-918: WHEN reward categories are nested THE SYSTEM SHALL support parent navigation and pagination without hiding existing categories or changing reward claims.
+- REQ-919: WHEN holiday tag defaults are installed THE SYSTEM SHALL make Pumpkin Hunter bold and preserve configured colors, custom tags, earned ownership, and reward history.
+
 - REQ-916: WHEN companion sources are verified THE SYSTEM SHALL use the canonical merged advancement presentation provider with matching Maven coordinates and reject unapproved repositories, versions or commits without changing reward behavior.
 
 - REQ-914: WHEN playtime reward requirements are loaded THE SYSTEM SHALL use active playtime for every bundled and existing total or AFK minute criterion, retaining thresholds, payouts, custom non-time criteria, historical claims, and administrator descriptions.
@@ -97,3 +117,43 @@ The user explicitly authorized the remaining non-guild WarzoneDuels advancement 
 - REQ-905: WHEN local workflow tooling reads or modifies task state THE SYSTEM SHALL reject malformed state, serialize concurrent operations, enforce required evidence, and replace files atomically.
 
 - REQ-906: IF a companion linkage error occurs during projection or tree removal THEN THE SYSTEM SHALL contain and log that integration failure while preserving retry/cleanup behavior without swallowing fatal virtual-machine errors.
+
+## Holiday reward tags (EnthusiaHolidays)
+
+- REQ-910: WHEN the plugin starts THE SYSTEM SHALL install any missing EnthusiaHolidays reward tag definitions (pumpkin_hunter, no_pumpkin_left_behind, present_seeker, home_for_the_holidays, advent_keeper, secret_santa, seen_the_watcher, pumpkin_king) without overwriting administrator edits, so that `tag give <player> <id>` from holiday events always names a known tag.
+
+## Reward browser source recovery
+
+- REQ-945: WHEN a player browses rewards THE SYSTEM SHALL expose the preserved dashboard, category, ready, filter, sorting, grouping and focused navigation without changing reward definitions or claiming during navigation.
+- REQ-946: WHEN reward progress or delivery is displayed THE SYSTEM SHALL distinguish unavailable evidence, incomplete, ready, claimed, queued, pending, failed, withheld and review states using existing RewardService authority.
+- REQ-947: WHEN a reward menu receives interaction THE SYSTEM SHALL accept only its own server-side top-inventory actions and recheck permission, online session and inventory before deferred navigation or ordinary left-click claims.
+- REQ-948: WHEN a claim finishes or a reward browser refreshes THE SYSTEM SHALL retain stable visible slots and release in-flight guards without reopening a closed inventory or moving a new session into an old view.
+
+- REQ-920: WHEN Holidays is browsed THE SYSTEM SHALL retain the production 45-slot framed dashboard, seven-category pagination, 54-slot framed browser, existing controls and reward actions while adding Holidays and nested seasonal catalogs.
+- REQ-921: WHEN a seasonal catalog is browsed THE SYSTEM SHALL show earned or locked tags without claiming event awards and return Back to the parent holiday category.
+
+- REQ-960: WHEN Tags, Cosmetics or KOTH progression is browsed THE SYSTEM SHALL retain the production rewards frame, reserved controls, pagination and provider-owned award authority.
+
+- REQ-970: WHEN a player opens rewards THE SYSTEM SHALL retain production default categories, frame and controls, add Holidays and optional KOTH, and expose advancement rewards in provider subcategories while preserving reward definitions and claims.
+- REQ-971: WHEN missing nested defaults are copied THE SYSTEM SHALL traverse each actual child section once without constructing repeated parent paths or overwriting administrator values.
+- REQ-980: WHEN Tags or Cosmetics is opened THE SYSTEM SHALL retain the production dashboard slots, filters, headers, source descriptions, navigation and permission-gated read-only Admin Preview while preserving selections, ownership and existing reward categories.
+
+- REQ-1120: WHEN the Enthusia tab is rendered THE SYSTEM SHALL use its scoped logo item model, organize advancement-backed rewards with their available provider nodes, wrap additional rewards into bounded non-overlapping branches, and preserve reward identities, progress, criteria and manual claim authority.
+
+- REQ-1123: WHEN Forgotten Melody completes while EnthusiaHolidays is enabled THE SYSTEM SHALL leave its celebration to EnthusiaHolidays while retaining Tags reward progress, native projection and manual disc claim authority.
+- REQ-1124: IF EnthusiaHolidays is absent or disabled THE SYSTEM SHALL retain the Tags Forgotten Melody celebration and preserve celebrations for all unrelated rewards.
+
+- REQ-SOUND-001: WHEN a configured sound is a valid namespaced resource-pack event THE SYSTEM SHALL play that exact event once at the existing trigger while preserving legacy sound names, gain, pitch, recipients, enablement and invalid-value fallback.
+
+- REQ-PRIVATE-REWARD-001: WHEN a reward is explicitly marked hidden until earned THE SYSTEM SHALL omit its name, description, icon and counts from unearned or unknown viewers' reward screens, focused openings, tag previews and public advancement projection; WHEN durable earned eligibility is verified THE SYSTEM SHALL permit the normal one-time claim even after the originating event ends.
+- REQ-PRIVATE-REWARD-002: IF reward evidence or storage is unavailable THE SYSTEM SHALL fail closed for private visibility without altering existing public reward, tag, claim, sibling, daily or gold policies.
+
+## Guild prestige advancements
+
+LumaGuilds credits counters (REQ-152 to REQ-154 in LumaGuilds); Tags owns the definitions. Operator snippet and decisions: `docs/guild-prestige-advancements.md`.
+
+- REQ-1150: THE SYSTEM SHALL bundle a `prestige` reward category with six latched achievements, one per guild prestige tier I to VI, each completed by the custom counter `guild_prestige_<tier>` reaching 1, so that a repeated credit cannot complete or pay an achievement twice.
+- REQ-1151: THE SYSTEM SHALL bundle six server-first achievements in the same category, completed by `guild_prestige_first_<tier>` reaching 1 and marked hidden until earned, so they stay out of the public advancement tab and completion broadcasts until a player has earned one.
+- REQ-1152: THE SYSTEM SHALL keep guild prestige rewards cosmetic: their actions SHALL be tags only (no MONEY, ITEM or COMMAND actions), and every referenced tag SHALL be defined in the bundled tag catalogue.
+- REQ-1153: THE SYSTEM SHALL bundle native advancement frames for the prestige achievements: TASK for tiers I and II, GOAL for tiers III to V, and CHALLENGE for tier VI.
+- REQ-1154: WHEN a reward with `announce-completion: false` is completed THE SYSTEM SHALL ask the advancement renderer for a toast-only celebration, so the player sees their toast and no chat line or Discord post is sent; rewards without the flag, or with any value other than boolean `false`, SHALL keep the full celebration. WHERE the installed renderer has no toast-only celebration THE SYSTEM SHALL fall back to the full celebration and log that once. The bundled guild prestige tier achievements SHALL set `announce-completion: false`.

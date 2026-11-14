@@ -55,6 +55,12 @@ final class DiaryAdvancementBridge {
             player, ignored -> new DiaryMilestoneProgress()).observe(stats);
     }
 
+    boolean evidenceAvailable(UUID player) {
+        var snapshot = latest;
+        Long joined = sessionStarted.get(player);
+        return snapshot != null && joined != null && snapshot.readStarted() - joined >= 0;
+    }
+
     void forget(UUID player) {
         sessions.remove(player);
         sessionStarted.remove(player);
@@ -65,10 +71,18 @@ final class DiaryAdvancementBridge {
             false, 0, 0, 0, 0, 0);
     }
     static List<ProjectionService.Node> nodes(int baseY, int diaryIconCustomModelData) {
+        return nodes(baseY, diaryIconCustomModelData, "nexo:diary_book");
+    }
+
+    static List<ProjectionService.Node> nodes(int baseY, int diaryIconCustomModelData, String itemModel) {
+        // Retire the old bundled PAPER selector; production's physical diary owns this model.
+        String model = "enthusia:advancement/diary".equals(itemModel) ? "nexo:diary_book" : itemModel;
+        boolean named = model != null && !model.isBlank();
         return List.of(
             node("dear_diary", null, "Dear Diary...",
                 "Receive your personal diary for the first time.",
-                Material.PAPER, diaryIconCustomModelData, "TASK", 1, baseY),
+                named ? Material.WRITABLE_BOOK : Material.PAPER,
+                named ? null : diaryIconCustomModelData, named ? model : null, "TASK", 1, baseY),
             node("first_entry", "dear_diary", "First Entry",
                 "Write or edit your diary once.",
                 Material.INK_SAC, "TASK", 2, baseY - 1),
@@ -109,7 +123,7 @@ final class DiaryAdvancementBridge {
 
     private static ProjectionService.Node node(
         String id, String parent, String title, String requirement,
-        Material icon, Integer customModelData, String frame, int x, int y
+        Material icon, Integer customModelData, String itemModel, String frame, int x, int y
     ) {
         return new ProjectionService.Node(
             "diary/" + id,
@@ -118,6 +132,6 @@ final class DiaryAdvancementBridge {
             List.of("§7DiaryKeeper", "§7Requirements:", "§f" + requirement,
                 "§7Progress is read from DiaryKeeper.",
                 "§7Rewards: None (advancement only)."),
-            icon, customModelData, frame, x, y);
+            icon, customModelData, itemModel, frame, x, y);
     }
 }

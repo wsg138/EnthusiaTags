@@ -1,4 +1,7 @@
 config-version: 3
+rewards-holiday-owned: "&aEarned &8- &7Equip with /tags."
+rewards-holiday-locked: "&7Not earned yet."
+rewards-holiday-event: "&8Awarded by the holiday event."
 
 no-permission: "&cYou do not have permission to do that."
 players-only: "&cOnly players can use this command."
@@ -85,3 +88,5 @@ cosmetics-reloaded: "&aCosmetics reloaded."
 rewards-loading: "&eReward data is still loading. Try again in a moment."
 sync-queued: "&aReward sync queued."
 performance-disabled: "&ePerformance debug logging is disabled, but counters are still available."
+
+admin-preview-readonly: "&eAdmin Preview is read-only. Ownership and selections are unchanged."

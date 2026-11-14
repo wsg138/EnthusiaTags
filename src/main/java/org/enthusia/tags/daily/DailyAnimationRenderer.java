@@ -98,18 +98,18 @@ final class DailyAnimationRenderer {
             return;
         }
         if (plan.revealAccent()) {
-            Sound sound = configuredSound(SOUND_PATH + "accent-sound", Sound.BLOCK_NOTE_BLOCK_CHIME);
-            float volume = configuredFloat(SOUND_PATH + "volume", 0.35F, 0F, 2F);
-            player.playSound(player.getLocation(), sound, SoundCategory.PLAYERS, volume, 1.15F);
+            playConfiguredSound(player, SOUND_PATH + "accent-sound", Sound.BLOCK_NOTE_BLOCK_CHIME,
+                SOUND_PATH + "accent-volume", configuredFloat(SOUND_PATH + "volume", 0.35F, 0F, 2F),
+                SOUND_PATH + "accent-pitch", 1.15F);
             return;
         }
-        Sound sound = configuredSound(SOUND_PATH + "step-sound", Sound.BLOCK_NOTE_BLOCK_HAT);
         float configuredVolume = configuredFloat(SOUND_PATH + "volume", 0.35F, 0F, 2F);
         float volume = Math.min(0.16F, configuredVolume * 0.45F);
         float startPitch = configuredFloat(SOUND_PATH + "starting-pitch", 0.68F, 0.5F, 2F);
         float pitchStep = configuredFloat(SOUND_PATH + "pitch-step", 0.055F, 0F, 0.2F);
         float pitch = Math.min(2F, startPitch + plan.number() * pitchStep);
-        player.playSound(player.getLocation(), sound, SoundCategory.PLAYERS, volume, pitch);
+        playConfiguredSound(player, SOUND_PATH + "step-sound", Sound.BLOCK_NOTE_BLOCK_HAT,
+            SOUND_PATH + "step-volume", volume, SOUND_PATH + "step-pitch", pitch);
     }
 
     void playClaimSound(Player player) {
@@ -206,6 +206,10 @@ final class DailyAnimationRenderer {
     private void playConfiguredSound(Player player, String soundPath, Sound fallback,
                                      String volumePath, float defaultVolume,
                                      String pitchPath, float defaultPitch) {
+        if (org.enthusia.tags.infrastructure.sound.CustomSound.play(player,
+                plugin.getConfig().getString(soundPath), SoundCategory.PLAYERS,
+                configuredFloat(volumePath, defaultVolume, 0F, 2F),
+                configuredFloat(pitchPath, defaultPitch, 0.5F, 2F))) return;
         Sound sound = configuredSound(soundPath, fallback);
         float volume = configuredFloat(volumePath, defaultVolume, 0F, 2F);
         float pitch = configuredFloat(pitchPath, defaultPitch, 0.5F, 2F);

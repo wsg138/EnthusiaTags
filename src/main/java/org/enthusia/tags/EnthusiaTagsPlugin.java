@@ -6,12 +6,14 @@ import org.bukkit.plugin.ServicePriority;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.enthusia.tags.api.TagVisibilityService;
 import org.enthusia.tags.advancements.NativeAdvancementController;
+import org.enthusia.tags.advancements.ProviderRewardTracker;
 import org.enthusia.tags.cosmetics.RoseChatPresenceHook;
 import org.enthusia.tags.cosmetics.CosmeticsCommand;
 import org.enthusia.tags.cosmetics.CosmeticsListener;
 import org.enthusia.tags.cosmetics.CosmeticsService;
 import org.enthusia.tags.rewards.NaturalBlockTracker;
 import org.enthusia.tags.rewards.RewardListener;
+import org.enthusia.tags.rewards.RewardMenu;
 import org.enthusia.tags.rewards.RewardService;
 import org.enthusia.tags.rewards.RewardTracker;
 import org.enthusia.tags.rewards.RewardsCommand;
@@ -35,6 +37,8 @@ public final class EnthusiaTagsPlugin extends JavaPlugin {
     private LoreItemRewardRuntime loreItemRewardRuntime;
     private LoreItemRewardAdmin loreItemRewardAdmin;
     private NativeAdvancementController nativeAdvancements;
+    private ProviderRewardTracker providerRewards;
+    private RewardMenu rewardMenu;
 
     @Override
     public void onEnable() {
@@ -59,6 +63,10 @@ public final class EnthusiaTagsPlugin extends JavaPlugin {
         rewardService = new RewardService(this, tagService, messages, performanceMonitor);
         dailyService = new DailyService(this);
 
+        // Reward actions are validated against the tag registry during rewardService.enable().
+        // Install bundled definitions before that registry is loaded, including on first startup.
+        FrontierPortableTagCatalog.ensureInstalled(this);
+        HolidayTagCatalog.ensureInstalled(this);
         tagService.enable();
         cosmeticsService.enable();
         rewardService.enable();
@@ -85,10 +93,11 @@ public final class EnthusiaTagsPlugin extends JavaPlugin {
         Bukkit.getServicesManager().register(TagVisibilityService.class, tagService, this, ServicePriority.Normal);
         registerListeners();
         registerCommands();
+        if (rewardService.isAvailable()) providerRewards = new ProviderRewardTracker(this, rewardService);
         if (getConfig().getBoolean("advancements.enabled", true)
             && Bukkit.getPluginManager().isPluginEnabled("EnthusiaAdvancements")) {
             try {
-                nativeAdvancements = new NativeAdvancementController(this, rewardService);
+                nativeAdvancements = new NativeAdvancementController(this, rewardService, providerRewards);
             } catch (RuntimeException | LinkageError ex) {
                 getLogger().warning("Native advancement track unavailable; rewards remain accessible: " + ex.getMessage());
             }
@@ -100,7 +109,9 @@ public final class EnthusiaTagsPlugin extends JavaPlugin {
 
     @Override
     public void onDisable() {
+        if (rewardMenu != null) rewardMenu.close();
         if (nativeAdvancements != null) nativeAdvancements.close();
+        if (providerRewards != null) providerRewards.close();
         Bukkit.getServicesManager().unregister(tagService);
         if (rewardTracker != null) {
             rewardTracker.stop();
@@ -160,6 +171,7 @@ public final class EnthusiaTagsPlugin extends JavaPlugin {
         performanceMonitor.reload();
         messages.reload();
         tagService.reloadAll();
+        if (providerRewards != null) providerRewards.resetSessions();
         rewardService.reload();
         if (loreItemRewardRuntime != null) {
             loreItemRewardRuntime.kickRetries();
@@ -176,8 +188,10 @@ public final class EnthusiaTagsPlugin extends JavaPlugin {
         Bukkit.getPluginManager().registerEvents(new CosmeticsListener(cosmeticsService, tagService, messages, rewardService), this);
         RoseChatPresenceHook.register(this, cosmeticsService);
         RewardsCommand rewardsCommand = new RewardsCommand(rewardService, tagService, messages, this);
+        rewardMenu = rewardsCommand.getRewardMenu();
         if (rewardService.isAvailable()) {
-            Bukkit.getPluginManager().registerEvents(new RewardListener(rewardService, rewardsCommand.getRewardMenu()), this);
+            Bukkit.getPluginManager().registerEvents(new RewardListener(rewardService, rewardMenu), this);
+            rewardMenu.startRefresh();
             Bukkit.getPluginManager().registerEvents(rewardTracker, this);
             if (naturalBlockTracker != null) {
                 Bukkit.getPluginManager().registerEvents(naturalBlockTracker, this);

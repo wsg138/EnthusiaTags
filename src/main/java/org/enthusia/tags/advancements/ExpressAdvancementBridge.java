@@ -59,6 +59,12 @@ final class ExpressAdvancementBridge {
             player, ignored -> new ExpressMilestoneProgress()).observe(stats);
     }
 
+    boolean evidenceAvailable(UUID player) {
+        var snapshot = latest;
+        Long joined = sessionStarted.get(player);
+        return snapshot != null && joined != null && snapshot.readStarted() - joined >= 0;
+    }
+
     void forget(UUID player) {
         sessions.remove(player);
         sessionStarted.remove(player);

@@ -1,10 +1,12 @@
-config-version: 5
+config-version: 7
 
 # Display-only native advancement pilot. Claims still use /rewards.
 advancements:
   enabled: true
-  # Paper remains a normal vanilla icon without the optional logo resource pack.
+  # Legacy PAPER selector, retained for administrators choosing CMD-only mode.
   logo-custom-model-data: 815001
+  # Requires the supplied logo pack. Empty uses CMD only (vanilla PAPER without a pack).
+  logo-item-model: "enthusia:advancement/logo"
   players-per-tick: 25
   # Optional display-only statistics track. Requires WarzoneDuels; restart after changing.
   # Adds nine duel milestones for challenges, wins, streaks, spoils, draws, and special-condition wins.
@@ -22,8 +24,17 @@ advancements:
   # PAPER custom model used by the Dear Diary advancement icon.
   # PAPER is intentional: it shares Nexo's already-working paper item mapping with the Enthusia tab logo.
   diary-icon-custom-model-data: 815002
+  # Same named model as the physical DiaryKeeper diary. Blank opts into legacy PAPER/CMD.
+  diary-icon-item-model: nexo:diary_book
   # Optional per-existing-reward frame overrides: TASK, GOAL or CHALLENGE.
-  frames: {}
+  frames:
+    # Guild prestige tiers (REQ-1153).
+    prestige_1: TASK
+    prestige_2: TASK
+    prestige_3: GOAL
+    prestige_4: GOAL
+    prestige_5: GOAL
+    prestige_6: CHALLENGE
 
 # MiniMessage format exposed to nametag consumers. `{tag}` is replaced with configured tag text.
 line-format: "<gray>[{tag}<gray>]"
@@ -127,6 +138,14 @@ daily:
     pitch: 1.25
 
 tags:
+  pumpkin_patcher:
+    display-name: "ꂡ<bold><gradient:#82c6a2:#eee7c8>Pumpkin Patcher</gradient></bold>ꂡ"
+    tag-text: "ꂡ<bold><gradient:#82c6a2:#eee7c8>Pumpkin Patcher</gradient></bold>ꂡ"
+    icon: "NAME_TAG"
+    description:
+      - "&7Placed all 31 pumpkins around spawn"
+      - "&7for the Halloween hunt."
+      - "&6Special recognition - awarded by staff"
   beta_tester:
     display-name: "<#39c5ff>Beta <#6ee7ff>Tester"
     tag-text: "<#39c5ff>Beta <#6ee7ff>Tester"
@@ -319,3 +338,20 @@ tags:
     display-name: "<#ffb700><bold>High Roller"
     tag-text: "<#ffb700><bold>High Roller"
     icon: "GOLD_BLOCK"
+  # Guild prestige tags (REQ-1152), granted by the prestige achievements in rewards.yml.
+  prestiged:
+    display-name: "<#e09650><bold>Prestiged"
+    tag-text: "<#e09650><bold>Prestiged"
+    icon: "COPPER_INGOT"
+  winged:
+    display-name: "<#c4d0dc><bold>Winged"
+    tag-text: "<#c4d0dc><bold>Winged"
+    icon: "IRON_INGOT"
+  crowned:
+    display-name: "<gradient:#fcc404:#c84cec><bold>Crowned</bold></gradient>"
+    tag-text: "<gradient:#fcc404:#c84cec><bold>Crowned</bold></gradient>"
+    icon: "NETHER_STAR"
+  first_crowned:
+    display-name: "<gradient:#fff070:#9030c0><bold>First Crowned</bold></gradient>"
+    tag-text: "<gradient:#fff070:#9030c0><bold>First Crowned</bold></gradient>"
+    icon: "DRAGON_EGG"

@@ -1,4 +1,4 @@
-config-version: 5
+config-version: 7
 
 placeholders:
   # Placeholder fallback values. These are only used if
@@ -17,6 +17,19 @@ integrations:
     plugin-name: "EnthusiaCurrency"
 
 categories:
+  holidays:
+    name: "&6&lHolidays"
+    icon: FIREWORK_ROCKET
+  halloween:
+    name: "&6&lHalloween"
+    icon: JACK_O_LANTERN
+    parent: holidays
+    tags: [pumpkin_hunter, no_pumpkin_left_behind, pumpkin_king, pumpkin_patcher, seen_the_watcher, remembered]
+  christmas:
+    name: "&a&lChristmas"
+    icon: SPRUCE_SAPLING
+    parent: holidays
+    tags: [present_seeker, home_for_the_holidays, advent_keeper, secret_santa]
   playtime:
     name: "&bPlaytime"
     icon: "CLOCK"
@@ -38,6 +51,21 @@ categories:
   misc:
     name: "&dMisc"
     icon: "NAME_TAG"
+  advancements:
+    name: '&dAdvancements'
+    icon: NETHER_STAR
+  supporter:
+    name: '&6Supporter'
+    icon: GOLD_INGOT
+  legacy:
+    name: '&bLegacy'
+    icon: ECHO_SHARD
+  events:
+    name: '&5Events'
+    icon: AMETHYST_SHARD
+  prestige:
+    name: '&6Guild Prestige'
+    icon: SHIELD
 underground-max-y: 56
 rewards:
   first_hour:
@@ -1678,3 +1706,217 @@ rewards:
         material: TOTEM_OF_UNDYING
         amount: 2
         label: Ultimate Survivor bonus
+  watcher_melody:
+    name: "&7Forgotten Melody"
+    description:
+      - "&7Hear the Watcher's theme all the way to its end."
+    icon: MUSIC_DISC_11
+    category: misc
+    criteria:
+      c1:
+        type: CUSTOM_COUNTER
+        key: watcher_theme_heard
+        amount: 1
+    rewards:
+      r1:
+        type: COMMAND
+        id: 'give %player% minecraft:music_disc_11[minecraft:item_model="enthusia:watcher_disc",minecraft:jukebox_playable="enthusia:forgotten_melody",minecraft:item_name={"text":"Music Disc","color":"#F5F5F5"},minecraft:rarity="rare"] 1'
+
+  silent_snow_disc:
+    name: "&dSilent Snow"
+    description:
+      - "&7Find all 25 peppermints in the Christmas hunt."
+      - "&7Reward: the Silent Snow music disc by The Giver."
+    icon: MUSIC_DISC_11
+    icon-model: "enthusia:silent_snow_disc"
+    category: christmas
+    criteria:
+      c1:
+        type: CUSTOM_COUNTER
+        key: silent_snow_disc
+        amount: 1
+    rewards:
+      r1:
+        type: COMMAND
+        id: 'give %player% minecraft:music_disc_11[minecraft:item_model="enthusia:silent_snow_disc",minecraft:jukebox_playable="enthusia:silent_snow",minecraft:item_name={"text":"Music Disc"},minecraft:rarity="epic"] 1'
+
+  last_watch_remembered_2026:
+    name: "&7Remembered"
+    description:
+      - "&7Complete The Last Watch. Claim after the event."
+    icon: NAME_TAG
+    category: halloween
+    hidden-until-earned: true
+    criteria:
+      eligibility:
+        type: CUSTOM_COUNTER
+        key: last_watch_halloween_2026
+        amount: 1
+    rewards:
+      remembered:
+        type: TAG
+        id: remembered
+
+  # Guild prestige (REQ-1150 to REQ-1152). LumaGuilds credits these counters for
+  # members of a prestiging guild; see docs/guild-prestige-advancements.md.
+  prestige_1:
+    name: '&6Prestige I'
+    description:
+      - '&7Be in your guild when it reaches Prestige I.'
+    icon: COPPER_INGOT
+    category: prestige
+    announce-completion: false
+    criteria:
+      prestige:
+        type: CUSTOM_COUNTER
+        key: guild_prestige_1
+        amount: 1
+    rewards:
+      tag:
+        type: TAG
+        id: prestiged
+  prestige_2:
+    name: '&6Prestige II'
+    description:
+      - '&7Be in your guild when it reaches Prestige II.'
+    icon: COPPER_BLOCK
+    category: prestige
+    announce-completion: false
+    criteria:
+      prestige:
+        type: CUSTOM_COUNTER
+        key: guild_prestige_2
+        amount: 1
+  prestige_3:
+    name: '&6Prestige III'
+    description:
+      - '&7Be in your guild when it reaches Prestige III.'
+    icon: IRON_INGOT
+    category: prestige
+    announce-completion: false
+    criteria:
+      prestige:
+        type: CUSTOM_COUNTER
+        key: guild_prestige_3
+        amount: 1
+    rewards:
+      tag:
+        type: TAG
+        id: winged
+  prestige_4:
+    name: '&6Prestige IV'
+    description:
+      - '&7Be in your guild when it reaches Prestige IV.'
+    icon: IRON_BLOCK
+    category: prestige
+    announce-completion: false
+    criteria:
+      prestige:
+        type: CUSTOM_COUNTER
+        key: guild_prestige_4
+        amount: 1
+  prestige_5:
+    name: '&6Prestige V'
+    description:
+      - '&7Be in your guild when it reaches Prestige V.'
+    icon: GOLD_BLOCK
+    category: prestige
+    announce-completion: false
+    criteria:
+      prestige:
+        type: CUSTOM_COUNTER
+        key: guild_prestige_5
+        amount: 1
+  prestige_6:
+    name: '&6Crowned'
+    description:
+      - '&7Be in your guild when it reaches Prestige VI,'
+      - '&7the final tier.'
+    icon: NETHER_STAR
+    category: prestige
+    announce-completion: false
+    criteria:
+      prestige:
+        type: CUSTOM_COUNTER
+        key: guild_prestige_6
+        amount: 1
+    rewards:
+      tag:
+        type: TAG
+        id: crowned
+  prestige_first_1:
+    name: '&dFirst to Prestige I'
+    description:
+      - '&7Be in the first guild on the server to reach Prestige I.'
+    icon: BEACON
+    category: prestige
+    hidden-until-earned: true
+    criteria:
+      first:
+        type: CUSTOM_COUNTER
+        key: guild_prestige_first_1
+        amount: 1
+  prestige_first_2:
+    name: '&dFirst to Prestige II'
+    description:
+      - '&7Be in the first guild on the server to reach Prestige II.'
+    icon: BEACON
+    category: prestige
+    hidden-until-earned: true
+    criteria:
+      first:
+        type: CUSTOM_COUNTER
+        key: guild_prestige_first_2
+        amount: 1
+  prestige_first_3:
+    name: '&dFirst to Prestige III'
+    description:
+      - '&7Be in the first guild on the server to reach Prestige III.'
+    icon: BEACON
+    category: prestige
+    hidden-until-earned: true
+    criteria:
+      first:
+        type: CUSTOM_COUNTER
+        key: guild_prestige_first_3
+        amount: 1
+  prestige_first_4:
+    name: '&dFirst to Prestige IV'
+    description:
+      - '&7Be in the first guild on the server to reach Prestige IV.'
+    icon: BEACON
+    category: prestige
+    hidden-until-earned: true
+    criteria:
+      first:
+        type: CUSTOM_COUNTER
+        key: guild_prestige_first_4
+        amount: 1
+  prestige_first_5:
+    name: '&dFirst to Prestige V'
+    description:
+      - '&7Be in the first guild on the server to reach Prestige V.'
+    icon: BEACON
+    category: prestige
+    hidden-until-earned: true
+    criteria:
+      first:
+        type: CUSTOM_COUNTER
+        key: guild_prestige_first_5
+        amount: 1
+  prestige_first_6:
+    name: '&dFirst Crowned'
+    description:
+      - '&7Be in the first guild on the server to reach Prestige VI.'
+    icon: DRAGON_EGG
+    category: prestige
+    hidden-until-earned: true
+    criteria:
+      first:
+        type: CUSTOM_COUNTER
+        key: guild_prestige_first_6
+        amount: 1
+    rewards:
+      tag:
+        type: TAG
+        id: first_crowned
